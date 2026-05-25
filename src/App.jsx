@@ -104,7 +104,7 @@ export default function App() {
       {/* HEADER PRINCIPAL MODO CLARO */}
       <header style={{ background: C.surface, padding: "20px 30px", borderRadius: 12, border: `1px solid ${C.border}`, marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 15, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
         <div>
-          <h1 style={{ margin: 0, color: C.text, fontSize: 22, fontWeight: 700 }}>Limpiapp Pro V2</h1>
+          <h1 style={{ margin: 0, color: C.text, fontSize: 22, fontWeight: 700 }}>Limpiapp Pro V3</h1>
           <p style={{ margin: "4px 0 0 0", color: C.textMuted, fontSize: 14 }}>Control Operacional ERP · Supervisor: Luis Guzman L.</p>
         </div>
         
