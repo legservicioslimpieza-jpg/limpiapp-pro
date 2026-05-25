@@ -66,15 +66,6 @@ export default function App() {
         let { data: resContratos } = await supabase.from("contratos").select("*");
         let { data: resTareas } = await supabase.from("checklist").select("*");
         if (resContratos) setContratos(resContratos);
-        if (resTareas) setTareas(resTareas);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadData();
-  }, []);
 
   const handleEstadoChange = async (id, nuevoEstado) => {
     setTareas(tareas.map(t => t.id === id ? { ...t, estado: nuevoEstado } : t));
