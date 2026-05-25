@@ -46,7 +46,7 @@ export default function App() {
   useEffect(() => {
     async function loadData() {
       if (!isConfigured) {
-        // Datos de respaldo con tus 5 empresas reales si Supabase no responde
+        // Datos de respaldo si la conexión está cargando
         setContratos([
           { id: "CT001", cliente: "Seremi de Transportes", instalacion: "Oficina Central", estado: "Vigente" },
           { id: "CT002", cliente: "Museo Morro de Arica", instalacion: "Sector Patrimonial", estado: "Vigente" },
