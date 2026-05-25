@@ -42,30 +42,48 @@ export default function App() {
   const [tareas, setTareas] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Cargar tus 5 contratos reales desde Supabase
+  // // Cargar la nómina real de 8 contratos de LEG Servicios de Limpieza
   useEffect(() => {
-    async function loadData() {
-      if (!isConfigured) {
-        // Datos de respaldo si la conexión está cargando
-        setContratos([
-          { id: "CT001", cliente: "Seremi de Transportes", instalacion: "Oficina Central", estado: "Vigente" },
-          { id: "CT002", cliente: "Museo Morro de Arica", instalacion: "Sector Patrimonial", estado: "Vigente" },
-          { id: "CT003", cliente: "Seremi de Medio Ambiente", instalacion: "Instalación Regional", estado: "Vigente" },
-          { id: "CT004", cliente: "Subdere", instalacion: "Oficina Regional", estado: "Vigente" },
-          { id: "CT005", cliente: "Seremi de Ciencias y Tecnología", instalacion: "Oficina Técnica", estado: "Vigente" }
-        ]);
-        setTareas([
-          { id: 1, contrato_id: "CT001", tarea: "Aseo general profundo oficinas", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
-          { id: 2, contrato_id: "CT001", tarea: "Limpieza de vidrios y ventanales", periodicidad: "SEMANAL", estado: "En Proceso", responsable: "" }
-        ]);
-        setLoading(false);
-        return;
-      }
+    setContratos([
+      { id: "CT001", cliente: "Seremi de Transportes", instalacion: "Sucursal Arica", estado: "Vigente" },
+      { id: "CT002", cliente: "Museo Histórico Morro de Arica", instalacion: "Monumento Nacional", estado: "Vigente" },
+      { id: "CT003", cliente: "Seremi de Medio Ambiente", instalacion: "Dirección Regional", estado: "Vigente" },
+      { id: "CT004", cliente: "Subdere", instalacion: "Unidad Regional Arica", estado: "Vigente" },
+      { id: "CT005", cliente: "Seremi de Ciencias y Tecnología", instalacion: "Dirección Regional", estado: "Vigente" },
+      { id: "CT006", cliente: "Dipreca", instalacion: "Plataforma de Atención", estado: "Postulación" },
+      { id: "CT007", cliente: "Regimiento Pisagua", instalacion: "Brigada Motorizada N°4", estado: "Renovación" },
+      { id: "CT008", cliente: "Servel", instalacion: "Dirección Regional Arica y Parinacota", estado: "Postulación" }
+    ]);
+    
+    setTareas([
+      { id: 1, contrato_id: "CT001", tarea: "Limpieza y desinfección baños Pisos 1, 2 y 3", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
+      { id: 2, contrato_id: "CT001", tarea: "Desempolvado de escritorios y puestos de trabajo", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
+      { id: 3, contrato_id: "CT001", tarea: "Limpieza de vidrios interiores, ventanas y mamparas", periodicidad: "SEMANAL", estado: "En Proceso", responsable: "" },
+      { id: 4, contrato_id: "CT002", tarea: "Sala museo: limpieza de vitrinas de madera y vidrio", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
+      { id: 5, contrato_id: "CT002", tarea: "Limpieza de bronces San Martín, rosa vientos y cañones", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
+      { id: 6, contrato_id: "CT002", tarea: "Lavado del camino de cemento con hidrolavadora", periodicidad: "MENSUAL", estado: "Abierta", responsable: "" },
+      { id: 7, contrato_id: "CT003", tarea: "Limpieza de entradas, antejardín, fachada y vereda", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
+      { id: 8, contrato_id: "CT003", tarea: "Limpieza de vehículo fiscal (interior aspirado y exterior)", periodicidad: "QUINCENAL", estado: "Abierta", responsable: "" },
+      { id: 9, contrato_id: "CT004", tarea: "Limpieza general de muebles con desinfectante", periodicidad: "DIARIA", estado: "En Proceso", responsable: "" },
+      { id: 10, contrato_id: "CT004", tarea: "Mantención de jardines (corte de pasto y retiro de hojas)", periodicidad: "QUINCENAL", estado: "Abierta", responsable: "" },
+      { id: 11, contrato_id: "CT005", tarea: "Limpieza de recepción, hall y entradas", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
+      { id: 12, contrato_id: "CT005", tarea: "Lavado profundo de pisos con máquina o abrillantado", periodicidad: "MENSUAL", estado: "Abierta", responsable: "" },
+      { id: 13, contrato_id: "CT006", tarea: "Limpieza de recepción, sala de espera y pasillos", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
+      { id: 14, contrato_id: "CT007", tarea: "Casino Oficiales y Suboficiales: barrido, trapeado y pisos", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
+      { id: 15, contrato_id: "CT007", tarea: "Lavado de loza del rancho (100 elementos por día)", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
+      { id: 16, contrato_id: "CT008", tarea: "Aseo profundo de baños (desinfección de artefactos)", periodicidad: "DIARIA", estado: "Abierta", responsable: "" },
+      { id: 17, contrato_id: "CT008", tarea: "Lavado de alfombra (aseo mensual profundo)", periodicidad: "MENSUAL", estado: "Abierta", responsable: "" }
+    ]);
+    
+    setLoading(false);
+  }, []);
 
-      try {
-        let { data: resContratos } = await supabase.from("contratos").select("*");
-        let { data: resTareas } = await supabase.from("checklist").select("*");
-        if (resContratos) setContratos(resContratos);
+  const handleEstadoChange = async (id, nuevoEstado) => {
+    setTareas(tareas.map(t => t.id === id ? { ...t, estado: nuevoEstado } : t));
+    if (isConfigured) {
+      await supabase.from("checklist").update({ estado: nuevoEstado }).eq("id", id);
+    }
+  };
 
   const handleEstadoChange = async (id, nuevoEstado) => {
     setTareas(tareas.map(t => t.id === id ? { ...t, estado: nuevoEstado } : t));
