@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+mport { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isConfigured } from "./supabase.js";
 
 /* ─── Paleta ERP corporativa ────────────────────────────────── */
