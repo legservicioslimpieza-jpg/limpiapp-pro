@@ -859,6 +859,7 @@ function Remuneraciones({ data, saveRem }) {
   const [hextra, setHextra] = useState(0);
   const [otrosH, setOtrosH] = useState(0);
   const [otrosD, setOtrosD] = useState(0);
+  const [descripcion, setDescripcion] = useState('');
   const [res, setRes] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -871,7 +872,7 @@ function Remuneraciones({ data, saveRem }) {
 
   const calcular = () => {
     if (!trabajador || !params) { alert("Selecciona un trabajador y verifica que los parámetros legales estén cargados."); return; }
-    setRes(calcularLiquidacion(trabajador, params, tasas, { dias_trabajados: dias, horas_extra: hextra, otros_haberes: otrosH, otros_descuentos: otrosD, contrato_id: cId, periodo }));
+    setRes({...calcularLiquidacion(trabajador, params, tasas, { dias_trabajados: dias, horas_extra: hextra, otros_haberes: otrosH, otros_descuentos: otrosD, contrato_id: cId, periodo }), descripcion});
     setSaved(false);
   };
 
@@ -935,6 +936,9 @@ function Remuneraciones({ data, saveRem }) {
             <FL label="Período (AAAA-MM)">
               <input style={INP} value={periodo} onChange={e => setPeriodo(e.target.value)} placeholder="2026-05" />
             </FL>
+            <FL label="Instituciones / Descripción">
+              <input style={INP} value={descripcion} onChange={e => setDescripcion(e.target.value)} placeholder="Ej: Seremi Transportes  |  Seremi MA + Seremi Ciencias" />
+            </FL>
             <FL label={`Días trabajados: ${dias}`}>
               <input type="range" min={1} max={30} value={dias} onChange={e => setDias(Number(e.target.value))} style={{ width: "100%", accentColor: C.accent }} />
             </FL>
@@ -973,6 +977,7 @@ function Remuneraciones({ data, saveRem }) {
                   <hr style={{ margin: "8px 0", border: "none", borderTop: `1px solid ${C.border}` }} />
                   <p style={{ color: C.text, fontSize: 12 }}><b>Trabajador/a:</b> {trabajador?.nombre} · <b>RUT:</b> {trabajador?.rut || "—"}</p>
                   <p style={{ color: C.text, fontSize: 12 }}><b>Cargo:</b> {trabajador?.cargo} · <b>Contrato:</b> {trabajador?.tipo_contrato} · <b>Período:</b> {periodo}</p>
+                  {res.descripcion&&<p style={{ color: C.text, fontSize: 12 }}><b>Instituciones:</b> {res.descripcion}</p>}
                   <p style={{ color: C.text, fontSize: 12 }}><b>Días trabajados:</b> {res.dias_trabajados} · <b>AFP:</b> {res.afp} · <b>Salud:</b> {trabajador?.salud}</p>
                 </div>
 
