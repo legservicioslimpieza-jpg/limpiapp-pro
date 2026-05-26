@@ -170,7 +170,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -384,15 +384,17 @@ function Dependencias({data,contratoId,insert,update}){
 /* ─── Trabajadores ──────────────────────────────────────────── */
 const AFP_LIST=["NO COTIZA","CAPITAL","CUPRUM","HABITAT","PLANVITAL","PROVIDA","MODELO","UNO"];
 const SALUD_LIST=["FONASA","ISAPRE BANMEDICA","ISAPRE COLMENA","ISAPRE CONSALUD","ISAPRE CRUZ BLANCA","ISAPRE NUEVA MASVIDA","ISAPRE VIDA TRES"];
-function Trabajadores({data,insert,update}){
+function Trabajadores({data,insert,update,contratoId}){
   const [form,setForm]=useState(null);
   const [tab,setTab]=useState("datos");
   const isNew=form&&!data.trabajadores.find(t=>t.id===form.id);
+  const asignadosIds=contratoId?(data.asignaciones||[]).filter(a=>a.contrato_id===contratoId&&a.activo).map(a=>a.trabajador_id):null;
+  const trabajadoresFiltrados=asignadosIds?data.trabajadores.filter(t=>asignadosIds.includes(t.id)):data.trabajadores;
   const openNew=()=>{setTab("datos");setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:500000,tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO"});};
   const save=async()=>{if(!form.nombre.trim())return;const ok=isNew?await insert("trabajadores",form):await update("trabajadores",form);if(ok)setForm(null);};
   return(
     <div>
-      <PageHeader title="Trabajadores" subtitle={`${data.trabajadores.filter(t=>t.activo).length} activos`} action={<PrimaryBtn onClick={openNew}>+ Nuevo trabajador</PrimaryBtn>}/>
+      <PageHeader title="Trabajadores" subtitle={contratoId ? `${trabajadoresFiltrados.filter(t=>t.activo).length} asignados` : `${data.trabajadores.filter(t=>t.activo).length} activos`} action={<PrimaryBtn onClick={openNew}>+ Nuevo trabajador</PrimaryBtn>}/>
       {form&&(
         <div style={{background:C.surface,border:`1px solid ${C.accent}`,borderRadius:8,padding:20,marginBottom:16,boxShadow:`0 0 0 3px ${C.accent}14`}}>
           <div style={{display:"flex",gap:8,marginBottom:16,borderBottom:`1px solid ${C.borderLight}`,paddingBottom:12}}>
@@ -436,7 +438,7 @@ function Trabajadores({data,insert,update}){
             {key:"activo",label:"Estado",render:r=><Tag text={r.activo?"Activo":"Inactivo"} scheme={r.activo?{bg:C.greenBg,text:C.green,border:C.greenBorder}:{bg:"#f9fafb",text:C.textMuted,border:C.border}}/>},
             {key:"edit",label:"",render:r=><button onClick={()=>{setTab("datos");setForm({...r});}} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
           ]}
-          rows={data.trabajadores}
+          rows={trabajadoresFiltrados}
         />
       </Panel>
     </div>
@@ -450,7 +452,7 @@ function Checklist({data,contratoId,insert}){
   const hoy=new Date().toISOString().slice(0,10);
   const chks=contratoId?data.checklist.filter(c=>c.contrato_id===contratoId):data.checklist;
   const rows=filtro==="TODAS"?chks:chks.filter(c=>c.periodicidad===filtro);
-  const marcar=async(chkId,cId)=>{await insert("evidencias",{id:`EV${Date.now()}`,checklist_id:chkId,trabajador_id:data.trabajadores.find(t=>t.cargo!=="Supervisor"&&t.cargo!=="Supervisora")?.id||data.trabajadores[0]?.id,contrato_id:cId,fecha_hora:new Date().toISOString(),observacion:"",cumplido:true});};
+  const marcar=async(chkId,cId)=>{const asig=(data.asignaciones||[]).filter(a=>a.contrato_id===cId&&a.activo);const tId=asig.map(a=>a.trabajador_id).find(id=>{const t=data.trabajadores.find(w=>w.id===id);return t&&t.cargo==="Auxiliar Aseo";}) || data.trabajadores.find(t=>t.cargo==="Auxiliar Aseo")?.id||data.trabajadores[0]?.id;await insert("evidencias",{id:`EV${Date.now()}`,checklist_id:chkId,trabajador_id:tId,contrato_id:cId,fecha_hora:new Date().toISOString(),observacion:"",cumplido:true});};
   const openNew=()=>{const deps=contratoId?data.dependencias.filter(d=>d.contrato_id===contratoId):data.dependencias;setForm({id:genId("CHK"),dep_id:deps[0]?.id||"",contrato_id:contratoId||data.contratos[0]?.id||"",tarea:"",periodicidad:"DIARIA",obligatoria:true,activa:true});};
   const save=async()=>{if(!form.tarea.trim())return;const ok=await insert("checklist",form);if(ok)setForm(null);};
   const completadas=chks.filter(c=>c.periodicidad==="DIARIA"&&data.evidencias.some(e=>e.checklist_id===c.id&&e.fecha_hora?.startsWith(hoy)));
@@ -940,7 +942,7 @@ export default function App(){
         {tab==="dashboard"      &&<Dashboard      data={data} contratoId={contratoId}/>}
         {tab==="contratos"      &&<Contratos       data={data} insert={insert} update={update}/>}
         {tab==="dependencias"   &&<Dependencias    data={data} contratoId={contratoId} insert={insert} update={update}/>}
-        {tab==="trabajadores"   &&<Trabajadores    data={data} insert={insert} update={update}/>}
+        {tab==="trabajadores"   &&<Trabajadores    data={data} insert={insert} update={update} contratoId={contratoId}/>}
         {tab==="checklist"      &&<Checklist       data={data} contratoId={contratoId} insert={insert}/>}
         {tab==="incidencias"    &&<Incidencias     data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="supervisiones"  &&<Supervisiones   data={data} contratoId={contratoId} insert={insert}/>}
