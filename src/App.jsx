@@ -413,7 +413,30 @@ function Trabajadores({data,insert,update,contratoId}){
           {tab==="remuneracion"&&(
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
               <FL label="Sueldo base ($)"><input type="number" style={INP} value={form.sueldo_base||0} onChange={e=>setForm({...form,sueldo_base:Number(e.target.value)})}/></FL>
-              <FL label="Método gratificación"><select style={INP} value={form.metodo_gratificacion||"25% MENSUAL"} onChange={e=>setForm({...form,metodo_gratificacion:e.target.value})}><option>25% MENSUAL</option><option>SIN GRATIFICACIÓN</option></select></FL>
+              <FL label="Método gratificación">
+                <select style={INP} value={form.metodo_gratificacion||"25% MENSUAL"} onChange={e=>setForm({...form,metodo_gratificacion:e.target.value})}>
+                  <option value="25% MENSUAL">25% mensual (tope legal UTM)</option>
+                  <option value="ANTICIPO PORCENTAJE">Anticipo porcentaje (%)</option>
+                  <option value="ANTICIPO MONTO FIJO">Anticipo monto fijo ($)</option>
+                  <option value="SIN GRATIFICACIÓN">Sin gratificación (pago anual)</option>
+                </select>
+              </FL>
+              {form.metodo_gratificacion==="ANTICIPO PORCENTAJE" && (
+                <FL label="Porcentaje de gratificación (%)">
+                  <input type="number" min={0} max={100} step={0.01} style={INP}
+                    value={form.gratificacion_porcentaje||25}
+                    onChange={e=>setForm({...form,gratificacion_porcentaje:Number(e.target.value)})}
+                    placeholder="Ej: 8.33"/>
+                </FL>
+              )}
+              {form.metodo_gratificacion==="ANTICIPO MONTO FIJO" && (
+                <FL label="Monto fijo mensual ($)">
+                  <input type="number" min={0} style={INP}
+                    value={form.gratificacion_monto||0}
+                    onChange={e=>setForm({...form,gratificacion_monto:Number(e.target.value)})}
+                    placeholder="Ej: 50000"/>
+                </FL>
+              )}
               <FL label="AFP"><select style={INP} value={form.afp||"MODELO"} onChange={e=>setForm({...form,afp:e.target.value})}>{AFP_LIST.map(a=><option key={a}>{a}</option>)}</select></FL>
               <FL label="Salud"><select style={INP} value={form.salud||"FONASA"} onChange={e=>setForm({...form,salud:e.target.value})}>{SALUD_LIST.map(s=><option key={s}>{s}</option>)}</select></FL>
               <FL label="Bono asistencia ($)"><input type="number" style={INP} value={form.bono_asistencia||0} onChange={e=>setForm({...form,bono_asistencia:Number(e.target.value)})}/></FL>
@@ -622,8 +645,15 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
   // ── Haberes ────────────────────────────────────────────────
   const sueldo_prop   = Math.round((trabajador.sueldo_base||0) * diasPagados / 30);
   const tope_grat     = Math.round(4.75 * utm / 12);
-  const gratificacion = trabajador.metodo_gratificacion==='25% MENSUAL'
-    ? Math.min(Math.round(sueldo_prop*0.25), tope_grat) : 0;
+  let gratificacion   = 0;
+  const metGrat = trabajador.metodo_gratificacion || '25% MENSUAL';
+  if (metGrat === '25% MENSUAL') {
+    gratificacion = Math.min(Math.round(sueldo_prop * 0.25), tope_grat);
+  } else if (metGrat === 'ANTICIPO PORCENTAJE') {
+    gratificacion = Math.round(sueldo_prop * ((trabajador.gratificacion_porcentaje || 25) / 100));
+  } else if (metGrat === 'ANTICIPO MONTO FIJO') {
+    gratificacion = Math.round((trabajador.gratificacion_monto || 0) * diasPagados / 30);
+  }
   const valor_hora    = Math.round((trabajador.sueldo_base||0)/(params.horas_mensuales||180));
   const horas_extra_valor = Math.round(valor_hora*1.5*(horas_extra||0));
   const bono_asis     = diasPagados>=30?(trabajador.bono_asistencia||0):0;
@@ -1081,7 +1111,11 @@ function Remuneraciones({ data, saveRem, insert, update }) {
               <div style={{ background: C.surfaceAlt, border: `1px solid ${C.border}`, borderRadius: 6, padding: "10px 12px", fontSize: 12 }}>
                 <p style={{ color: C.textMuted }}><b style={{ color: C.text }}>Sueldo base:</b> {clp(trabajador.sueldo_base)}</p>
                 <p style={{ color: C.textMuted }}><b style={{ color: C.text }}>AFP:</b> {trabajador.afp} · <b style={{ color: C.text }}>Salud:</b> {trabajador.salud}</p>
-                <p style={{ color: C.textMuted }}><b style={{ color: C.text }}>Gratificación:</b> {trabajador.metodo_gratificacion}</p>
+                <p style={{ color: C.textMuted }}><b style={{ color: C.text }}>Gratificación:</b> {trabajador.metodo_gratificacion}
+                  {trabajador.metodo_gratificacion==="ANTICIPO PORCENTAJE" && ` — ${trabajador.gratificacion_porcentaje||25}%`}
+                  {trabajador.metodo_gratificacion==="ANTICIPO MONTO FIJO" && ` — ${clp(trabajador.gratificacion_monto||0)}/mes`}
+                </p>
+                {trabajador.es_pensionado && <p style={{color:C.purple,fontWeight:600}}>PENSIONADO — Exento AFP y CES</p>}
               </div>
             )}
             <FL label="Contrato (opcional)">
