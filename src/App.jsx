@@ -59,6 +59,7 @@ const TABS = [
   {key:"contratos",      label:"Contratos",      icon:Icon.contratos},
   {key:"dependencias",   label:"Dependencias",   icon:Icon.dependencias},
   {key:"trabajadores",   label:"Trabajadores",   icon:Icon.trabajadores},
+  {key:"qr",             label:"QR Operacional", icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/></svg>},
   {key:"asistencia",     label:"Asistencia",     icon:Icon.checklist},
   {key:"checklist",      label:"Checklist",      icon:Icon.checklist},
   {key:"incidencias",    label:"Incidencias",    icon:Icon.incidencias},
@@ -476,6 +477,280 @@ function Trabajadores({data,insert,update,contratoId}){
 }
 
 /* ─── Checklist ─────────────────────────────────────────────── */
+/* ─── QR Components ──────────────────────────────────────────── */
+
+/* Modo QR — interfaz trabajador cuando escanea el QR */
+function ModoQR({ depId, data, insert, loading }) {
+  const [tId, setTId] = useState('');
+  const [marcadas, setMarcadas] = useState(new Set());
+  const [gps, setGps] = useState(null);
+  const [confirmado, setConfirmado] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [obs, setObs] = useState('');
+
+  const dep = (data.dependencias||[]).find(d=>d.id===depId);
+  const contrato = dep?(data.contratos||[]).find(c=>c.id===dep.contrato_id):null;
+  const tareas = dep?(data.checklist||[]).filter(t=>t.dep_id===dep.id&&t.activa):[];
+  const trabajadoresContrato = dep
+    ? (data.asignaciones||[]).filter(a=>a.contrato_id===dep.contrato_id&&a.activo)
+        .map(a=>(data.trabajadores||[]).find(t=>t.id===a.trabajador_id))
+        .filter(t=>t&&t.cargo!=="Gerente y Supervisor"&&t.cargo!=="Representante Legal")
+    : [];
+
+  useEffect(()=>{
+    if(!navigator.geolocation)return;
+    navigator.geolocation.getCurrentPosition(
+      p=>setGps({lat:p.coords.latitude.toFixed(6),lng:p.coords.longitude.toFixed(6)}),
+      ()=>{}
+    );
+  },[]);
+
+  const toggle = (id) => setMarcadas(prev=>{
+    const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n;
+  });
+
+  const registrar = async () => {
+    if(!tId||marcadas.size===0){alert("Selecciona tu nombre y al menos una tarea completada.");return;}
+    setEnviando(true);
+    const ahora = new Date().toISOString();
+    for(const chkId of marcadas){
+      await insert("evidencias",{
+        id:`EV${Date.now()}${Math.random().toString(36).slice(2,6)}`,
+        checklist_id:chkId, trabajador_id:tId,
+        contrato_id:dep.contrato_id, fecha_hora:ahora,
+        observacion:obs||"Registrado vía QR", cumplido:true,
+        via_qr:true, latitud:gps?.lat||null, longitud:gps?.lng||null,
+      });
+      await new Promise(r=>setTimeout(r,50));
+    }
+    setConfirmado(true); setEnviando(false);
+  };
+
+  const mS = {minHeight:"100vh",background:"#0f172a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"24px 16px",fontFamily:"Arial,sans-serif"};
+  const card = {background:"#1e293b",borderRadius:12,padding:"20px",width:"100%",maxWidth:420,marginBottom:16};
+  const btnG = {background:"#16a34a",color:"#fff",border:"none",borderRadius:10,padding:"16px 24px",fontSize:18,fontWeight:700,width:"100%",cursor:"pointer"};
+  const btnD = {background:"#374151",color:"#9ca3af",border:"none",borderRadius:10,padding:"16px 24px",fontSize:18,fontWeight:700,width:"100%",cursor:"not-allowed"};
+
+  if(loading)return<div style={{...mS,justifyContent:"center"}}><div style={{color:"#fff",fontSize:20}}>Cargando...</div></div>;
+  if(!dep||!contrato)return<div style={mS}><div style={{color:"#f87171",fontSize:18,textAlign:"center"}}>❌ QR inválido o dependencia no encontrada.<br/>Contacta al supervisor.</div></div>;
+
+  if(confirmado){
+    const t=data.trabajadores.find(w=>w.id===tId);
+    const ahora=new Date();
+    return(
+      <div style={mS}>
+        <div style={{...card,textAlign:"center",border:"2px solid #16a34a"}}>
+          <div style={{fontSize:64,marginBottom:8}}>✅</div>
+          <div style={{color:"#4ade80",fontSize:22,fontWeight:700,marginBottom:8}}>¡Registrado!</div>
+          <div style={{color:"#fff",fontSize:16,marginBottom:4}}>{t?.nombre||"—"}</div>
+          <div style={{color:"#94a3b8",fontSize:14,marginBottom:4}}>{dep.nombre}</div>
+          <div style={{color:"#94a3b8",fontSize:14,marginBottom:4}}>{contrato.cliente}</div>
+          <div style={{color:"#4ade80",fontSize:15,fontWeight:600,marginBottom:4}}>
+            {ahora.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})} hrs — {ahora.toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"})}
+          </div>
+          <div style={{color:"#94a3b8",fontSize:13}}>{marcadas.size} tarea{marcadas.size!==1?"s":""} registrada{marcadas.size!==1?"s":""}</div>
+          {gps&&<div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📍 GPS registrado</div>}
+        </div>
+        <button style={{...btnG,maxWidth:420}} onClick={()=>{setConfirmado(false);setMarcadas(new Set());setObs('');}}>
+          + Registrar otra tarea
+        </button>
+      </div>
+    );
+  }
+
+  return(
+    <div style={mS}>
+      {/* Header */}
+      <div style={{textAlign:"center",marginBottom:16,width:"100%",maxWidth:420}}>
+        <div style={{color:"#3b82f6",fontSize:13,fontWeight:600,letterSpacing:1,marginBottom:4}}>LIMPIAPP PRO · LEG SERVICIOS DE LIMPIEZA</div>
+        <div style={{color:"#fff",fontSize:22,fontWeight:700,marginBottom:2}}>{dep.nombre}</div>
+        <div style={{color:"#94a3b8",fontSize:14}}>{contrato.cliente}</div>
+        <div style={{color:"#64748b",fontSize:12,marginTop:4}}>
+          {new Date().toLocaleDateString("es-CL",{weekday:"long",day:"2-digit",month:"long",year:"numeric"})}
+        </div>
+      </div>
+
+      {/* Selector trabajador */}
+      <div style={card}>
+        <div style={{color:"#94a3b8",fontSize:13,marginBottom:8,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>Trabajador(a)</div>
+        <select
+          style={{width:"100%",background:"#0f172a",color:"#fff",border:"1px solid #374151",borderRadius:8,padding:"12px",fontSize:16}}
+          value={tId} onChange={e=>setTId(e.target.value)}>
+          <option value="">— Selecciona tu nombre —</option>
+          {trabajadoresContrato.map(t=>(
+            <option key={t.id} value={t.id}>{t.nombre}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Tareas */}
+      <div style={card}>
+        <div style={{color:"#94a3b8",fontSize:13,marginBottom:12,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>
+          Tareas a registrar ({tareas.length} en esta área)
+        </div>
+        {tareas.length===0&&<div style={{color:"#64748b",fontSize:14}}>No hay tareas activas para esta área.</div>}
+        {tareas.map(t=>(
+          <div key={t.id}
+            onClick={()=>toggle(t.id)}
+            style={{display:"flex",alignItems:"flex-start",gap:12,padding:"12px 0",borderBottom:"1px solid #334155",cursor:"pointer"}}>
+            <div style={{width:28,height:28,borderRadius:6,border:`2px solid ${marcadas.has(t.id)?"#16a34a":"#475569"}`,
+              background:marcadas.has(t.id)?"#16a34a":"transparent",
+              display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:2}}>
+              {marcadas.has(t.id)&&<span style={{color:"#fff",fontSize:18,fontWeight:700}}>✓</span>}
+            </div>
+            <div style={{flex:1}}>
+              <div style={{color:marcadas.has(t.id)?"#4ade80":"#f1f5f9",fontSize:15,lineHeight:1.4}}>{t.tarea}</div>
+              <div style={{color:"#64748b",fontSize:12,marginTop:2}}>{t.periodicidad}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Observación */}
+      <div style={card}>
+        <div style={{color:"#94a3b8",fontSize:13,marginBottom:8,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>Observación (opcional)</div>
+        <input
+          style={{width:"100%",background:"#0f172a",color:"#fff",border:"1px solid #374151",borderRadius:8,padding:"10px",fontSize:14,boxSizing:"border-box"}}
+          value={obs} onChange={e=>setObs(e.target.value)}
+          placeholder="Ej: requirió producto adicional, vidrios muy sucios..."/>
+        {gps&&<div style={{color:"#4ade80",fontSize:12,marginTop:8}}>📍 GPS: {gps.lat}, {gps.lng}</div>}
+        {!gps&&<div style={{color:"#64748b",fontSize:12,marginTop:8}}>⚠️ GPS no disponible — se registrará sin coordenadas</div>}
+      </div>
+
+      {/* Botón registrar */}
+      <div style={{width:"100%",maxWidth:420}}>
+        <button
+          style={tId&&marcadas.size>0?btnG:btnD}
+          onClick={registrar} disabled={enviando||!tId||marcadas.size===0}>
+          {enviando?"Registrando...": tId&&marcadas.size>0?`✓ Registrar ${marcadas.size} tarea${marcadas.size!==1?"s":""}`:"Selecciona nombre y tareas"}
+        </button>
+        <div style={{color:"#475569",fontSize:12,textAlign:"center",marginTop:8}}>
+          Registro seguro · {new Date().toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})} hrs
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Tab QR — panel administrador */
+function TabQR({ data, contratoId }) {
+  const [filtro, setFiltro] = useState(contratoId||'');
+  const BASE = typeof window!=="undefined" ? window.location.origin : "https://limpiapp-pro.vercel.app";
+
+  const contratos = (data.contratos||[]).filter(c=>c.activo);
+  const deps = (data.dependencias||[]).filter(d=>d.activo&&(!filtro||d.contrato_id===filtro));
+
+  const qrUrl  = (depId) => `${BASE}?dep=${depId}`;
+  const imgUrl = (depId) => `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrUrl(depId))}&color=1e3a8a&bgcolor=ffffff`;
+
+  const imprimir = (cId) => {
+    const depsC = (data.dependencias||[]).filter(d=>d.contrato_id===cId&&d.activo);
+    const c = data.contratos.find(x=>x.id===cId);
+    const rows = depsC.map(d=>`
+      <div class="qr-card">
+        <img src="${imgUrl(d.id)}" alt="QR ${d.nombre}"/>
+        <div class="dep-name">${d.nombre}</div>
+        <div class="dep-info">${c?.cliente||""}</div>
+        <div class="dep-url">${BASE}?dep=${d.id}</div>
+      </div>`).join('');
+    const w = window.open('','_blank');
+    w.document.write(`<!DOCTYPE html><html><head><title>QR ${c?.cliente||''}</title>
+    <style>
+      body{font-family:Arial;margin:16px;background:#fff}
+      h2{color:#1e3a8a;margin-bottom:4px}h3{color:#64748b;font-weight:normal;margin-top:0}
+      .grid{display:flex;flex-wrap:wrap;gap:16px}
+      .qr-card{border:2px solid #1e3a8a;border-radius:10px;padding:16px;width:200px;text-align:center;page-break-inside:avoid}
+      .dep-name{font-weight:700;color:#0f172a;font-size:13px;margin-top:8px}
+      .dep-info{color:#64748b;font-size:11px;margin-top:2px}
+      .dep-url{color:#94a3b8;font-size:9px;margin-top:4px;word-break:break-all}
+      .instruccion{background:#dbeafe;border-radius:8px;padding:12px;margin:12px 0;font-size:12px;color:#1e40af}
+      @media print{@page{margin:10mm}.qr-card{border:2px solid #000}}
+    </style></head><body>
+    <h2>Códigos QR Operacionales — LimpiApp Pro</h2>
+    <h3>${c?.cliente||''} · ${c?.instalacion||''} · LEG Servicios de Limpieza EIRL</h3>
+    <div class="instruccion">📋 Imprimir, laminar y pegar en cada área. El trabajador escanea con la cámara del celular → marca tareas completadas → confirma.</div>
+    <div class="grid">${rows}</div>
+    <p style="color:#94a3b8;font-size:10px;margin-top:16px">Generado: ${new Date().toLocaleString("es-CL")} · LimpiApp Pro v1.0</p>
+    </body></html>`);
+    w.document.close();
+    setTimeout(()=>w.print(),800);
+  };
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:8}}>
+        <div>
+          <h1 style={{color:C.text,fontSize:18,fontWeight:600,margin:"0 0 3px"}}>📱 QR Operacionales</h1>
+          <p style={{color:C.textMuted,fontSize:12,margin:0}}>Genera, imprime y pega en cada área · Los trabajadores escanean para registrar evidencia</p>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <select style={{...INP,width:220}} value={filtro} onChange={e=>setFiltro(e.target.value)}>
+            <option value="">Todos los contratos</option>
+            {contratos.map(c=><option key={c.id} value={c.id}>{c.cliente}</option>)}
+          </select>
+          {filtro&&<button onClick={()=>imprimir(filtro)}
+            style={{background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",cursor:"pointer",fontSize:13,fontWeight:600}}>
+            🖨 Imprimir todos
+          </button>}
+        </div>
+      </div>
+
+      {/* Instrucciones */}
+      <div style={{background:C.accentBg,border:"1px solid #bfdbfe",borderRadius:8,padding:"12px 16px",marginBottom:20}}>
+        <p style={{color:C.accentText,fontWeight:600,fontSize:13,marginBottom:4}}>¿Cómo usar los códigos QR?</p>
+        <p style={{color:C.accentText,fontSize:12,margin:0}}>
+          1. Imprime el QR de cada área → lamínalo → pégalo en la puerta o pared visible del área.
+          2. El trabajador llega al área, escanea con la cámara del celular.
+          3. Se abre la app en el celular → selecciona su nombre → marca las tareas completadas → confirma.
+          4. El registro queda guardado con hora exacta, fecha y GPS.
+          5. Ante cualquier reclamo del mandante → vas a Checklist → Evidencias → tienes la prueba completa.
+        </p>
+      </div>
+
+      {/* Grid QR */}
+      {!deps.length&&<Panel><div style={{textAlign:"center",padding:"30px",color:C.textMuted}}>Selecciona un contrato para ver sus QR.</div></Panel>}
+
+      {contratos.filter(c=>!filtro||c.id===filtro).map(contrato=>{
+        const depsC = deps.filter(d=>d.contrato_id===contrato.id);
+        if(!depsC.length)return null;
+        return(
+          <div key={contrato.id} style={{marginBottom:24}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div>
+                <span style={{fontWeight:700,color:C.text,fontSize:15}}>{contrato.cliente}</span>
+                <span style={{color:C.textMuted,fontSize:12,marginLeft:8}}>{depsC.length} áreas</span>
+              </div>
+              <button onClick={()=>imprimir(contrato.id)}
+                style={{background:C.surface,color:C.accent,border:`1px solid ${C.accent}`,borderRadius:6,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:600}}>
+                🖨 Imprimir contrato
+              </button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:16}}>
+              {depsC.map(dep=>{
+                const tareas = (data.checklist||[]).filter(t=>t.dep_id===dep.id&&t.activa);
+                return(
+                  <div key={dep.id} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:16,textAlign:"center",boxShadow:C.shadow}}>
+                    <img src={imgUrl(dep.id)} alt={dep.nombre} style={{width:160,height:160,borderRadius:6}}
+                      onError={e=>{e.target.src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Crect width='160' height='160' fill='%23f1f5f9'/%3E%3Ctext y='90' x='80' text-anchor='middle' font-size='12' fill='%2394a3b8'%3EQR sin internet%3C/text%3E%3C/svg%3E";}}
+                    />
+                    <div style={{fontWeight:700,color:C.text,fontSize:13,marginTop:8,lineHeight:1.3}}>{dep.nombre}</div>
+                    <div style={{color:C.textMuted,fontSize:11,marginTop:2}}>{tareas.length} tarea{tareas.length!==1?"s":""} activa{tareas.length!==1?"s":""}</div>
+                    <div style={{color:C.textMuted,fontSize:10,marginTop:4,wordBreak:"break-all"}}>{qrUrl(dep.id)}</div>
+                    <a href={qrUrl(dep.id)} target="_blank" rel="noreferrer"
+                      style={{display:"inline-block",marginTop:8,color:C.accent,fontSize:11,textDecoration:"none"}}>
+                      👁 Previsualizar
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── Helper funciones tiempo ────────────────────────────────── */
 function tToMin(t){if(!t)return null;const[h,m]=(t||"").split(":").map(Number);return h*60+m;}
 function minToT(m){return`${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;}
@@ -1628,11 +1903,16 @@ function InformesIA({data,contratoId}){
 
 /* ─── App principal ─────────────────────────────────────────── */
 export default function App(){
+  // ── Detección modo QR (cuando trabajador escanea) ────────────
+  const depQR = typeof window!=="undefined"
+    ? new URLSearchParams(window.location.search).get("dep")
+    : null;
   const [tab,setTab]=useState("dashboard");
   const [contratoId,setContratoId]=useState("");
   const {data,loading,dbMode,insert,update,saveRem}=useData();
 
   if(loading||!data)return<Spinner/>;
+  if(depQR)return<ModoQR depId={depQR} data={data} insert={insert} loading={loading}/>;
 
   const contratos=data.contratos||[];
   const incAb=(contratoId?data.incidencias?.filter(i=>i.contrato_id===contratoId&&i.estado==="Abierta"):data.incidencias?.filter(i=>i.estado==="Abierta"))?.length||0;
@@ -1672,6 +1952,7 @@ export default function App(){
         {tab==="contratos"      &&<Contratos       data={data} insert={insert} update={update}/>}
         {tab==="dependencias"   &&<Dependencias    data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="trabajadores"   &&<Trabajadores    data={data} insert={insert} update={update} contratoId={contratoId}/>}
+        {tab==="qr"            &&<TabQR           data={data} contratoId={contratoId}/>}
         {tab==="asistencia"     &&<Asistencia      data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="checklist"      &&<Checklist       data={data} contratoId={contratoId} insert={insert}/>}
         {tab==="incidencias"    &&<Incidencias     data={data} contratoId={contratoId} insert={insert} update={update}/>}
