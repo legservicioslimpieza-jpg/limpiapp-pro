@@ -656,7 +656,200 @@ function SlipRow({ label, value, bold, color, indent, divider }) {
   );
 }
 
+function LibroRemuneraciones({ data }) {
+  const hoy = new Date();
+  const periodoDefault = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,"0")}`;
+  const [periodo, setPeriodo] = useState(periodoDefault);
+  const libroRef = useRef();
+
+  const liqPeriodo = (data.liquidaciones||[]).filter(l=>l.periodo===periodo);
+  const params = (data.parametros_legales||[])[0];
+
+  const tot = liqPeriodo.reduce((a,l)=>({
+    dias:        a.dias        + (l.dias_trabajados||0),
+    sueldo:      a.sueldo      + (l.sueldo_proporcional||0),
+    grat:        a.grat        + (l.gratificacion||0),
+    hex:         a.hex         + (l.horas_extra_valor||0),
+    movil:       a.movil       + (l.bono_movilizacion||0),
+    cola:        a.cola        + (l.bono_colacion||0),
+    asis:        a.asis        + (l.bono_asistencia||0),
+    otros_h:     a.otros_h     + (l.otros_haberes||0),
+    total_h:     a.total_h     + (l.total_haberes||0),
+    afp:         a.afp         + (l.cotiz_afp||0),
+    salud:       a.salud       + (l.cotiz_salud||0),
+    ces_t:       a.ces_t       + (l.ces_trabajador||0),
+    otros_d:     a.otros_d     + (l.otros_descuentos||0),
+    total_d:     a.total_d     + (l.total_descuentos||0),
+    liquido:     a.liquido     + (l.liquido||0),
+    sis:         a.sis         + (l.sis||0),
+    ces_e:       a.ces_e       + (l.ces_empleador||0),
+    costo:       a.costo       + (l.costo_empresa||0),
+  }),{dias:0,sueldo:0,grat:0,hex:0,movil:0,cola:0,asis:0,otros_h:0,total_h:0,afp:0,salud:0,ces_t:0,otros_d:0,total_d:0,liquido:0,sis:0,ces_e:0,costo:0});
+
+  const imprimir = () => {
+    const estilos = `
+      body{font-family:Arial,sans-serif;font-size:9px;margin:10px;color:#000}
+      h2{font-size:13px;margin-bottom:2px}
+      h3{font-size:10px;margin-bottom:6px;font-weight:normal}
+      table{width:100%;border-collapse:collapse;font-size:8px}
+      th{background:#1d4ed8;color:#fff;padding:3px 4px;text-align:center;font-size:7.5px;border:1px solid #1d4ed8}
+      td{padding:3px 4px;border:1px solid #ccc;text-align:right;white-space:nowrap}
+      td.left{text-align:left}
+      tr.tot td{background:#dbeafe;font-weight:bold;border-top:2px solid #1d4ed8}
+      .seccion{background:#e0e7ff;font-weight:bold;text-align:center}
+      @media print{@page{size:landscape;margin:8mm}}
+    `;
+    const w = window.open("","_blank");
+    w.document.write(`<html><head><title>Libro Remuneraciones ${periodo}</title><style>${estilos}</style></head><body>${libroRef.current?.innerHTML}</body></html>`);
+    w.document.close();
+    w.print();
+  };
+
+  const thS = {background:"#1d4ed8",color:"#fff",padding:"5px 6px",fontSize:10,fontWeight:600,textAlign:"center",border:`1px solid #1d4ed8`,whiteSpace:"nowrap"};
+  const thG = {background:"#15803d",color:"#fff",padding:"5px 6px",fontSize:10,fontWeight:600,textAlign:"center",border:`1px solid #15803d`,whiteSpace:"nowrap"};
+  const thR = {background:"#b91c1c",color:"#fff",padding:"5px 6px",fontSize:10,fontWeight:600,textAlign:"center",border:`1px solid #b91c1c`,whiteSpace:"nowrap"};
+  const thP = {background:"#6d28d9",color:"#fff",padding:"5px 6px",fontSize:10,fontWeight:600,textAlign:"center",border:`1px solid #6d28d9`,whiteSpace:"nowrap"};
+  const td  = (v,bold,color) => ({padding:"6px 8px",border:`1px solid ${C.border}`,textAlign:"right",fontSize:11,fontVariantNumeric:"tabular-nums",fontWeight:bold?"700":"400",color:color||C.text,background:bold?C.surfaceAlt:C.surface,whiteSpace:"nowrap"});
+  const tdL = (bold) => ({...td(null,bold),textAlign:"left"});
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+        <div>
+          <h2 style={{color:C.text,fontSize:16,fontWeight:600,margin:"0 0 3px"}}>Libro de Remuneraciones</h2>
+          <p style={{color:C.textMuted,fontSize:12,margin:0}}>Formato oficial · LEG Servicios de Limpieza EIRL · RUT 78.086.977-1</p>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div>
+            <label style={{display:"block",color:C.textMuted,fontSize:11,marginBottom:3}}>Período</label>
+            <input style={{...INP,width:120}} value={periodo} onChange={e=>setPeriodo(e.target.value)} placeholder="2026-05"/>
+          </div>
+          <div style={{marginTop:16}}>
+            <PrimaryBtn onClick={imprimir} color={C.accent}>🖨 Imprimir / PDF</PrimaryBtn>
+          </div>
+        </div>
+      </div>
+
+      {!liqPeriodo.length ? (
+        <Panel>
+          <div style={{textAlign:"center",padding:"40px 0",color:C.textMuted}}>
+            <div style={{fontSize:32,marginBottom:8}}>📋</div>
+            <p style={{fontWeight:600,color:C.text,marginBottom:4}}>Sin liquidaciones para {periodo}</p>
+            <p style={{fontSize:12}}>Genera las liquidaciones en la calculadora primero, luego vuelve aquí.</p>
+          </div>
+        </Panel>
+      ) : (
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,boxShadow:C.shadow,overflow:"hidden"}}>
+          <div ref={libroRef}>
+            {/* Encabezado */}
+            <div style={{padding:"16px 20px",borderBottom:`1px solid ${C.border}`,background:C.surfaceAlt}}>
+              <div style={{fontWeight:700,fontSize:15,color:C.text}}>LIBRO DE REMUNERACIONES</div>
+              <div style={{color:C.textMuted,fontSize:12,marginTop:2}}>
+                Empresa: LEG Servicios de Limpieza EIRL · RUT: 78.086.977-1 · Período: {periodo}
+              </div>
+              {params && <div style={{color:C.textMuted,fontSize:11,marginTop:1}}>UF: {clp(params.uf)} · UTM: {clp(params.utm)} · IMM: {clp(params.imm)}</div>}
+            </div>
+
+            {/* Tabla */}
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                <thead>
+                  <tr>
+                    <th style={{...thS,textAlign:"left"}} rowSpan={2}>N°</th>
+                    <th style={{...thS,textAlign:"left"}} rowSpan={2}>RUT</th>
+                    <th style={{...thS,textAlign:"left",minWidth:140}} rowSpan={2}>Trabajador</th>
+                    <th style={thS} rowSpan={2}>Días</th>
+                    <th colSpan={7} style={thG}>HABERES</th>
+                    <th colSpan={4} style={thR}>DESCUENTOS</th>
+                    <th style={thS} rowSpan={2}>LÍQUIDO</th>
+                    <th colSpan={3} style={thP}>COSTO EMPRESA</th>
+                  </tr>
+                  <tr>
+                    <th style={thG}>S. Base</th>
+                    <th style={thG}>Gratif.</th>
+                    <th style={thG}>H. Extra</th>
+                    <th style={thG}>B. Movil.</th>
+                    <th style={thG}>B. Colac.</th>
+                    <th style={thG}>Otros</th>
+                    <th style={{...thG,fontWeight:800}}>TOTAL</th>
+                    <th style={thR}>AFP</th>
+                    <th style={thR}>Salud</th>
+                    <th style={thR}>Ces. T.</th>
+                    <th style={{...thR,fontWeight:800}}>TOTAL</th>
+                    <th style={thP}>SIS</th>
+                    <th style={thP}>Ces. E.</th>
+                    <th style={{...thP,fontWeight:800}}>TOTAL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liqPeriodo.map((l,i)=>{
+                    const t=data.trabajadores.find(w=>w.id===l.trabajador_id);
+                    return (
+                      <tr key={i} style={{borderBottom:`1px solid ${C.borderLight}`}}>
+                        <td style={tdL()}>{i+1}</td>
+                        <td style={tdL()}>{t?.rut||"—"}</td>
+                        <td style={tdL()}>{t?.nombre||"—"}</td>
+                        <td style={td()}>{l.dias_trabajados}</td>
+                        <td style={td()}>{clp(l.sueldo_proporcional)}</td>
+                        <td style={td()}>{clp(l.gratificacion)}</td>
+                        <td style={td()}>{clp(l.horas_extra_valor)}</td>
+                        <td style={td()}>{clp(l.bono_movilizacion)}</td>
+                        <td style={td()}>{clp(l.bono_colacion)}</td>
+                        <td style={td()}>{clp(l.otros_haberes)}</td>
+                        <td style={td(true,false,C.green)}>{clp(l.total_haberes)}</td>
+                        <td style={td()}>{clp(l.cotiz_afp)}</td>
+                        <td style={td()}>{clp(l.cotiz_salud)}</td>
+                        <td style={td()}>{clp(l.ces_trabajador)}</td>
+                        <td style={td(true,false,C.red)}>{clp(l.total_descuentos)}</td>
+                        <td style={td(true,false,C.accent)}>{clp(l.liquido)}</td>
+                        <td style={td()}>{clp(l.sis)}</td>
+                        <td style={td()}>{clp(l.ces_empleador)}</td>
+                        <td style={td(true,false,C.purple)}>{clp(l.costo_empresa)}</td>
+                      </tr>
+                    );
+                  })}
+                  {/* Fila totales */}
+                  <tr style={{background:C.accentBg,borderTop:`2px solid ${C.accent}`}}>
+                    <td style={tdL(true)} colSpan={3}>TOTALES</td>
+                    <td style={td(true)}>{tot.dias}</td>
+                    <td style={td(true)}>{clp(tot.sueldo)}</td>
+                    <td style={td(true)}>{clp(tot.grat)}</td>
+                    <td style={td(true)}>{clp(tot.hex)}</td>
+                    <td style={td(true)}>{clp(tot.movil)}</td>
+                    <td style={td(true)}>{clp(tot.cola)}</td>
+                    <td style={td(true)}>{clp(tot.otros_h)}</td>
+                    <td style={td(true,false,C.green)}>{clp(tot.total_h)}</td>
+                    <td style={td(true)}>{clp(tot.afp)}</td>
+                    <td style={td(true)}>{clp(tot.salud)}</td>
+                    <td style={td(true)}>{clp(tot.ces_t)}</td>
+                    <td style={td(true,false,C.red)}>{clp(tot.total_d)}</td>
+                    <td style={td(true,false,C.accent)}>{clp(tot.liquido)}</td>
+                    <td style={td(true)}>{clp(tot.sis)}</td>
+                    <td style={td(true)}>{clp(tot.ces_e)}</td>
+                    <td style={td(true,false,C.purple)}>{clp(tot.costo)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Firma */}
+            <div style={{padding:"20px 24px",borderTop:`1px solid ${C.border}`,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:24,marginTop:8}}>
+              {["Empleador / Representante Legal","Contador","Trabajador"].map(r=>(
+                <div key={r} style={{textAlign:"center"}}>
+                  <div style={{borderTop:`1px solid ${C.text}`,paddingTop:6,color:C.textMuted,fontSize:11}}>{r}</div>
+                  {r==="Empleador / Representante Legal" && <div style={{color:C.text,fontSize:11,marginTop:2}}>Ana María Guzmán Loyola · RUT 12.083.247-6</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Remuneraciones({ data, saveRem }) {
+  const [vistaRem, setVistaRem] = useState("calculadora");
   const hoy = new Date();
   const periodoDefault = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}`;
   const [tId, setTId] = useState("");
@@ -698,7 +891,20 @@ function Remuneraciones({ data, saveRem }) {
 
   return (
     <div>
-      <PageHeader title="Remuneraciones" subtitle="Liquidaciones de sueldo · Ley del Trabajo Chile" />
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <div>
+          <h1 style={{color:C.text,fontSize:18,fontWeight:600,margin:"0 0 3px"}}>Remuneraciones</h1>
+          <p style={{color:C.textMuted,fontSize:12,margin:0}}>Liquidaciones y Libro de Remuneraciones · Ley del Trabajo Chile</p>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {[{key:"calculadora",label:"💰 Calculadora"},{key:"libro",label:"📋 Libro de Remuneraciones"}].map(v=>(
+            <button key={v.key} onClick={()=>setVistaRem(v.key)} style={{background:vistaRem===v.key?C.accent:C.surface,color:vistaRem===v.key?"#fff":C.textMuted,border:`1px solid ${vistaRem===v.key?C.accent:C.border}`,borderRadius:6,padding:"7px 16px",fontSize:12,cursor:"pointer",fontWeight:vistaRem===v.key?600:400}}>{v.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {vistaRem==="libro" && <LibroRemuneraciones data={data}/>}
+      {vistaRem==="calculadora" && <>
 
       {!params && <AlertBanner type="warning" message="No se encontraron parámetros legales (UF, UTM, IMM). Ejecuta el SQL de remuneraciones en Supabase." />}
 
@@ -854,6 +1060,7 @@ function Remuneraciones({ data, saveRem }) {
           </Panel>
         </div>
       </div>
+      </>}
     </div>
   );
 }
