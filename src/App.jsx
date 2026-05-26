@@ -1142,8 +1142,8 @@ function Checklist({data,contratoId,insert}){
         />
       </Panel>
     </div>
+    {lightboxUrl&&<Lightbox url={lightboxUrl} onClose={()=>setLightboxUrl(null)}/>}
   );
-  {lightboxUrl&&<Lightbox url={lightboxUrl} onClose={()=>setLightboxUrl(null)}/>}
 }
 
 /* ─── Incidencias ───────────────────────────────────────────── */
