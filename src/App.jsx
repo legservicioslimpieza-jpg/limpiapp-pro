@@ -170,7 +170,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -419,6 +419,12 @@ function Trabajadores({data,insert,update,contratoId}){
               <FL label="Bono asistencia ($)"><input type="number" style={INP} value={form.bono_asistencia||0} onChange={e=>setForm({...form,bono_asistencia:Number(e.target.value)})}/></FL>
               <FL label="Bono movilización ($)"><input type="number" style={INP} value={form.bono_movilizacion||0} onChange={e=>setForm({...form,bono_movilizacion:Number(e.target.value)})}/></FL>
               <FL label="Bono colación ($)"><input type="number" style={INP} value={form.bono_colacion||0} onChange={e=>setForm({...form,bono_colacion:Number(e.target.value)})}/></FL>
+              <FL label="Tipo de trabajador">
+                <select style={INP} value={form.es_pensionado?"pensionado":"activo"} onChange={e=>setForm({...form,es_pensionado:e.target.value==="pensionado"})}>
+                  <option value="activo">Activo (cotiza AFP y CES)</option>
+                  <option value="pensionado">Pensionado (exento AFP y CES)</option>
+                </select>
+              </FL>
             </div>
           )}
           <div style={{display:"flex",gap:8,paddingTop:8,borderTop:`1px solid ${C.borderLight}`}}>
@@ -434,7 +440,7 @@ function Trabajadores({data,insert,update,contratoId}){
             {key:"rut",label:"RUT",render:r=><span style={{color:C.textMuted,fontVariantNumeric:"tabular-nums"}}>{r.rut||"—"}</span>},
             {key:"cargo",label:"Cargo",render:r=><Tag text={r.cargo} scheme={r.cargo==="Supervisor"||r.cargo==="Supervisora"?{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}:{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
             {key:"sueldo",label:"Sueldo Base",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:C.text}}>{r.sueldo_base?clp(r.sueldo_base):"—"}</span>},
-            {key:"afp",label:"AFP",render:r=><span style={{color:C.textMuted}}>{r.afp||"—"}</span>},
+            {key:"afp",label:"AFP",render:r=>r.es_pensionado?<Tag text="PENSIONADO" scheme={{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}}/>:<span style={{color:C.textMuted}}>{r.afp||"—"}</span>},
             {key:"activo",label:"Estado",render:r=><Tag text={r.activo?"Activo":"Inactivo"} scheme={r.activo?{bg:C.greenBg,text:C.green,border:C.greenBorder}:{bg:"#f9fafb",text:C.textMuted,border:C.border}}/>},
             {key:"edit",label:"",render:r=><button onClick={()=>{setTab("datos");setForm({...r});}} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
           ]}
@@ -586,61 +592,87 @@ function Supervisiones({data,contratoId,insert}){
 }
 
 /* ─── MÓDULO REMUNERACIONES ─────────────────────────────────── */
-function calcularLiquidacion(trabajador, params, tasas, input) {
-  const { dias_trabajados, horas_extra, otros_haberes, otros_descuentos, contrato_id, periodo } = input;
-  const afpRate = tasas.find(a => a.nombre === trabajador.afp) || { tasa_trabajador: 0, sis: 0 };
+/* ─── Cálculo IUSC (Impuesto Único 2da Categoría) ────────────── */
+function calcularIUSC(baseIUSC, utm, tabla) {
+  if (!tabla || !tabla.length || baseIUSC <= 0) return 0;
+  const baseUTM = baseIUSC / utm;
+  const tramo = [...tabla].sort((a,b)=>b.desde_utm-a.desde_utm)
+    .find(t => baseUTM >= t.desde_utm && (t.hasta_utm === null || baseUTM < t.hasta_utm));
+  if (!tramo || tramo.tasa === 0) return 0;
+  return Math.max(0, Math.round(baseIUSC * tramo.tasa - tramo.factor_deduccion_utm * utm));
+}
 
-  // Sueldo proporcional
-  const sueldo_prop = Math.round((trabajador.sueldo_base || 0) * dias_trabajados / 30);
+function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
+  const {
+    dias_trabajados=30, horas_extra=0, otros_haberes=0, otros_descuentos=0,
+    contrato_id, periodo, descripcion='',
+    dias_licencia_medica=0, dias_permiso_sin_goce=0,
+    dias_vacaciones=0, dias_inasistencia=0
+  } = input;
 
-  // Gratificación mensual (método 25% mensual, tope 4.75 UTM/12)
-  let gratificacion = 0;
-  if (trabajador.metodo_gratificacion === "25% MENSUAL") {
-    const tope_grat = Math.round(4.75 * (params.utm || 68034) / 12);
-    gratificacion = Math.min(Math.round(sueldo_prop * 0.25), tope_grat);
-  }
+  const esPensionado  = trabajador.es_pensionado || false;
+  const esIndefinido  = (trabajador.tipo_contrato||'PLAZO FIJO') === 'INDEFINIDO';
+  const afpRate       = tasas.find(a=>a.nombre===trabajador.afp)||{tasa_trabajador:0,sis:0};
+  const utm           = params.utm || 68034;
 
-  // Horas extra (50% de recargo sobre valor hora ordinaria)
-  const valor_hora = Math.round((trabajador.sueldo_base || 0) / (params.horas_mensuales || 180));
-  const horas_extra_valor = Math.round(valor_hora * 1.5 * (horas_extra || 0));
+  // ── Días efectivos ─────────────────────────────────────────
+  const diasSinPago   = (dias_permiso_sin_goce||0) + (dias_inasistencia||0);
+  const diasPagados   = Math.min(30, Math.max(0, (dias_trabajados||30) - diasSinPago + (dias_vacaciones||0)));
 
-  // Bonos (asistencia solo si trabajó mes completo)
-  const bono_asis = dias_trabajados >= 30 ? (trabajador.bono_asistencia || 0) : 0;
-  const bono_movil = trabajador.bono_movilizacion || 0;
-  const bono_cola = trabajador.bono_colacion || 0;
+  // ── Haberes ────────────────────────────────────────────────
+  const sueldo_prop   = Math.round((trabajador.sueldo_base||0) * diasPagados / 30);
+  const tope_grat     = Math.round(4.75 * utm / 12);
+  const gratificacion = trabajador.metodo_gratificacion==='25% MENSUAL'
+    ? Math.min(Math.round(sueldo_prop*0.25), tope_grat) : 0;
+  const valor_hora    = Math.round((trabajador.sueldo_base||0)/(params.horas_mensuales||180));
+  const horas_extra_valor = Math.round(valor_hora*1.5*(horas_extra||0));
+  const bono_asis     = diasPagados>=30?(trabajador.bono_asistencia||0):0;
+  const bono_movil    = trabajador.bono_movilizacion||0;
+  const bono_cola     = trabajador.bono_colacion||0;
+  const total_haberes = sueldo_prop+gratificacion+horas_extra_valor+bono_asis+bono_movil+bono_cola+(otros_haberes||0);
 
-  // Total haberes
-  const total_haberes = sueldo_prop + gratificacion + horas_extra_valor + bono_asis + bono_movil + bono_cola + (otros_haberes || 0);
+  // ── Renta imponible ────────────────────────────────────────
+  const tope_imp      = Math.round((params.tope_imponible_uf||90.0)*(params.uf||38894));
+  const tope_ces      = Math.round((params.tope_cesantia_uf||135.2)*(params.uf||38894));
+  const rem_imponible = Math.min(sueldo_prop+gratificacion+horas_extra_valor, tope_imp);
+  const rem_imp_ces   = Math.min(sueldo_prop+gratificacion+horas_extra_valor, tope_ces);
 
-  // Renta imponible (tope = 84.3 UF)
-  const tope_imp = Math.round((params.tope_imponible_uf || 84.3) * (params.uf || 38894));
-  const rem_imponible = Math.min(sueldo_prop + gratificacion + horas_extra_valor, tope_imp);
+  // ── Descuentos trabajador ──────────────────────────────────
+  const salud_tasa    = params.salud_trabajador||0.07;
+  const tasa_afp      = esPensionado?0:(afpRate.tasa_trabajador||0);
+  const cotiz_afp     = Math.round(rem_imponible*tasa_afp);
+  const cotiz_salud   = Math.round(rem_imponible*salud_tasa);
+  const ces_trab_tasa = esPensionado?0:(esIndefinido?(params.ces_trab_indefinido||0.006):(params.ces_trab_plazo_fijo||0));
+  const ces_trabajador= Math.round(rem_imp_ces*ces_trab_tasa);
 
-  // Descuentos legales
-  const tasa_afp = afpRate.tasa_trabajador || 0;
-  const cotiz_afp = Math.round(rem_imponible * tasa_afp);
-  const cotiz_salud = Math.round(rem_imponible * 0.07);
-  const ces_trabajador = Math.round(rem_imponible * 0.006);
-  const total_descuentos = cotiz_afp + cotiz_salud + ces_trabajador + (otros_descuentos || 0);
+  // ── IUSC (Impuesto Único 2da Categoría) ────────────────────
+  const base_iusc     = Math.max(0, rem_imponible-cotiz_afp-cotiz_salud);
+  const iusc          = esPensionado?0:calcularIUSC(base_iusc, utm, iuscTabla||[]);
 
-  // Líquido
-  const liquido = total_haberes - total_descuentos;
+  const total_descuentos = cotiz_afp+cotiz_salud+ces_trabajador+iusc+(otros_descuentos||0);
+  const liquido          = total_haberes-total_descuentos;
 
-  // Costo empresa
-  const sis = Math.round(rem_imponible * (afpRate.sis || 0));
-  const ces_empleador = Math.round(rem_imponible * 0.024);
-  const costo_empresa = total_haberes + sis + ces_empleador;
+  // ── Costo empresa ──────────────────────────────────────────
+  const sis               = esPensionado?0:Math.round(rem_imponible*(afpRate.sis||0));
+  const ces_emp_tasa      = esIndefinido?(params.ces_emp_indefinido||0.024):(params.ces_emp_plazo_fijo||0.030);
+  const ces_empleador     = Math.round(rem_imp_ces*ces_emp_tasa);
+  const mutualidad_valor  = Math.round(rem_imponible*(params.mutualidad||0.0093));
+  const aporte_patronal_valor = esPensionado?0:Math.round(rem_imponible*(params.aporte_patronal||0.010));
+  const costo_empresa     = total_haberes+sis+ces_empleador+mutualidad_valor+aporte_patronal_valor;
 
   return {
-    periodo, trabajador_id: trabajador.id, contrato_id: contrato_id || null,
-    dias_trabajados: dias_trabajados || 30, horas_extra: horas_extra || 0,
-    otros_haberes: otros_haberes || 0, otros_descuentos: otros_descuentos || 0,
-    sueldo_base: trabajador.sueldo_base || 0, sueldo_proporcional: sueldo_prop,
-    gratificacion, horas_extra_valor, bono_asistencia: bono_asis,
-    bono_movilizacion: bono_movil, bono_colacion: bono_cola,
-    total_haberes, rem_imponible, afp: trabajador.afp,
-    tasa_afp, cotiz_afp, cotiz_salud, ces_trabajador,
-    total_descuentos, liquido, sis, ces_empleador, costo_empresa,
+    periodo, trabajador_id:trabajador.id, contrato_id:contrato_id||null, descripcion,
+    dias_trabajados:dias_trabajados||30, dias_licencia_medica:dias_licencia_medica||0,
+    dias_permiso_sin_goce:dias_permiso_sin_goce||0, dias_vacaciones:dias_vacaciones||0,
+    dias_inasistencia:dias_inasistencia||0,
+    horas_extra:horas_extra||0, otros_haberes:otros_haberes||0, otros_descuentos:otros_descuentos||0,
+    sueldo_base:trabajador.sueldo_base||0, sueldo_proporcional:sueldo_prop,
+    gratificacion, horas_extra_valor, bono_asistencia:bono_asis,
+    bono_movilizacion:bono_movil, bono_colacion:bono_cola,
+    total_haberes, rem_imponible, afp:trabajador.afp,
+    tasa_afp, cotiz_afp, cotiz_salud, ces_trabajador, ces_trab_tasa,
+    iusc, total_descuentos, liquido,
+    sis, ces_empleador, ces_emp_tasa, mutualidad_valor, aporte_patronal_valor, costo_empresa,
   };
 }
 
@@ -653,6 +685,117 @@ function SlipRow({ label, value, bold, color, indent, divider }) {
         <td style={{ padding: "4px 0", textAlign: "right", fontWeight: bold ? 700 : 400, color: color || C.text, fontSize: 13, fontVariantNumeric: "tabular-nums" }}>{value}</td>
       </tr>
     </>
+  );
+}
+
+/* ─── Panel de Parámetros Legales editables ─────────────────── */
+function ParametrosPanel({ data, update, insert }) {
+  const params = (data.parametros_legales||[])[0];
+  const tasas  = data.tasas_afp||[];
+  const iusc   = (data.tabla_iusc||[]).sort((a,b)=>a.tramo-b.tramo);
+  const [editP, setEditP] = useState(null);
+  const [editA, setEditA] = useState(null);
+
+  const saveParams = async () => {
+    if (!editP) return;
+    if (params) await update("parametros_legales", {...params,...editP});
+    else await insert("parametros_legales", {...editP});
+    setEditP(null);
+  };
+  const saveAfp = async () => {
+    if (!editA) return;
+    await update("tasas_afp", editA);
+    setEditA(null);
+  };
+
+  const labelP = [
+    {k:"uf",             label:"UF",                         fmt:"$"},
+    {k:"utm",            label:"UTM",                        fmt:"$"},
+    {k:"imm",            label:"Ingreso Mínimo Mensual (IMM)", fmt:"$"},
+    {k:"tope_imponible_uf", label:"Tope imponible AFP/Salud (UF)", fmt:""},
+    {k:"tope_cesantia_uf",  label:"Tope imponible Cesantía (UF)", fmt:""},
+    {k:"salud_trabajador",  label:"Cotización Salud trabajador", fmt:"%", mult:100},
+    {k:"ces_trab_indefinido",label:"CES Trabajador — Indefinido",fmt:"%",mult:100},
+    {k:"ces_trab_plazo_fijo",label:"CES Trabajador — Plazo Fijo",fmt:"%",mult:100},
+    {k:"ces_emp_indefinido", label:"CES Empleador — Indefinido", fmt:"%",mult:100},
+    {k:"ces_emp_plazo_fijo", label:"CES Empleador — Plazo Fijo", fmt:"%",mult:100},
+    {k:"mutualidad",     label:"Mutualidad Ley 16.744 empleador",fmt:"%",mult:100},
+    {k:"aporte_patronal",label:"Aporte Patronal Reforma 2025",   fmt:"%",mult:100},
+    {k:"horas_mensuales",label:"Horas mensuales jornada completa",fmt:""},
+  ];
+
+  return (
+    <div>
+      <div style={{marginBottom:20}}>
+        <h2 style={{color:C.text,fontSize:16,fontWeight:600,margin:"0 0 4px"}}>⚙️ Parámetros Legales</h2>
+        <p style={{color:C.textMuted,fontSize:12,margin:0}}>Todos los valores se leen desde aquí al calcular — sin código. Actualiza cuando el gobierno publique nuevos valores.</p>
+      </div>
+
+      {/* Parámetros del período */}
+      <Panel title={`Parámetros del período ${params?.periodo||'—'}`}
+        action={!editP?<PrimaryBtn onClick={()=>setEditP({...params})} small>✏️ Editar</PrimaryBtn>:
+          <div style={{display:"flex",gap:6}}><PrimaryBtn onClick={saveParams} color={C.green} small>Guardar</PrimaryBtn><SecondaryBtn onClick={()=>setEditP(null)} small>Cancelar</SecondaryBtn></div>}>
+        {editP ? (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            {labelP.map(f=>(
+              <FL key={f.k} label={f.label}>
+                <input type="number" style={INP} step={f.mult?"0.01":"1"}
+                  value={f.mult ? ((editP[f.k]||0)*f.mult).toFixed(f.mult===100?2:3) : (editP[f.k]||0)}
+                  onChange={e=>setEditP({...editP,[f.k]:f.mult?Number(e.target.value)/f.mult:Number(e.target.value)})}/>
+              </FL>
+            ))}
+          </div>
+        ) : params ? (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {labelP.map(f=>{
+              const v = params[f.k]||0;
+              const disp = f.fmt==="$" ? clp(v) : f.mult ? `${(v*f.mult).toFixed(2)}%` : v;
+              return <div key={f.k} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
+                <span style={{color:C.textMuted,fontSize:12}}>{f.label}</span>
+                <span style={{color:C.text,fontWeight:500,fontSize:13}}>{disp}</span>
+              </div>;
+            })}
+          </div>
+        ) : <AlertBanner type="warning" message="No hay parámetros cargados. Ejecuta el SQL remuneraciones_v2.sql en Supabase."/>}
+      </Panel>
+
+      {/* Tasas AFP */}
+      <Panel title="Tasas AFP y SIS" action={editA?<div style={{display:"flex",gap:6}}><PrimaryBtn onClick={saveAfp} color={C.green} small>Guardar</PrimaryBtn><SecondaryBtn onClick={()=>setEditA(null)} small>Cancelar</SecondaryBtn></div>:null} noPad>
+        <DataTable
+          cols={[
+            {key:"afp",    label:"AFP",    render:r=><span style={{fontWeight:500}}>{r.nombre}</span>},
+            {key:"tasa",   label:"Tasa trabajador", render:r=>editA?.id===r.id?
+              <input type="number" step="0.0001" style={{...INP,width:90}} value={editA.tasa_trabajador} onChange={e=>setEditA({...editA,tasa_trabajador:Number(e.target.value)})}/>:
+              <span>{pct(r.tasa_trabajador)}</span>},
+            {key:"sis",    label:"SIS empleador",   render:r=>editA?.id===r.id?
+              <input type="number" step="0.0001" style={{...INP,width:90}} value={editA.sis} onChange={e=>setEditA({...editA,sis:Number(e.target.value)})}/>:
+              <span style={{color:C.textMuted}}>{pct(r.sis)}</span>},
+            {key:"edit",   label:"",        render:r=><button onClick={()=>setEditA({...r})} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12}}>Editar</button>},
+          ]}
+          rows={tasas}
+        />
+      </Panel>
+
+      {/* Tabla IUSC */}
+      <Panel title="Tabla IUSC — Impuesto Único 2ª Categoría" noPad>
+        <div style={{padding:"10px 16px",background:C.accentBg,borderBottom:`1px solid ${C.border}`}}>
+          <p style={{color:C.accentText,fontSize:12}}>Los tramos se expresan en UTM. El sistema calcula automáticamente en pesos usando el UTM del período. Para actualizar cuando el SII publique nuevos tramos, contacta al administrador del sistema.</p>
+        </div>
+        <DataTable
+          cols={[
+            {key:"t",    label:"Tramo", render:r=><span style={{fontWeight:600}}>{r.tramo}</span>},
+            {key:"d",    label:"Desde (UTM)",  render:r=><span>{r.desde_utm} UTM</span>},
+            {key:"h",    label:"Hasta (UTM)",  render:r=><span style={{color:C.textMuted}}>{r.hasta_utm?`${r.hasta_utm} UTM`:"Sin límite"}</span>},
+            {key:"tasa", label:"Tasa",         render:r=><Tag text={`${(r.tasa*100).toFixed(1)}%`} scheme={r.tasa===0?{bg:"#f9fafb",text:C.textMuted,border:C.border}:{bg:C.redBg,text:C.red,border:C.redBorder}}/>},
+            {key:"fac",  label:"Factor deduc. (UTM)", render:r=><span style={{color:C.textMuted}}>{r.factor_deduccion_utm} UTM</span>},
+          ]}
+          rows={iusc}
+        />
+        {params&&<div style={{padding:"8px 16px",borderTop:`1px solid ${C.borderLight}`,color:C.textMuted,fontSize:11}}>
+          Con UTM = {clp(params.utm)}: Primer tramo exento hasta {clp(13.5*params.utm)} · Trabajadores del IMM pagan $0 IUSC
+        </div>}
+      </Panel>
+    </div>
   );
 }
 
@@ -860,6 +1003,10 @@ function Remuneraciones({ data, saveRem }) {
   const [otrosH, setOtrosH] = useState(0);
   const [otrosD, setOtrosD] = useState(0);
   const [descripcion, setDescripcion] = useState('');
+  const [diasLicencia, setDiasLicencia] = useState(0);
+  const [diasPermisoSG, setDiasPermisoSG] = useState(0);
+  const [diasVacaciones, setDiasVacaciones] = useState(0);
+  const [diasInasistencia, setDiasInasistencia] = useState(0);
   const [res, setRes] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -867,12 +1014,21 @@ function Remuneraciones({ data, saveRem }) {
 
   const params = (data.parametros_legales || [])[0];
   const tasas = data.tasas_afp || [];
+  const iuscTabla = data.tabla_iusc || [];
   const liqList = data.liquidaciones || [];
   const trabajador = data.trabajadores.find(t => t.id === tId);
 
   const calcular = () => {
     if (!trabajador || !params) { alert("Selecciona un trabajador y verifica que los parámetros legales estén cargados."); return; }
-    setRes({...calcularLiquidacion(trabajador, params, tasas, { dias_trabajados: dias, horas_extra: hextra, otros_haberes: otrosH, otros_descuentos: otrosD, contrato_id: cId, periodo }), descripcion});
+    setRes(calcularLiquidacion(trabajador, params, tasas, iuscTabla, {
+      dias_trabajados: dias, horas_extra: hextra,
+      otros_haberes: otrosH, otros_descuentos: otrosD,
+      contrato_id: cId, periodo, descripcion,
+      dias_licencia_medica: diasLicencia,
+      dias_permiso_sin_goce: diasPermisoSG,
+      dias_vacaciones: diasVacaciones,
+      dias_inasistencia: diasInasistencia,
+    }));
     setSaved(false);
   };
 
@@ -897,14 +1053,15 @@ function Remuneraciones({ data, saveRem }) {
           <h1 style={{color:C.text,fontSize:18,fontWeight:600,margin:"0 0 3px"}}>Remuneraciones</h1>
           <p style={{color:C.textMuted,fontSize:12,margin:0}}>Liquidaciones y Libro de Remuneraciones · Ley del Trabajo Chile</p>
         </div>
-        <div style={{display:"flex",gap:6}}>
-          {[{key:"calculadora",label:"💰 Calculadora"},{key:"libro",label:"📋 Libro de Remuneraciones"}].map(v=>(
-            <button key={v.key} onClick={()=>setVistaRem(v.key)} style={{background:vistaRem===v.key?C.accent:C.surface,color:vistaRem===v.key?"#fff":C.textMuted,border:`1px solid ${vistaRem===v.key?C.accent:C.border}`,borderRadius:6,padding:"7px 16px",fontSize:12,cursor:"pointer",fontWeight:vistaRem===v.key?600:400}}>{v.label}</button>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {[{key:"calculadora",label:"💰 Calculadora"},{key:"libro",label:"📋 Libro"},{key:"parametros",label:"⚙️ Parámetros"}].map(v=>(
+            <button key={v.key} onClick={()=>setVistaRem(v.key)} style={{background:vistaRem===v.key?C.accent:C.surface,color:vistaRem===v.key?"#fff":C.textMuted,border:`1px solid ${vistaRem===v.key?C.accent:C.border}`,borderRadius:6,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:vistaRem===v.key?600:400}}>{v.label}</button>
           ))}
         </div>
       </div>
 
-      {vistaRem==="libro" && <LibroRemuneraciones data={data}/>}
+      {vistaRem==="libro"      && <LibroRemuneraciones data={data}/>}
+      {vistaRem==="parametros" && <ParametrosPanel data={data} update={update} insert={insert}/>}
       {vistaRem==="calculadora" && <>
 
       {!params && <AlertBanner type="warning" message="No se encontraron parámetros legales (UF, UTM, IMM). Ejecuta el SQL de remuneraciones en Supabase." />}
@@ -947,10 +1104,20 @@ function Remuneraciones({ data, saveRem }) {
               <FL label="Otros haberes ($)"><input type="number" min={0} style={INP} value={otrosH} onChange={e => setOtrosH(Number(e.target.value))} /></FL>
               <FL label="Otros descuentos ($)"><input type="number" min={0} style={INP} value={otrosD} onChange={e => setOtrosD(Number(e.target.value))} /></FL>
             </div>
+            {/* Ausencias */}
+            <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:6,padding:"10px 12px"}}>
+              <p style={{color:C.yellow,fontWeight:600,fontSize:11,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>Ausencias del mes</p>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <FL label="Licencia médica (días)"><input type="number" min={0} max={30} style={INP} value={diasLicencia} onChange={e=>setDiasLicencia(Number(e.target.value))}/></FL>
+                <FL label="Permiso sin goce (días)"><input type="number" min={0} max={30} style={INP} value={diasPermisoSG} onChange={e=>setDiasPermisoSG(Number(e.target.value))}/></FL>
+                <FL label="Vacaciones (días)"><input type="number" min={0} max={30} style={INP} value={diasVacaciones} onChange={e=>setDiasVacaciones(Number(e.target.value))}/></FL>
+                <FL label="Inasistencia injust. (días)"><input type="number" min={0} max={30} style={INP} value={diasInasistencia} onChange={e=>setDiasInasistencia(Number(e.target.value))}/></FL>
+              </div>
+            </div>
             {params && (
               <div style={{ background: C.accentBg, border: "1px solid #bfdbfe", borderRadius: 6, padding: "8px 12px", fontSize: 11 }}>
                 <p style={{ color: C.accentText }}><b>UF:</b> {clp(params.uf)} · <b>UTM:</b> {clp(params.utm)} · <b>IMM:</b> {clp(params.imm)}</p>
-                <p style={{ color: C.accentText }}><b>Período:</b> {params.periodo}</p>
+                <p style={{ color: C.accentText }}><b>Tope AFP:</b> {params.tope_imponible_uf} UF · <b>Mutualidad:</b> {((params.mutualidad||0.0093)*100).toFixed(2)}% · <b>Aporte Patronal:</b> {((params.aporte_patronal||0.01)*100).toFixed(1)}%</p>
               </div>
             )}
             <PrimaryBtn onClick={calcular} color={C.accent} disabled={!tId}>⚡ Calcular liquidación</PrimaryBtn>
@@ -978,7 +1145,12 @@ function Remuneraciones({ data, saveRem }) {
                   <p style={{ color: C.text, fontSize: 12 }}><b>Trabajador/a:</b> {trabajador?.nombre} · <b>RUT:</b> {trabajador?.rut || "—"}</p>
                   <p style={{ color: C.text, fontSize: 12 }}><b>Cargo:</b> {trabajador?.cargo} · <b>Contrato:</b> {trabajador?.tipo_contrato} · <b>Período:</b> {periodo}</p>
                   {res.descripcion&&<p style={{ color: C.text, fontSize: 12 }}><b>Instituciones:</b> {res.descripcion}</p>}
-                  <p style={{ color: C.text, fontSize: 12 }}><b>Días trabajados:</b> {res.dias_trabajados} · <b>AFP:</b> {res.afp} · <b>Salud:</b> {trabajador?.salud}</p>
+                  {(res.dias_licencia_medica>0||res.dias_permiso_sin_goce>0||res.dias_vacaciones>0||res.dias_inasistencia>0)&&(
+                    <p style={{ color: C.yellow, fontSize: 12 }}>
+                      <b>Ausencias:</b>{res.dias_licencia_medica>0?` Licencia médica: ${res.dias_licencia_medica}d`:''}{res.dias_permiso_sin_goce>0?` · Permiso sin goce: ${res.dias_permiso_sin_goce}d`:''}{res.dias_vacaciones>0?` · Vacaciones: ${res.dias_vacaciones}d`:''}{res.dias_inasistencia>0?` · Inasistencia: ${res.dias_inasistencia}d`:''}
+                    </p>
+                  )}
+                  <p style={{ color: C.text, fontSize: 12 }}><b>Días trabajados:</b> {res.dias_trabajados} · <b>AFP:</b> {trabajador?.es_pensionado?"PENSIONADO - Exento":res.afp} · <b>Salud:</b> {trabajador?.salud}</p>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -1006,9 +1178,10 @@ function Remuneraciones({ data, saveRem }) {
                     <p style={{ fontWeight: 700, fontSize: 12, color: C.red, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Descuentos legales</p>
                     <table style={{ width: "100%" }}>
                       <tbody>
-                        <SlipRow label={`AFP ${res.afp} (${pct(res.tasa_afp)})`} value={clp(res.cotiz_afp)} />
+                        <SlipRow label={trabajador?.es_pensionado?"AFP — PENSIONADO (Exento)":(`AFP ${res.afp} (${pct(res.tasa_afp)})`)} value={trabajador?.es_pensionado?"$0":clp(res.cotiz_afp)} />
                         <SlipRow label="Salud (7.00%)" value={clp(res.cotiz_salud)} />
-                        <SlipRow label="Seguro Cesantía trab. (0.60%)" value={clp(res.ces_trabajador)} />
+                        <SlipRow label={`Seg. Cesantía trab. (${pct(res.ces_trab_tasa||0)})`} value={res.ces_trab_tasa>0?clp(res.ces_trabajador):"$0 — Plazo Fijo"} />
+                        {res.iusc>0&&<SlipRow label="IUSC (Imp. Único 2da Cat.)" value={clp(res.iusc)} />}
                         {res.otros_descuentos > 0 && <SlipRow label="Otros descuentos" value={clp(res.otros_descuentos)} />}
                         <SlipRow label="TOTAL DESCUENTOS" value={clp(res.total_descuentos)} bold color={C.red} divider />
                       </tbody>
@@ -1029,7 +1202,9 @@ function Remuneraciones({ data, saveRem }) {
                     <tbody>
                       <SlipRow label="Total haberes" value={clp(res.total_haberes)} />
                       <SlipRow label={`SIS ${res.afp} (${pct(tasas.find(a=>a.nombre===res.afp)?.sis||0)})`} value={clp(res.sis)} />
-                      <SlipRow label="Seguro Cesantía empl. (2.40%)" value={clp(res.ces_empleador)} />
+                      <SlipRow label={`Seg. Cesantía emp. (${pct(res.ces_emp_tasa||0)})`} value={clp(res.ces_empleador)} />
+                      <SlipRow label="Mutualidad Ley 16.744 (0.93%)" value={clp(res.mutualidad_valor)} />
+                      <SlipRow label="Aporte Patronal Reforma 2025 (1%)" value={clp(res.aporte_patronal_valor)} />
                       <SlipRow label="COSTO TOTAL EMPRESA" value={clp(res.costo_empresa)} bold color={C.purple} divider />
                     </tbody>
                   </table>
