@@ -630,7 +630,8 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
     dias_trabajados=30, horas_extra=0, otros_haberes=0, otros_descuentos=0,
     contrato_id, periodo, descripcion='',
     dias_licencia_medica=0, dias_permiso_sin_goce=0,
-    dias_vacaciones=0, dias_inasistencia=0
+    dias_vacaciones=0, dias_inasistencia=0,
+    dias_mes=30
   } = input;
 
   const esPensionado  = trabajador.es_pensionado || false;
@@ -638,9 +639,15 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
   const afpRate       = tasas.find(a=>a.nombre===trabajador.afp)||{tasa_trabajador:0,sis:0};
   const utm           = params.utm || 68034;
 
-  // ── Días efectivos ─────────────────────────────────────────
+  // ── Días efectivos (base legal 30 días — Código del Trabajo) ──
+  // En meses de 31 días: 1 ausencia no descuenta (día extra del calendario)
+  // En meses de 28/29 días: el trabajador igual cobra sobre base 30
+  const diasExtra     = Math.max(0, (dias_mes||30) - 30); // días extra del calendario (ej: 1 en enero)
+  const totalAusencias= (dias_licencia_medica||0)+(dias_permiso_sin_goce||0)+(dias_inasistencia||0);
+  const ausenciasEfectivas = Math.max(0, totalAusencias - diasExtra); // se absorben los días extra
   const diasSinPago   = (dias_permiso_sin_goce||0) + (dias_inasistencia||0);
-  const diasPagados   = Math.min(30, Math.max(0, (dias_trabajados||30) - diasSinPago + (dias_vacaciones||0)));
+  const diasSinPagoEfectivos = Math.max(0, diasSinPago - diasExtra);
+  const diasPagados   = Math.min(30, Math.max(0, (dias_trabajados||30) - diasSinPagoEfectivos + (dias_vacaciones||0)));
 
   // ── Haberes ────────────────────────────────────────────────
   const sueldo_prop   = Math.round((trabajador.sueldo_base||0) * diasPagados / 30);
@@ -1037,6 +1044,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
   const [diasPermisoSG, setDiasPermisoSG] = useState(0);
   const [diasVacaciones, setDiasVacaciones] = useState(0);
   const [diasInasistencia, setDiasInasistencia] = useState(0);
+  const [diasMes, setDiasMes] = useState(30);
   const [res, setRes] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1058,6 +1066,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
       dias_permiso_sin_goce: diasPermisoSG,
       dias_vacaciones: diasVacaciones,
       dias_inasistencia: diasInasistencia,
+      dias_mes: diasMes,
     }));
     setSaved(false);
   };
@@ -1130,6 +1139,14 @@ function Remuneraciones({ data, saveRem, insert, update }) {
             <FL label="Instituciones / Descripción">
               <input style={INP} value={descripcion} onChange={e => setDescripcion(e.target.value)} placeholder="Ej: Seremi Transportes  |  Seremi MA + Seremi Ciencias" />
             </FL>
+            <FL label="Días del mes calendario">
+              <select style={INP} value={diasMes} onChange={e=>setDiasMes(Number(e.target.value))}>
+                <option value={28}>28 días (Febrero año normal)</option>
+                <option value={29}>29 días (Febrero año bisiesto)</option>
+                <option value={30}>30 días (Abril, Junio, Septiembre, Noviembre)</option>
+                <option value={31}>31 días (Enero, Marzo, Mayo, Julio, Agosto, Octubre, Diciembre)</option>
+              </select>
+            </FL>
             <FL label={`Días trabajados: ${dias}`}>
               <input type="range" min={1} max={30} value={dias} onChange={e => setDias(Number(e.target.value))} style={{ width: "100%", accentColor: C.accent }} />
             </FL>
@@ -1148,6 +1165,39 @@ function Remuneraciones({ data, saveRem, insert, update }) {
                 <FL label="Inasistencia injust. (días)"><input type="number" min={0} max={30} style={INP} value={diasInasistencia} onChange={e=>setDiasInasistencia(Number(e.target.value))}/></FL>
               </div>
             </div>
+            {/* Validador 30 días — base legal Código del Trabajo Chile */}
+            {(()=>{
+              const totalAus  = diasLicencia+diasPermisoSG+diasVacaciones+diasInasistencia;
+              const totalDias = dias + totalAus;
+              const diasExtra = Math.max(0, diasMes - 30);
+              const ausEfect  = Math.max(0, totalAus - diasExtra);
+              const diff      = 30 - (dias + ausEfect);
+
+              // Mes 31 días con 1 ausencia → sueldo completo
+              if (diasMes===31 && totalDias===31 && totalAus<=1) return (
+                <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:6,padding:"8px 12px",fontSize:12}}>
+                  <span style={{color:"#15803d",fontWeight:700}}>✓ Sueldo completo</span>
+                  <p style={{color:"#15803d",margin:"3px 0 0",fontSize:11}}>Mes de 31 días — la ausencia queda absorbida por el día extra del calendario. Base legal: 30 días.</p>
+                </div>
+              );
+              if (dias+ausEfect===30) return (
+                <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:6,padding:"8px 12px",fontSize:12,display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{color:"#15803d",fontWeight:700}}>✓</span>
+                  <span style={{color:"#15803d",fontWeight:600}}>Total: 30/30 días — correcto</span>
+                </div>
+              );
+              if (dias+ausEfect>30) return (
+                <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:6,padding:"8px 12px",fontSize:12}}>
+                  <span style={{color:C.yellow,fontWeight:700}}>⚠️ Revisa los días ingresados</span>
+                  <p style={{color:C.yellow,margin:"4px 0 0",fontSize:11}}>La suma supera la base de 30 días legales.</p>
+                </div>
+              );
+              return (
+                <div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:6,padding:"8px 12px",fontSize:12}}>
+                  <span style={{color:"#b45309",fontWeight:600}}>📅 Faltan {diff} día{diff!==1?"s":""} por clasificar (trabajados o ausencia)</span>
+                </div>
+              );
+            })()}
             {params && (
               <div style={{ background: C.accentBg, border: "1px solid #bfdbfe", borderRadius: 6, padding: "8px 12px", fontSize: 11 }}>
                 <p style={{ color: C.accentText }}><b>UF:</b> {clp(params.uf)} · <b>UTM:</b> {clp(params.utm)} · <b>IMM:</b> {clp(params.imm)}</p>
