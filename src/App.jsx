@@ -59,6 +59,7 @@ const TABS = [
   {key:"contratos",      label:"Contratos",      icon:Icon.contratos},
   {key:"dependencias",   label:"Dependencias",   icon:Icon.dependencias},
   {key:"trabajadores",   label:"Trabajadores",   icon:Icon.trabajadores},
+  {key:"asistencia",     label:"Asistencia",     icon:Icon.checklist},
   {key:"checklist",      label:"Checklist",      icon:Icon.checklist},
   {key:"incidencias",    label:"Incidencias",    icon:Icon.incidencias},
   {key:"supervisiones",  label:"Supervisiones",  icon:Icon.supervisiones},
@@ -170,7 +171,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -475,6 +476,263 @@ function Trabajadores({data,insert,update,contratoId}){
 }
 
 /* ─── Checklist ─────────────────────────────────────────────── */
+/* ─── Helper funciones tiempo ────────────────────────────────── */
+function tToMin(t){if(!t)return null;const[h,m]=(t||"").split(":").map(Number);return h*60+m;}
+function minToT(m){return`${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;}
+function horasNet(entrada,salida,colMin){
+  const e=tToMin(entrada),s=tToMin(salida);
+  if(!e||!s||s<=e)return 0;
+  return Math.max(0,((s-e)-colMin)/60);
+}
+
+/* ─── Asistencia ─────────────────────────────────────────────── */
+function Asistencia({data,contratoId,insert,update}){
+  const hoy=new Date().toISOString().slice(0,10);
+  const [vista,setVista]=useState("registrar");
+  const [tId,setTId]=useState("");
+  const [cId,setCId]=useState(contratoId||"");
+  const [fecha,setFecha]=useState(hoy);
+  const [esFeriado,setEsFeriado]=useState(false);
+  const [entrada,setEntrada]=useState("");
+  const [colSal,setColSal]=useState("");
+  const [colReg,setColReg]=useState("");
+  const [salida,setSalida]=useState("");
+  const [obs,setObs]=useState("");
+  const [saving,setSaving]=useState(false);
+  const [filtroMes,setFiltroMes]=useState(hoy.slice(0,7));
+  const [filtroTrab,setFiltroTrab]=useState("");
+
+  const trabajador = data.trabajadores.find(t=>t.id===tId);
+
+  // Horario programado para este trabajador+contrato+día
+  const diaSemana = fecha ? new Date(fecha+"T12:00:00").getDay() : -1;
+  const horario = (data.horarios||[]).find(h=>
+    h.trabajador_id===tId && h.contrato_id===cId &&
+    h.activo && h.dias_semana.split(",").map(Number).includes(diaSemana)
+  );
+
+  // Cálculos en tiempo real
+  const colMinutos = colSal&&colReg ? Math.max(0,tToMin(colReg)-tToMin(colSal)) : (horario?.colacion_minutos||0);
+  const horasTrabajadas = horasNet(entrada,salida,colMinutos);
+  const horasContratadas = horario ? horasNet(horario.hora_entrada,horario.hora_salida,horario.colacion_minutos) : 0;
+  const horasExtra = Math.max(0, horasTrabajadas - horasContratadas);
+  const atrasoMin = entrada && horario
+    ? Math.max(0, tToMin(entrada) - tToMin(horario.hora_entrada))
+    : 0;
+  const estado = atrasoMin>0?"ATRASO":"PRESENTE";
+
+  // Contratos del trabajador seleccionado
+  const contratosT = tId
+    ? (data.asignaciones||[]).filter(a=>a.trabajador_id===tId&&a.activo)
+        .map(a=>data.contratos.find(c=>c.id===a.contrato_id)).filter(Boolean)
+    : [];
+
+  const guardar = async () => {
+    if(!tId||!cId||!fecha||!entrada||!salida){alert("Completa todos los campos obligatorios.");return;}
+    setSaving(true);
+    const id=`AS${tId}${fecha.replace(/-/g,"")}${cId}`;
+    await insert("asistencia",{
+      id, trabajador_id:tId, contrato_id:cId, fecha,
+      hora_entrada:entrada, hora_colacion_salida:colSal||null,
+      hora_colacion_regreso:colReg||null, hora_salida:salida,
+      atraso_minutos:atrasoMin, horas_trabajadas:Math.round(horasTrabajadas*100)/100,
+      horas_extra:Math.round(horasExtra*100)/100,
+      es_feriado:esFeriado, estado, observacion:obs,
+    });
+    setSaving(false);
+    setEntrada("");setColSal("");setColReg("");setSalida("");setObs("");
+  };
+
+  // Historial filtrado
+  const historial = (data.asistencia||[])
+    .filter(a=>(!filtroMes||a.fecha.slice(0,7)===filtroMes)&&(!filtroTrab||a.trabajador_id===filtroTrab))
+    .sort((a,b)=>b.fecha.localeCompare(a.fecha));
+
+  // Resumen mensual
+  const resumen = data.trabajadores
+    .filter(t=>["TR001","TR002","TR003","TR004","TR005"].includes(t.id))
+    .map(t=>{
+      const recs=(data.asistencia||[]).filter(a=>a.trabajador_id===t.id&&a.fecha.slice(0,7)===filtroMes);
+      return {
+        nombre:t.nombre,
+        dias:recs.length,
+        horas:recs.reduce((s,r)=>s+(r.horas_trabajadas||0),0).toFixed(1),
+        extra:recs.reduce((s,r)=>s+(r.horas_extra||0),0).toFixed(1),
+        atrasos:recs.filter(r=>r.atraso_minutos>0).length,
+        minAtraso:recs.reduce((s,r)=>s+(r.atraso_minutos||0),0),
+        feriados:recs.filter(r=>r.es_feriado).length,
+      };
+    });
+
+  const DIAS=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:8}}>
+        <div>
+          <h1 style={{color:C.text,fontSize:18,fontWeight:600,margin:"0 0 3px"}}>Control de Asistencia</h1>
+          <p style={{color:C.textMuted,fontSize:12,margin:0}}>Registro diario · Atrasos · Horas extra · Feriados</p>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {[{k:"registrar",l:"📝 Registrar"},{k:"historial",l:"📋 Historial"},{k:"resumen",l:"📊 Resumen mensual"}].map(v=>(
+            <button key={v.k} onClick={()=>setVista(v.k)} style={{background:vista===v.k?C.accent:C.surface,color:vista===v.k?"#fff":C.textMuted,border:`1px solid ${vista===v.k?C.accent:C.border}`,borderRadius:6,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:vista===v.k?600:400}}>{v.l}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── REGISTRAR ── */}
+      {vista==="registrar"&&(
+        <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:20,alignItems:"start"}}>
+          <Panel title="Registrar asistencia">
+            <FL label="Trabajador(a)">
+              <select style={INP} value={tId} onChange={e=>{setTId(e.target.value);setCId("");}}>
+                <option value="">— Seleccionar —</option>
+                {data.trabajadores.filter(t=>t.activo&&["TR001","TR003","TR004","TR005"].includes(t.id)).map(t=>(
+                  <option key={t.id} value={t.id}>{t.nombre}</option>
+                ))}
+              </select>
+            </FL>
+            {tId&&<FL label="Contrato">
+              <select style={INP} value={cId} onChange={e=>setCId(e.target.value)}>
+                <option value="">— Seleccionar —</option>
+                {contratosT.map(c=><option key={c.id} value={c.id}>{c.cliente}</option>)}
+              </select>
+            </FL>}
+            <FL label="Fecha">
+              <input type="date" style={INP} value={fecha} onChange={e=>setFecha(e.target.value)}/>
+            </FL>
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0"}}>
+              <input type="checkbox" id="feriado" checked={esFeriado} onChange={e=>setEsFeriado(e.target.checked)} style={{width:16,height:16,accentColor:C.accent}}/>
+              <label htmlFor="feriado" style={{color:C.text,fontSize:13,cursor:"pointer"}}>¿Día feriado? (se trabaja igual)</label>
+            </div>
+
+            {/* Horario programado */}
+            {horario&&(
+              <div style={{background:C.accentBg,border:"1px solid #bfdbfe",borderRadius:6,padding:"8px 12px",marginBottom:8}}>
+                <p style={{color:C.accentText,fontSize:11,fontWeight:600}}>📅 {DIAS[diaSemana]} — Horario programado</p>
+                <p style={{color:C.accentText,fontSize:12}}>{horario.hora_entrada} — {horario.hora_salida} · Colación: {horario.colacion_minutos} min</p>
+              </div>
+            )}
+            {tId&&cId&&!horario&&(
+              <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:6,padding:"8px 12px",marginBottom:8}}>
+                <p style={{color:"#c2410c",fontSize:12}}>⚠️ No hay horario programado para este trabajador en este contrato el {DIAS[diaSemana]}.</p>
+              </div>
+            )}
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <FL label="Hora entrada *"><input type="time" style={INP} value={entrada} onChange={e=>setEntrada(e.target.value)}/></FL>
+              <FL label="Hora salida *"><input type="time" style={INP} value={salida} onChange={e=>setSalida(e.target.value)}/></FL>
+              <FL label="Salida colación"><input type="time" style={INP} value={colSal} onChange={e=>setColSal(e.target.value)}/></FL>
+              <FL label="Regreso colación"><input type="time" style={INP} value={colReg} onChange={e=>setColReg(e.target.value)}/></FL>
+            </div>
+            <FL label="Observación (opcional)">
+              <input style={INP} value={obs} onChange={e=>setObs(e.target.value)} placeholder="Ej: llegó tarde por tráfico"/>
+            </FL>
+            <PrimaryBtn onClick={guardar} color={C.accent} disabled={saving||!tId||!cId||!entrada||!salida}>
+              {saving?"Guardando...":"💾 Guardar asistencia"}
+            </PrimaryBtn>
+          </Panel>
+
+          {/* Panel resumen en tiempo real */}
+          <Panel title={entrada&&salida?"Resumen del registro":"Información del turno"}>
+            {trabajador&&(
+              <div style={{marginBottom:16,padding:"10px 12px",background:C.surfaceAlt,borderRadius:6,border:`1px solid ${C.border}`}}>
+                <p style={{fontWeight:600,color:C.text,marginBottom:2}}>{trabajador.nombre}</p>
+                <p style={{color:C.textMuted,fontSize:12}}>{trabajador.cargo} · RUT: {trabajador.rut||"—"}</p>
+              </div>
+            )}
+            {horario&&!entrada&&(
+              <div>
+                <p style={{color:C.textMuted,fontSize:12,marginBottom:12}}>Ingresa las horas para ver el cálculo.</p>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                  <KPICard label="Entrada programada" value={horario.hora_entrada} color={C.accent}/>
+                  <KPICard label="Salida programada"  value={horario.hora_salida}  color={C.accent}/>
+                  <KPICard label="Colación" value={`${horario.colacion_minutos} min`} color={C.textMuted}/>
+                  <KPICard label="Horas contratadas" value={`${horasContratadas.toFixed(1)} hrs`} color={C.green}/>
+                </div>
+              </div>
+            )}
+            {entrada&&salida&&(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                <KPICard label="Horas trabajadas" value={`${horasTrabajadas.toFixed(1)} hrs`} color={C.green}/>
+                <KPICard label="Horas contratadas" value={`${horasContratadas.toFixed(1)} hrs`} color={C.accent}/>
+                <KPICard label="Horas extra" value={horasExtra>0?`+${horasExtra.toFixed(1)} hrs`:"0"} color={horasExtra>0?C.yellow:C.textMuted}/>
+                <KPICard label="Atraso" value={atrasoMin>0?`${atrasoMin} min`:"Sin atraso"} color={atrasoMin>0?C.red:C.green}/>
+                {esFeriado&&<KPICard label="Feriado trabajado" value="✓" color={C.purple}/>}
+              </div>
+            )}
+            {atrasoMin>0&&(
+              <div style={{marginTop:12,background:C.redBg,border:`1px solid ${C.redBorder}`,borderRadius:6,padding:"10px 12px"}}>
+                <p style={{color:C.red,fontWeight:600,fontSize:13}}>⚠️ Atraso detectado: {atrasoMin} minutos</p>
+                <p style={{color:C.red,fontSize:12}}>Programado: {horario?.hora_entrada} · Registrado: {entrada}</p>
+              </div>
+            )}
+            {horasExtra>0&&(
+              <div style={{marginTop:12,background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:6,padding:"10px 12px"}}>
+                <p style={{color:C.yellow,fontWeight:600,fontSize:13}}>⏱ Horas extra: {horasExtra.toFixed(1)} horas</p>
+                <p style={{color:C.yellow,fontSize:12}}>Se registran para liquidación mensual.</p>
+              </div>
+            )}
+          </Panel>
+        </div>
+      )}
+
+      {/* ── HISTORIAL ── */}
+      {vista==="historial"&&(
+        <Panel title="Historial de asistencia" noPad>
+          <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:12,flexWrap:"wrap"}}>
+            <FL label="Mes"><input type="month" style={{...INP,width:140}} value={filtroMes} onChange={e=>setFiltroMes(e.target.value)}/></FL>
+            <FL label="Trabajador">
+              <select style={{...INP,width:200}} value={filtroTrab} onChange={e=>setFiltroTrab(e.target.value)}>
+                <option value="">Todos</option>
+                {data.trabajadores.filter(t=>t.activo).map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}
+              </select>
+            </FL>
+          </div>
+          <DataTable
+            cols={[
+              {key:"fecha",  label:"Fecha",     render:r=><span style={{fontWeight:500}}>{r.fecha} {DIAS[new Date(r.fecha+"T12:00:00").getDay()]}{r.es_feriado?" 🎉":""}</span>},
+              {key:"trab",   label:"Trabajador", render:r=><span>{data.trabajadores.find(t=>t.id===r.trabajador_id)?.nombre||"—"}</span>},
+              {key:"cont",   label:"Contrato",   render:r=><span style={{color:C.textMuted,fontSize:12}}>{data.contratos.find(c=>c.id===r.contrato_id)?.cliente||"—"}</span>},
+              {key:"ent",    label:"Entrada",    render:r=><span>{r.hora_entrada||"—"}</span>},
+              {key:"sal",    label:"Salida",     render:r=><span>{r.hora_salida||"—"}</span>},
+              {key:"horas",  label:"Horas",      render:r=><span style={{color:C.green,fontWeight:500}}>{r.horas_trabajadas}h</span>},
+              {key:"extra",  label:"Extra",      render:r=>r.horas_extra>0?<Tag text={`+${r.horas_extra}h`} scheme={{bg:C.yellowBg,text:C.yellow,border:C.yellowBorder}}/>:<span style={{color:C.textMuted}}>—</span>},
+              {key:"atraso", label:"Atraso",     render:r=>r.atraso_minutos>0?<Tag text={`${r.atraso_minutos} min`} scheme={{bg:C.redBg,text:C.red,border:C.redBorder}}/>:<Tag text="✓" scheme={{bg:"#f0fdf4",text:"#15803d",border:"#86efac"}}/>},
+              {key:"obs",    label:"Obs.",       render:r=><span style={{color:C.textMuted,fontSize:11}}>{r.observacion||""}</span>},
+            ]}
+            rows={historial}
+          />
+          {!historial.length&&<div style={{padding:"30px",textAlign:"center",color:C.textMuted}}>Sin registros para el período seleccionado</div>}
+        </Panel>
+      )}
+
+      {/* ── RESUMEN MENSUAL ── */}
+      {vista==="resumen"&&(
+        <div>
+          <div style={{marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+            <FL label="Período"><input type="month" style={{...INP,width:140}} value={filtroMes} onChange={e=>setFiltroMes(e.target.value)}/></FL>
+          </div>
+          <Panel title={`Resumen asistencia — ${filtroMes}`} noPad>
+            <DataTable
+              cols={[
+                {key:"nombre",  label:"Trabajador",       render:r=><span style={{fontWeight:500}}>{r.nombre}</span>},
+                {key:"dias",    label:"Días registrados", render:r=><span style={{color:C.accent,fontWeight:600}}>{r.dias}</span>},
+                {key:"horas",   label:"Total horas",      render:r=><span style={{color:C.green,fontWeight:500}}>{r.horas}h</span>},
+                {key:"extra",   label:"Horas extra",      render:r=>Number(r.extra)>0?<Tag text={`+${r.extra}h`} scheme={{bg:C.yellowBg,text:C.yellow,border:C.yellowBorder}}/>:<span style={{color:C.textMuted}}>—</span>},
+                {key:"atrasos", label:"Días c/atraso",    render:r=>r.atrasos>0?<Tag text={`${r.atrasos} días`} scheme={{bg:C.redBg,text:C.red,border:C.redBorder}}/>:<Tag text="Sin atrasos" scheme={{bg:"#f0fdf4",text:"#15803d",border:"#86efac"}}/>},
+                {key:"minAtr",  label:"Total min atraso", render:r=>r.minAtraso>0?<span style={{color:C.red}}>{r.minAtraso} min</span>:<span style={{color:C.textMuted}}>—</span>},
+                {key:"ferias",  label:"Feriados trabajados", render:r=>r.feriados>0?<Tag text={`${r.feriados}`} scheme={{bg:"#f3e8ff",text:"#7c3aed",border:"#d8b4fe"}}/>:<span style={{color:C.textMuted}}>—</span>},
+              ]}
+              rows={resumen}
+            />
+          </Panel>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Checklist({data,contratoId,insert}){
   const [filtro,setFiltro]=useState("TODAS");
   const [form,setForm]=useState(null);
@@ -1414,6 +1672,7 @@ export default function App(){
         {tab==="contratos"      &&<Contratos       data={data} insert={insert} update={update}/>}
         {tab==="dependencias"   &&<Dependencias    data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="trabajadores"   &&<Trabajadores    data={data} insert={insert} update={update} contratoId={contratoId}/>}
+        {tab==="asistencia"     &&<Asistencia      data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="checklist"      &&<Checklist       data={data} contratoId={contratoId} insert={insert}/>}
         {tab==="incidencias"    &&<Incidencias     data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="supervisiones"  &&<Supervisiones   data={data} contratoId={contratoId} insert={insert}/>}
