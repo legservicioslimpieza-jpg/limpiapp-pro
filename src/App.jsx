@@ -181,9 +181,9 @@ function useData(){
     if(!isConfigured){setData({});setLoading(false);return;}
     setLoading(true);
     try{
-      const res=await Promise.all(TABLES.map(t=>supabase.from(t).select("*").order("id")));
+      const res=await Promise.allSettled(TABLES.map(t=>supabase.from(t).select("*").order("id")));
       const d={};
-      TABLES.forEach((t,i)=>{d[t]=res[i].data||[];});
+      TABLES.forEach((t,i)=>{d[t]=res[i].status==="fulfilled"?(res[i].value.data||[]):[];});
       setData(d);setDbMode(true);
     }catch{setData({});}
     setLoading(false);
