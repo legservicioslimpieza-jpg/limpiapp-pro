@@ -1,4 +1,4 @@
-mport { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isConfigured } from "./supabase.js";
 
 /* ─── Paleta ERP corporativa ────────────────────────────────── */
@@ -991,7 +991,7 @@ function LibroRemuneraciones({ data }) {
   );
 }
 
-function Remuneraciones({ data, saveRem }) {
+function Remuneraciones({ data, saveRem, insert, update }) {
   const [vistaRem, setVistaRem] = useState("calculadora");
   const hoy = new Date();
   const periodoDefault = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}`;
@@ -1333,7 +1333,7 @@ export default function App(){
         {tab==="checklist"      &&<Checklist       data={data} contratoId={contratoId} insert={insert}/>}
         {tab==="incidencias"    &&<Incidencias     data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="supervisiones"  &&<Supervisiones   data={data} contratoId={contratoId} insert={insert}/>}
-        {tab==="remuneraciones" &&<Remuneraciones  data={data} saveRem={saveRem}/>}
+        {tab==="remuneraciones" &&<Remuneraciones  data={data} saveRem={saveRem} insert={insert} update={update}/>}
         {tab==="informes"       &&<InformesIA      data={data} contratoId={contratoId}/>}
       </div>
     </div>
