@@ -477,6 +477,23 @@ function Trabajadores({data,insert,update,contratoId}){
 }
 
 /* ─── Checklist ─────────────────────────────────────────────── */
+/* ─── Lightbox para fotos ─────────────────────────────────── */
+function Lightbox({ url, onClose }) {
+  useEffect(()=>{
+    const handler = e => { if(e.key==="Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  },[onClose]);
+  return(
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out"}}>
+      <div onClick={e=>e.stopPropagation()} style={{position:"relative",maxWidth:"95vw",maxHeight:"95vh"}}>
+        <img src={url} alt="Evidencia" style={{maxWidth:"90vw",maxHeight:"90vh",borderRadius:8,boxShadow:"0 0 60px rgba(0,0,0,0.8)"}}/>
+        <button onClick={onClose} style={{position:"absolute",top:-16,right:-16,background:"#fff",border:"none",borderRadius:"50%",width:32,height:32,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.4)"}}>×</button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── QR Components ──────────────────────────────────────────── */
 
 /* Modo QR — interfaz trabajador cuando escanea el QR */
@@ -509,17 +526,52 @@ function ModoQR({ depId, data, insert, loading }) {
     const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n;
   });
 
+  const [foto, setFoto] = useState(null);
+  const [fotoPreview, setFotoPreview] = useState(null);
+
+  const capturarFoto = async (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.src = url;
+    await new Promise(r=>img.onload=r);
+    const maxW=1024, scale=Math.min(1,maxW/img.width);
+    const canvas=document.createElement("canvas");
+    canvas.width=Math.round(img.width*scale);
+    canvas.height=Math.round(img.height*scale);
+    canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
+    const blob=await new Promise(r=>canvas.toBlob(r,"image/jpeg",0.75));
+    setFoto(blob); setFotoPreview(URL.createObjectURL(blob));
+    URL.revokeObjectURL(url);
+  };
+
+  const subirFoto = async (evId) => {
+    if(!foto) return null;
+    try {
+      const nombre=`${evId}.jpg`;
+      const { error } = await supabase.storage.from("evidencias-fotos").upload(nombre, foto, {contentType:"image/jpeg",upsert:true});
+      if(error) return null;
+      const { data } = supabase.storage.from("evidencias-fotos").getPublicUrl(nombre);
+      return data.publicUrl;
+    } catch { return null; }
+  };
+
   const registrar = async () => {
     if(!tId||marcadas.size===0){alert("Selecciona tu nombre y al menos una tarea completada.");return;}
     setEnviando(true);
     const ahora = new Date().toISOString();
+    let fotoUrl = null;
+    let primerEv = true;
     for(const chkId of marcadas){
+      const evId=`EV${Date.now()}${Math.random().toString(36).slice(2,6)}`;
+      if(primerEv && foto){ fotoUrl = await subirFoto(evId); primerEv=false; }
       await insert("evidencias",{
-        id:`EV${Date.now()}${Math.random().toString(36).slice(2,6)}`,
-        checklist_id:chkId, trabajador_id:tId,
+        id:evId, checklist_id:chkId, trabajador_id:tId,
         contrato_id:dep.contrato_id, fecha_hora:ahora,
         observacion:obs||"Registrado vía QR", cumplido:true,
         via_qr:true, latitud:gps?.lat||null, longitud:gps?.lng||null,
+        foto:fotoUrl,
       });
       await new Promise(r=>setTimeout(r,50));
     }
@@ -550,6 +602,8 @@ function ModoQR({ depId, data, insert, loading }) {
           </div>
           <div style={{color:"#94a3b8",fontSize:13}}>{marcadas.size} tarea{marcadas.size!==1?"s":""} registrada{marcadas.size!==1?"s":""}</div>
           {gps&&<div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📍 GPS registrado</div>}
+          {fotoPreview&&<img src={fotoPreview} alt="evidencia" style={{width:"100%",borderRadius:8,marginTop:8,maxHeight:140,objectFit:"cover"}}/>}
+          {foto&&<div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📷 Foto subida al servidor</div>}
         </div>
         <button style={{...btnG,maxWidth:420}} onClick={()=>{setConfirmado(false);setMarcadas(new Set());setObs('');}}>
           + Registrar otra tarea
@@ -604,6 +658,26 @@ function ModoQR({ depId, data, insert, loading }) {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Foto evidencia */}
+      <div style={card}>
+        <div style={{color:"#94a3b8",fontSize:13,marginBottom:8,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>📷 Foto de evidencia</div>
+        {!fotoPreview?(
+          <label style={{display:"block",background:"#0f172a",border:"2px dashed #374151",borderRadius:8,padding:"20px",textAlign:"center",cursor:"pointer"}}>
+            <div style={{color:"#94a3b8",fontSize:28,marginBottom:6}}>📷</div>
+            <div style={{color:"#94a3b8",fontSize:14}}>Tomar foto del área limpia</div>
+            <div style={{color:"#64748b",fontSize:11,marginTop:4}}>Recomendado para respaldo</div>
+            <input type="file" accept="image/*" capture="environment" onChange={capturarFoto} style={{display:"none"}}/>
+          </label>
+        ):(
+          <div style={{position:"relative"}}>
+            <img src={fotoPreview} alt="evidencia" style={{width:"100%",borderRadius:8,maxHeight:200,objectFit:"cover"}}/>
+            <button onClick={()=>{setFoto(null);setFotoPreview(null);}}
+              style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,0.7)",color:"#fff",border:"none",borderRadius:"50%",width:28,height:28,cursor:"pointer",fontSize:16}}>×</button>
+            <div style={{color:"#4ade80",fontSize:12,marginTop:6}}>✓ Foto lista para subir</div>
+          </div>
+        )}
       </div>
 
       {/* Observación */}
@@ -1010,14 +1084,15 @@ function Asistencia({data,contratoId,insert,update}){
 
 function Checklist({data,contratoId,insert}){
   const [filtro,setFiltro]=useState("TODAS");
+  const [lightboxUrl,setLightboxUrl]=useState(null);
   const [form,setForm]=useState(null);
   const hoy=new Date().toISOString().slice(0,10);
   const chks=contratoId?data.checklist.filter(c=>c.contrato_id===contratoId):data.checklist;
   const rows=filtro==="TODAS"?chks:chks.filter(c=>c.periodicidad===filtro);
   const marcar=async(chkId,cId)=>{const asig=(data.asignaciones||[]).filter(a=>a.contrato_id===cId&&a.activo);const tId=asig.map(a=>a.trabajador_id).find(id=>{const t=data.trabajadores.find(w=>w.id===id);return t&&t.cargo==="Auxiliar Aseo";}) || data.trabajadores.find(t=>t.cargo==="Auxiliar Aseo")?.id||data.trabajadores[0]?.id;await insert("evidencias",{id:`EV${Date.now()}`,checklist_id:chkId,trabajador_id:tId,contrato_id:cId,fecha_hora:new Date().toISOString(),observacion:"",cumplido:true});};
-  const openNew=()=>{const deps=contratoId?data.dependencias.filter(d=>d.contrato_id===contratoId):data.dependencias;setForm({id:genId("CHK"),dep_id:deps[0]?.id||"",contrato_id:contratoId||data.contratos[0]?.id||"",tarea:"",periodicidad:"DIARIA",obligatoria:true,activa:true});};
+  const openNew=()=>{const deps=contratoId?data.dependencias.filter(d=>d.contrato_id===contratoId):data.dependencias;setForm({id:genId("CHK"),dep_id:deps[0]?.id||"",contrato_id:contratoId||data.contratos[0]?.id||"",tarea:"",periodicidad:"DIARIA",obligatoria:true,activa:true});};  
   const save=async()=>{if(!form.tarea.trim())return;const ok=await insert("checklist",form);if(ok)setForm(null);};
-  const completadas=chks.filter(c=>c.periodicidad==="DIARIA"&&data.evidencias.some(e=>e.checklist_id===c.id&&e.fecha_hora?.startsWith(hoy)));
+  const completadas=chks.filter(c=>data.evidencias.some(e=>e.checklist_id===c.id&&e.fecha_hora?.startsWith(hoy)));
   return(
     <div>
       <PageHeader title="Checklist de tareas" subtitle={`${chks.length} tareas · ${completadas.length} completadas hoy`}
@@ -1041,10 +1116,25 @@ function Checklist({data,contratoId,insert}){
             {key:"ctt",label:"Contrato",render:r=>{const c=data.contratos.find(ct=>ct.id===r.contrato_id);return<span style={{color:C.textMuted,fontSize:12}}>{c?.cliente?.split(" ").slice(0,2).join(" ")}</span>;}},
             {key:"dep",label:"Área",render:r=>{const d=data.dependencias.find(dep=>dep.id===r.dep_id);return<span style={{color:C.textMuted}}>{d?.nombre||"—"}</span>;}},
             {key:"per",label:"Frecuencia",render:r=><Tag text={r.periodicidad} scheme={PTAG[r.periodicidad]}/>},
-            {key:"ev",label:"Hoy",render:r=>{
-              if(r.periodicidad!=="DIARIA")return<span style={{color:C.textDim}}>—</span>;
+            {key:"ultima",label:"Última vez",render:r=>{
+              const evs=data.evidencias.filter(e=>e.checklist_id===r.id).sort((a,b)=>b.fecha_hora?.localeCompare(a.fecha_hora));
+              if(!evs.length)return<span style={{color:C.textMuted,fontSize:11}}>Nunca</span>;
+              const d=new Date(evs[0].fecha_hora);
+              const dias=Math.floor((Date.now()-d)/86400000);
+              const label=dias===0?"Hoy":dias===1?"Ayer":`Hace ${dias}d`;
+              const color=dias===0?C.green:dias<=3?C.yellow:C.red;
+              const trab=data.trabajadores.find(t=>t.id===evs[0].trabajador_id);
+              return<div style={{display:"flex",alignItems:"center",gap:6}}>
+                <span style={{color,fontSize:11,fontWeight:500}}>{label}</span>
+                {evs[0].via_qr&&<span title="Registrado vía QR" style={{fontSize:11}}>📱</span>}
+                {evs[0].foto&&<span title={`Ver foto — ${trab?.nombre||""}`} onClick={()=>setLightboxUrl(evs[0].foto)} style={{cursor:"pointer",fontSize:14}}>📷</span>}
+              </div>;
+            }},
+            {key:"ev",label:"Marcar",render:r=>{
               const n=data.evidencias.filter(e=>e.checklist_id===r.id&&e.fecha_hora?.startsWith(hoy)).length;
-              return n>0?<Tag text="✓ Hecho" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>:<button onClick={()=>marcar(r.id,r.contrato_id)} style={{background:C.accentBg,color:C.accent,border:"1px solid #bfdbfe",borderRadius:5,padding:"3px 10px",fontSize:11,cursor:"pointer",fontWeight:600}}>Marcar ✓</button>;
+              return n>0
+                ?<Tag text="✓ Hecho hoy" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>
+                :<button onClick={()=>marcar(r.id,r.contrato_id)} style={{background:C.accentBg,color:C.accent,border:"1px solid #bfdbfe",borderRadius:5,padding:"3px 10px",fontSize:11,cursor:"pointer",fontWeight:600}}>Marcar ✓</button>;
             }},
           ]}
           rows={rows}
@@ -1053,6 +1143,7 @@ function Checklist({data,contratoId,insert}){
       </Panel>
     </div>
   );
+  {lightboxUrl&&<Lightbox url={lightboxUrl} onClose={()=>setLightboxUrl(null)}/>}
 }
 
 /* ─── Incidencias ───────────────────────────────────────────── */
