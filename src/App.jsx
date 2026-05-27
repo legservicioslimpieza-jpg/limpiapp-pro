@@ -504,6 +504,8 @@ function ModoQR({ depId, data, insert, loading }) {
   const [confirmado, setConfirmado] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [obs, setObs] = useState('');
+  const [foto, setFoto] = useState(null);
+  const [fotoPreview, setFotoPreview] = useState(null);
 
   const dep = (data.dependencias||[]).find(d=>d.id===depId);
   const contrato = dep?(data.contratos||[]).find(c=>c.id===dep.contrato_id):null;
@@ -525,9 +527,6 @@ function ModoQR({ depId, data, insert, loading }) {
   const toggle = (id) => setMarcadas(prev=>{
     const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n;
   });
-
-  const [foto, setFoto] = useState(null);
-  const [fotoPreview, setFotoPreview] = useState(null);
 
   const capturarFoto = async (e) => {
     const file = e.target.files[0];
