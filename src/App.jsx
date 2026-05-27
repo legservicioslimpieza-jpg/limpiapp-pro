@@ -1140,8 +1140,8 @@ function Checklist({data,contratoId,insert}){
           empty="No hay tareas para este filtro"
         />
       </Panel>
+      {lightboxUrl&&<Lightbox url={lightboxUrl} onClose={()=>setLightboxUrl(null)}/>}
     </div>
-    {lightboxUrl&&<Lightbox url={lightboxUrl} onClose={()=>setLightboxUrl(null)}/>}
   );
 }
 
