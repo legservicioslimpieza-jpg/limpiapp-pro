@@ -59,6 +59,7 @@ const TABS = [
   {key:"contratos",      label:"Contratos",      icon:Icon.contratos},
   {key:"dependencias",   label:"Dependencias",   icon:Icon.dependencias},
   {key:"trabajadores",   label:"Trabajadores",   icon:Icon.trabajadores},
+  {key:"evidencias",     label:"Evidencias",     icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>},
   {key:"qr",             label:"QR Operacional", icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/></svg>},
   {key:"asistencia",     label:"Asistencia",     icon:Icon.checklist},
   {key:"checklist",      label:"Checklist",      icon:Icon.checklist},
@@ -706,6 +707,200 @@ function ModoQR({ depId, data, insert, loading }) {
 }
 
 /* Tab QR — panel administrador */
+/* ─── Módulo Evidencias ──────────────────────────────────────── */
+function TabEvidencias({ data, contratoId }) {
+  const hoy = new Date().toLocaleDateString("en-CA", {timeZone:"America/Santiago"});
+  const hace7 = new Date(Date.now()-7*86400000).toLocaleDateString("en-CA", {timeZone:"America/Santiago"});
+  const [desde, setDesde] = useState(hace7);
+  const [hasta, setHasta] = useState(hoy);
+  const [filtroT, setFiltroT] = useState("");
+  const [filtroC, setFiltroC] = useState(contratoId||"");
+  const [soloFoto, setSoloFoto] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
+
+  const evidencias = (data.evidencias||[])
+    .filter(e => {
+      const fechaE = new Date(e.fecha_hora).toLocaleDateString("en-CA",{timeZone:"America/Santiago"});
+      return fechaE >= desde && fechaE <= hasta
+        && (!filtroT || e.trabajador_id === filtroT)
+        && (!filtroC || e.contrato_id === filtroC)
+        && (!soloFoto || e.foto);
+    })
+    .sort((a,b) => b.fecha_hora.localeCompare(a.fecha_hora));
+
+  const getNombre = (id, arr, key="nombre") => arr.find(x=>x.id===id)?.[key]||"—";
+  const getTarea = (id) => {
+    const ch = (data.checklist||[]).find(c=>c.id===id);
+    if(!ch) return "—";
+    const dep = (data.dependencias||[]).find(d=>d.id===ch.dep_id);
+    return { tarea: ch.tarea, dep: dep?.nombre||"—", periodicidad: ch.periodicidad };
+  };
+
+  const imprimir = () => {
+    const filas = evidencias.map((e,i) => {
+      const t = getTarea(e.checklist_id);
+      const trab = (data.trabajadores||[]).find(x=>x.id===e.trabajador_id);
+      const cont = (data.contratos||[]).find(x=>x.id===e.contrato_id);
+      const fecha = new Date(e.fecha_hora).toLocaleString("es-CL",{timeZone:"America/Santiago",day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+      return `<tr>
+        <td>${i+1}</td>
+        <td>${fecha}</td>
+        <td>${trab?.nombre||"—"}</td>
+        <td>${cont?.cliente||"—"}</td>
+        <td>${t.dep}</td>
+        <td>${t.tarea}</td>
+        <td>${t.periodicidad}</td>
+        <td style="text-align:center">${e.via_qr?"📱 QR":"Manual"}</td>
+        <td style="text-align:center">${e.foto?`<img src="${e.foto}" style="width:60px;height:60px;object-fit:cover;border-radius:4px"/>`:""}</td>
+        <td style="font-size:10px;color:#666">${e.latitud?`${e.latitud},${e.longitud}`:"—"}</td>
+      </tr>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html><html><head><title>Evidencias LEG Servicios de Limpieza</title>
+    <style>
+      body{font-family:Arial;font-size:11px;margin:16px}
+      h2{color:#1e3a8a;margin-bottom:2px}
+      h3{color:#64748b;font-weight:normal;margin:0 0 12px}
+      table{width:100%;border-collapse:collapse;font-size:10px}
+      th{background:#1e3a8a;color:#fff;padding:5px 6px;text-align:left;font-size:10px}
+      td{padding:4px 6px;border-bottom:1px solid #e2e8f0;vertical-align:middle}
+      tr:nth-child(even){background:#f8fafc}
+      .resumen{background:#dbeafe;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px}
+      @media print{@page{size:landscape;margin:8mm}}
+    </style></head><body>
+    <h2>Registro de Evidencias — LimpiApp Pro</h2>
+    <h3>LEG Servicios de Limpieza EIRL · RUT 78.086.977-1</h3>
+    <div class="resumen">
+      <strong>Período:</strong> ${desde} al ${hasta} &nbsp;|&nbsp;
+      <strong>Total evidencias:</strong> ${evidencias.length} &nbsp;|&nbsp;
+      <strong>Con foto:</strong> ${evidencias.filter(e=>e.foto).length} &nbsp;|&nbsp;
+      <strong>Vía QR:</strong> ${evidencias.filter(e=>e.via_qr).length} &nbsp;|&nbsp;
+      <strong>Generado:</strong> ${new Date().toLocaleString("es-CL",{timeZone:"America/Santiago"})}
+    </div>
+    <table>
+      <thead><tr>
+        <th>N°</th><th>Fecha y hora</th><th>Trabajador</th><th>Contrato</th>
+        <th>Área</th><th>Tarea realizada</th><th>Frecuencia</th><th>Origen</th><th>Foto</th><th>GPS</th>
+      </tr></thead>
+      <tbody>${filas}</tbody>
+    </table>
+    <p style="margin-top:20px;color:#94a3b8;font-size:9px">
+      Documento generado automáticamente desde LimpiApp Pro · ${new Date().toLocaleString("es-CL",{timeZone:"America/Santiago"})}
+      · Este documento constituye respaldo oficial de las labores de aseo realizadas por LEG Servicios de Limpieza EIRL.
+    </p>
+    </body></html>`;
+
+    const w = window.open("","_blank");
+    w.document.write(html);
+    w.document.close();
+    setTimeout(()=>w.print(),1000);
+  };
+
+  return (
+    <div>
+      {lightbox&&<Lightbox url={lightbox} onClose={()=>setLightbox(null)}/>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:8}}>
+        <div>
+          <h1 style={{color:C.text,fontSize:18,fontWeight:600,margin:"0 0 3px"}}>📋 Registro de Evidencias</h1>
+          <p style={{color:C.textMuted,fontSize:12,margin:0}}>Historial completo · Respaldo ante mandantes · Exportable a PDF</p>
+        </div>
+        <button onClick={imprimir}
+          style={{background:C.accent,color:"#fff",border:"none",borderRadius:6,padding:"9px 18px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+          🖨 Exportar PDF
+        </button>
+      </div>
+
+      {/* Filtros */}
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",marginBottom:16,display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-end"}}>
+        <FL label="Desde"><input type="date" style={{...INP,width:140}} value={desde} onChange={e=>setDesde(e.target.value)}/></FL>
+        <FL label="Hasta"><input type="date" style={{...INP,width:140}} value={hasta} onChange={e=>setHasta(e.target.value)}/></FL>
+        <FL label="Trabajador">
+          <select style={{...INP,width:200}} value={filtroT} onChange={e=>setFiltroT(e.target.value)}>
+            <option value="">Todos</option>
+            {(data.trabajadores||[]).filter(t=>t.activo).map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}
+          </select>
+        </FL>
+        <FL label="Contrato">
+          <select style={{...INP,width:200}} value={filtroC} onChange={e=>setFiltroC(e.target.value)}>
+            <option value="">Todos</option>
+            {(data.contratos||[]).filter(c=>c.activo).map(c=><option key={c.id} value={c.id}>{c.cliente}</option>)}
+          </select>
+        </FL>
+        <div style={{display:"flex",alignItems:"center",gap:6,paddingBottom:4}}>
+          <input type="checkbox" id="soloFoto" checked={soloFoto} onChange={e=>setSoloFoto(e.target.checked)} style={{width:15,height:15,accentColor:C.accent}}/>
+          <label htmlFor="soloFoto" style={{color:C.text,fontSize:13,cursor:"pointer"}}>Solo con foto 📷</label>
+        </div>
+      </div>
+
+      {/* Resumen */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
+        <KPICard label="Total evidencias" value={evidencias.length} color={C.accent}/>
+        <KPICard label="Con foto" value={evidencias.filter(e=>e.foto).length} color={C.green}/>
+        <KPICard label="Vía QR" value={evidencias.filter(e=>e.via_qr).length} color={C.purple}/>
+        <KPICard label="Con GPS" value={evidencias.filter(e=>e.latitud).length} color={C.yellow}/>
+      </div>
+
+      {/* Tabla */}
+      <Panel noPad>
+        {!evidencias.length ? (
+          <div style={{padding:"40px",textAlign:"center",color:C.textMuted}}>
+            <div style={{fontSize:32,marginBottom:8}}>📋</div>
+            <p style={{fontWeight:600,color:C.text}}>Sin evidencias para el período seleccionado</p>
+            <p style={{fontSize:12}}>Ajusta el rango de fechas o los filtros</p>
+          </div>
+        ) : (
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead>
+                <tr style={{background:C.surfaceAlt,borderBottom:`2px solid ${C.border}`}}>
+                  {["Fecha y hora","Trabajador","Contrato","Área","Tarea","Frec.","Origen","Foto","GPS"].map(h=>(
+                    <th key={h} style={{padding:"10px 12px",textAlign:"left",color:C.textMuted,fontWeight:600,fontSize:11,whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {evidencias.map((e,i) => {
+                  const t = getTarea(e.checklist_id);
+                  const trab = (data.trabajadores||[]).find(x=>x.id===e.trabajador_id);
+                  const cont = (data.contratos||[]).find(x=>x.id===e.contrato_id);
+                  const fecha = new Date(e.fecha_hora).toLocaleString("es-CL",{timeZone:"America/Santiago",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+                  return (
+                    <tr key={e.id} style={{borderBottom:`1px solid ${C.borderLight}`,background:i%2===0?C.surface:C.surfaceAlt}}>
+                      <td style={{padding:"8px 12px",color:C.text,fontWeight:500,whiteSpace:"nowrap"}}>{fecha}</td>
+                      <td style={{padding:"8px 12px",color:C.text}}>{trab?.nombre||"—"}</td>
+                      <td style={{padding:"8px 12px",color:C.textMuted,fontSize:11}}>{cont?.cliente||"—"}</td>
+                      <td style={{padding:"8px 12px",color:C.textMuted,fontSize:11}}>{t.dep}</td>
+                      <td style={{padding:"8px 12px",color:C.text,maxWidth:280,lineHeight:1.3}}>{t.tarea}</td>
+                      <td style={{padding:"8px 12px"}}><Tag text={t.periodicidad} scheme={{bg:C.accentBg,text:C.accent,border:"#bfdbfe"}}/></td>
+                      <td style={{padding:"8px 12px",textAlign:"center"}}>
+                        {e.via_qr
+                          ? <Tag text="📱 QR" scheme={{bg:"#f3e8ff",text:"#7c3aed",border:"#d8b4fe"}}/>
+                          : <Tag text="Manual" scheme={{bg:C.surfaceAlt,text:C.textMuted,border:C.border}}/>}
+                      </td>
+                      <td style={{padding:"8px 12px",textAlign:"center"}}>
+                        {e.foto
+                          ? <img src={e.foto} alt="ev" onClick={()=>setLightbox(e.foto)}
+                              style={{width:48,height:48,objectFit:"cover",borderRadius:6,cursor:"zoom-in",border:`1px solid ${C.border}`}}/>
+                          : <span style={{color:C.textMuted,fontSize:11}}>—</span>}
+                      </td>
+                      <td style={{padding:"8px 12px",textAlign:"center"}}>
+                        {e.latitud
+                          ? <a href={`https://maps.google.com/?q=${e.latitud},${e.longitud}`} target="_blank" rel="noreferrer"
+                              style={{color:C.accent,fontSize:11,textDecoration:"none"}}>📍 Ver</a>
+                          : <span style={{color:C.textMuted,fontSize:11}}>—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
 function TabQR({ data, contratoId }) {
   const [filtro, setFiltro] = useState(contratoId||'');
   const BASE = typeof window!=="undefined" ? window.location.origin : "https://limpiapp-pro.vercel.app";
@@ -1091,7 +1286,8 @@ function Checklist({data,contratoId,insert}){
   const marcar=async(chkId,cId)=>{const asig=(data.asignaciones||[]).filter(a=>a.contrato_id===cId&&a.activo);const tId=asig.map(a=>a.trabajador_id).find(id=>{const t=data.trabajadores.find(w=>w.id===id);return t&&t.cargo==="Auxiliar Aseo";}) || data.trabajadores.find(t=>t.cargo==="Auxiliar Aseo")?.id||data.trabajadores[0]?.id;await insert("evidencias",{id:`EV${Date.now()}`,checklist_id:chkId,trabajador_id:tId,contrato_id:cId,fecha_hora:new Date().toISOString(),observacion:"",cumplido:true});};
   const openNew=()=>{const deps=contratoId?data.dependencias.filter(d=>d.contrato_id===contratoId):data.dependencias;setForm({id:genId("CHK"),dep_id:deps[0]?.id||"",contrato_id:contratoId||data.contratos[0]?.id||"",tarea:"",periodicidad:"DIARIA",obligatoria:true,activa:true});};  
   const save=async()=>{if(!form.tarea.trim())return;const ok=await insert("checklist",form);if(ok)setForm(null);};
-  const completadas=chks.filter(c=>data.evidencias.some(e=>e.checklist_id===c.id&&e.fecha_hora?.startsWith(hoy)));
+  const hoyChile=new Date(new Date().toLocaleString("en-US",{timeZone:"America/Santiago"})).toISOString().slice(0,10);
+  const completadas=chks.filter(c=>data.evidencias.some(e=>e.checklist_id===c.id&&new Date(e.fecha_hora).toLocaleDateString("en-CA",{timeZone:"America/Santiago"})===hoyChile));
   return(
     <div>
       <PageHeader title="Checklist de tareas" subtitle={`${chks.length} tareas · ${completadas.length} completadas hoy`}
@@ -1119,8 +1315,14 @@ function Checklist({data,contratoId,insert}){
               const evs=data.evidencias.filter(e=>e.checklist_id===r.id).sort((a,b)=>b.fecha_hora?.localeCompare(a.fecha_hora));
               if(!evs.length)return<span style={{color:C.textMuted,fontSize:11}}>Nunca</span>;
               const d=new Date(evs[0].fecha_hora);
-              const dias=Math.floor((Date.now()-d)/86400000);
-              const label=dias===0?"Hoy":dias===1?"Ayer":`Hace ${dias}d`;
+              // Ajuste zona horaria Chile (UTC-4)
+              const ahoraChile=new Date(new Date().toLocaleString("en-US",{timeZone:"America/Santiago"}));
+              const dChile=new Date(d.toLocaleString("en-US",{timeZone:"America/Santiago"}));
+              const hoyStr=ahoraChile.toDateString();
+              const ayerD=new Date(ahoraChile); ayerD.setDate(ayerD.getDate()-1);
+              const ayerStr=ayerD.toDateString();
+              const dias=Math.floor((ahoraChile-dChile)/86400000);
+              const label=dChile.toDateString()===hoyStr?"Hoy":dChile.toDateString()===ayerStr?"Ayer":`Hace ${dias}d`;
               const color=dias===0?C.green:dias<=3?C.yellow:C.red;
               const trab=data.trabajadores.find(t=>t.id===evs[0].trabajador_id);
               return<div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -2042,6 +2244,7 @@ export default function App(){
         {tab==="contratos"      &&<Contratos       data={data} insert={insert} update={update}/>}
         {tab==="dependencias"   &&<Dependencias    data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="trabajadores"   &&<Trabajadores    data={data} insert={insert} update={update} contratoId={contratoId}/>}
+        {tab==="evidencias"    &&<TabEvidencias   data={data} contratoId={contratoId}/>}
         {tab==="qr"            &&<TabQR           data={data} contratoId={contratoId}/>}
         {tab==="asistencia"     &&<Asistencia      data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="checklist"      &&<Checklist       data={data} contratoId={contratoId} insert={insert}/>}
