@@ -505,8 +505,7 @@ function ModoQR({ depId, data, insert, loading }) {
   const [confirmado, setConfirmado] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [obs, setObs] = useState('');
-  const [foto, setFoto] = useState(null);
-  const [fotoPreview, setFotoPreview] = useState(null);
+  const [fotos, setFotos] = useState([]); // hasta 3 fotos
 
   const dep = (data.dependencias||[]).find(d=>d.id===depId);
   const contrato = dep?(data.contratos||[]).find(c=>c.id===dep.contrato_id):null;
@@ -529,7 +528,8 @@ function ModoQR({ depId, data, insert, loading }) {
     const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n;
   });
 
-  const capturarFoto = async (e) => {
+  const agregarFoto = async (e) => {
+    if(fotos.length>=3) return;
     const file = e.target.files[0];
     if(!file) return;
     const img = new Image();
@@ -542,19 +542,28 @@ function ModoQR({ depId, data, insert, loading }) {
     canvas.height=Math.round(img.height*scale);
     canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
     const blob=await new Promise(r=>canvas.toBlob(r,"image/jpeg",0.75));
-    setFoto(blob); setFotoPreview(URL.createObjectURL(blob));
+    const preview=URL.createObjectURL(blob);
+    setFotos(prev=>[...prev,{blob,preview}]);
     URL.revokeObjectURL(url);
+    e.target.value=""; // reset input para permitir otra foto
   };
 
-  const subirFoto = async (evId) => {
-    if(!foto) return null;
-    try {
-      const nombre=`${evId}.jpg`;
-      const { error } = await supabase.storage.from("evidencias-fotos").upload(nombre, foto, {contentType:"image/jpeg",upsert:true});
-      if(error) return null;
-      const { data } = supabase.storage.from("evidencias-fotos").getPublicUrl(nombre);
-      return data.publicUrl;
-    } catch { return null; }
+  const quitarFoto = (idx) => setFotos(prev=>prev.filter((_,i)=>i!==idx));
+
+  const subirFotos = async (evId) => {
+    if(!fotos.length) return null;
+    const urls=[];
+    for(let i=0;i<fotos.length;i++){
+      try{
+        const nombre=`${evId}_${i}.jpg`;
+        const {error}=await supabase.storage.from("evidencias-fotos").upload(nombre,fotos[i].blob,{contentType:"image/jpeg",upsert:true});
+        if(!error){
+          const {data}=supabase.storage.from("evidencias-fotos").getPublicUrl(nombre);
+          urls.push(data.publicUrl);
+        }
+      }catch{}
+    }
+    return urls.length ? JSON.stringify(urls) : null;
   };
 
   const registrar = async () => {
@@ -565,7 +574,7 @@ function ModoQR({ depId, data, insert, loading }) {
     let primerEv = true;
     for(const chkId of marcadas){
       const evId=`EV${Date.now()}${Math.random().toString(36).slice(2,6)}`;
-      if(primerEv && foto){ fotoUrl = await subirFoto(evId); primerEv=false; }
+      if(primerEv && fotos.length){ fotoUrl = await subirFotos(evId); primerEv=false; }
       await insert("evidencias",{
         id:evId, checklist_id:chkId, trabajador_id:tId,
         contrato_id:dep.contrato_id, fecha_hora:ahora,
@@ -603,7 +612,7 @@ function ModoQR({ depId, data, insert, loading }) {
           <div style={{color:"#94a3b8",fontSize:13}}>{marcadas.size} tarea{marcadas.size!==1?"s":""} registrada{marcadas.size!==1?"s":""}</div>
           {gps&&<div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📍 GPS registrado</div>}
           {fotoPreview&&<img src={fotoPreview} alt="evidencia" style={{width:"100%",borderRadius:8,marginTop:8,maxHeight:140,objectFit:"cover"}}/>}
-          {foto&&<div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📷 Foto subida al servidor</div>}
+          {fotos.length>0&&<div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📷 {fotos.length} foto{fotos.length>1?"s":""} subida{fotos.length>1?"s":""} al servidor</div>}
         </div>
         <button style={{...btnG,maxWidth:420}} onClick={()=>{setConfirmado(false);setMarcadas(new Set());setObs('');}}>
           + Registrar otra tarea
@@ -660,24 +669,35 @@ function ModoQR({ depId, data, insert, loading }) {
         ))}
       </div>
 
-      {/* Foto evidencia */}
+      {/* Fotos evidencia — hasta 3 */}
       <div style={card}>
-        <div style={{color:"#94a3b8",fontSize:13,marginBottom:8,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>📷 Foto de evidencia</div>
-        {!fotoPreview?(
-          <label style={{display:"block",background:"#0f172a",border:"2px dashed #374151",borderRadius:8,padding:"20px",textAlign:"center",cursor:"pointer"}}>
-            <div style={{color:"#94a3b8",fontSize:28,marginBottom:6}}>📷</div>
-            <div style={{color:"#94a3b8",fontSize:14}}>Tomar foto del área limpia</div>
-            <div style={{color:"#64748b",fontSize:11,marginTop:4}}>Recomendado para respaldo</div>
-            <input type="file" accept="image/*" capture="environment" onChange={capturarFoto} style={{display:"none"}}/>
-          </label>
-        ):(
-          <div style={{position:"relative"}}>
-            <img src={fotoPreview} alt="evidencia" style={{width:"100%",borderRadius:8,maxHeight:200,objectFit:"cover"}}/>
-            <button onClick={()=>{setFoto(null);setFotoPreview(null);}}
-              style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,0.7)",color:"#fff",border:"none",borderRadius:"50%",width:28,height:28,cursor:"pointer",fontSize:16}}>×</button>
-            <div style={{color:"#4ade80",fontSize:12,marginTop:6}}>✓ Foto lista para subir</div>
+        <div style={{color:"#94a3b8",fontSize:13,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>
+          📷 Fotos del área ({fotos.length}/3)
+        </div>
+        {/* Miniaturas */}
+        {fotos.length>0&&(
+          <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+            {fotos.map((f,i)=>(
+              <div key={i} style={{position:"relative"}}>
+                <img src={f.preview} alt={`foto ${i+1}`} style={{width:80,height:80,objectFit:"cover",borderRadius:8,border:"2px solid #16a34a"}}/>
+                <button onClick={()=>quitarFoto(i)}
+                  style={{position:"absolute",top:-6,right:-6,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+              </div>
+            ))}
           </div>
         )}
+        {/* Botón agregar foto */}
+        {fotos.length<3&&(
+          <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#0f172a",border:"2px dashed #374151",borderRadius:8,padding:"14px",cursor:"pointer"}}>
+            <span style={{fontSize:20}}>📷</span>
+            <div>
+              <div style={{color:"#94a3b8",fontSize:14}}>{fotos.length===0?"Tomar foto del área limpia":"Agregar otra foto"}</div>
+              <div style={{color:"#64748b",fontSize:11}}>{fotos.length===0?"Opcional — recomendado para respaldo":""}</div>
+            </div>
+            <input type="file" accept="image/*" capture="environment" onChange={agregarFoto} style={{display:"none"}}/>
+          </label>
+        )}
+        {fotos.length>0&&<div style={{color:"#4ade80",fontSize:12,marginTop:6}}>✓ {fotos.length} foto{fotos.length>1?"s":""} lista{fotos.length>1?"s":""} para subir</div>}
       </div>
 
       {/* Observación */}
@@ -707,6 +727,13 @@ function ModoQR({ depId, data, insert, loading }) {
 }
 
 /* Tab QR — panel administrador */
+/* ─── Helper fotos múltiples ────────────────────────────────── */
+function parseFotos(foto) {
+  if (!foto) return [];
+  try { const arr = JSON.parse(foto); return Array.isArray(arr) ? arr : [foto]; }
+  catch { return [foto]; }
+}
+
 /* ─── Módulo Evidencias ──────────────────────────────────────── */
 function TabEvidencias({ data, contratoId }) {
   const hoy = new Date().toLocaleDateString("en-CA", {timeZone:"America/Santiago"});
@@ -751,7 +778,7 @@ function TabEvidencias({ data, contratoId }) {
         <td>${t.tarea}</td>
         <td>${t.periodicidad}</td>
         <td style="text-align:center">${e.via_qr?"📱 QR":"Manual"}</td>
-        <td style="text-align:center">${e.foto?`<img src="${e.foto}" style="width:60px;height:60px;object-fit:cover;border-radius:4px"/>`:""}</td>
+        <td style="text-align:center">${parseFotos(e.foto).map(u=>`<img src="${u}" style="width:50px;height:50px;object-fit:cover;border-radius:4px;margin:1px"/>`).join("")}</td>
         <td style="font-size:10px;color:#666">${e.latitud?`${e.latitud},${e.longitud}`:"—"}</td>
       </tr>`;
     }).join("");
@@ -835,7 +862,7 @@ function TabEvidencias({ data, contratoId }) {
       {/* Resumen */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
         <KPICard label="Total evidencias" value={evidencias.length} color={C.accent}/>
-        <KPICard label="Con foto" value={evidencias.filter(e=>e.foto).length} color={C.green}/>
+        <KPICard label="Con foto" value={evidencias.filter(e=>parseFotos(e.foto).length>0).length} color={C.green}/>
         <KPICard label="Vía QR" value={evidencias.filter(e=>e.via_qr).length} color={C.purple}/>
         <KPICard label="Con GPS" value={evidencias.filter(e=>e.latitud).length} color={C.yellow}/>
       </div>
@@ -878,9 +905,13 @@ function TabEvidencias({ data, contratoId }) {
                           : <Tag text="Manual" scheme={{bg:C.surfaceAlt,text:C.textMuted,border:C.border}}/>}
                       </td>
                       <td style={{padding:"8px 12px",textAlign:"center"}}>
-                        {e.foto
-                          ? <img src={e.foto} alt="ev" onClick={()=>setLightbox(e.foto)}
-                              style={{width:48,height:48,objectFit:"cover",borderRadius:6,cursor:"zoom-in",border:`1px solid ${C.border}`}}/>
+                        {parseFotos(e.foto).length>0
+                          ? <div style={{display:"flex",gap:3,justifyContent:"center"}}>
+                              {parseFotos(e.foto).map((url,fi)=>(
+                                <img key={fi} src={url} alt="ev" onClick={()=>setLightbox(url)}
+                                  style={{width:36,height:36,objectFit:"cover",borderRadius:4,cursor:"zoom-in",border:`1px solid ${C.border}`}}/>
+                              ))}
+                            </div>
                           : <span style={{color:C.textMuted,fontSize:11}}>—</span>}
                       </td>
                       <td style={{padding:"8px 12px",textAlign:"center"}}>
@@ -1328,7 +1359,7 @@ function Checklist({data,contratoId,insert}){
               return<div style={{display:"flex",alignItems:"center",gap:6}}>
                 <span style={{color,fontSize:11,fontWeight:500}}>{label}</span>
                 {evs[0].via_qr&&<span title="Registrado vía QR" style={{fontSize:11}}>📱</span>}
-                {evs[0].foto&&<span title={`Ver foto — ${trab?.nombre||""}`} onClick={()=>setLightboxUrl(evs[0].foto)} style={{cursor:"pointer",fontSize:14}}>📷</span>}
+                {parseFotos(evs[0].foto).length>0&&<span title={`Ver foto — ${trab?.nombre||""}`} onClick={()=>setLightboxUrl(parseFotos(evs[0].foto)[0])} style={{cursor:"pointer",fontSize:14}}>📷</span>}
               </div>;
             }},
             {key:"ev",label:"Marcar",render:r=>{
