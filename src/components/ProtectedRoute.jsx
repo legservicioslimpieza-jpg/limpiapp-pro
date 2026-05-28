@@ -1,7 +1,7 @@
 // src/components/ProtectedRoute.jsx
 // LimpiApp Pro — Fase 6: Autenticación
 // Componente de ruta protegida por rol
-
+import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import Login from './Login'
 
