@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isConfigured } from "./supabase.js";
 import { AuthProvider } from "./contexts/AuthContext.jsx";
 import { ProtectedRoute } from "./components/ProtectedRoute.jsx";
+import { UserMenu } from "./components/ProtectedRoute.jsx";
 
 /* ─── Paleta ERP corporativa ────────────────────────────────── */
 const C = {
