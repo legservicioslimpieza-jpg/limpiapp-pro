@@ -9,7 +9,13 @@ const fmtFecha = (iso) => { if (!iso) return '—'; return new Date(iso).toLocal
 const fmtHora  = (iso) => { if (!iso) return '—'; return new Date(iso).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) }
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 const iniciales = (n='') => n.split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase()
-const parsePeriodo = (p) => { if(!p) return '—'; const [a,m] = p.split('-'); return `${MESES[parseInt(m)]} ${a}` }
+cconst parsePeriodo = (p) => {
+  if(!p) return '—'
+  const parts = p.split('-')
+  const mes  = parts[0].length === 4 ? parseInt(parts[1]) : parseInt(parts[0])
+  const anio = parts[0].length === 4 ? parts[0] : parts[1]
+  return `${MESES[mes] ?? p} ${anio}`
+}
 
 const T = {
   card: { background:'#fff', border:'1px solid #e2e8f0', borderRadius:'0.875rem', padding:'1rem 1.1rem', marginBottom:'0.75rem' },
@@ -342,7 +348,7 @@ export default function PortalTrabajador() {
       </main>
 
       {/* Barra inferior */}
-      <nav style={{position:'fixed',bottom:0,left:0,right:0,background:'#fff',borderTop:'1px solid #e2e8f0',display:'flex',zIndex:100}}>
+      <nav style={{position:'fixed',bottom:0,paddingBottom:'env(safe-area-inset-bottom)',left:0,right:0,background:'#fff',borderTop:'1px solid #e2e8f0',display:'flex',zIndex:100}}>
         {TABS.map(({id,icon,label})=>{
           const activo=tab===id
           return (
