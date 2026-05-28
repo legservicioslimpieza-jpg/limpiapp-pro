@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isConfigured } from "./supabase.js";
-import { AuthProvider } from "./contexts/AuthContext.jsx";
-import { ProtectedRoute } from "./components/ProtectedRoute.jsx";
+import { useAuth } from "./contexts/AuthContext.jsx";
+import Login from "./components/Login.jsx";
+import PortalTrabajador from "./components/PortalTrabajador.jsx";
 import { UserMenu } from "./components/ProtectedRoute.jsx";
-import AppRouter from "./AppRouter.jsx";
 
 /* ─── Paleta ERP corporativa ────────────────────────────────── */
 const C = {
@@ -2237,6 +2237,10 @@ export default function App(){
   const [tab,setTab]=useState("dashboard");
   const [contratoId,setContratoId]=useState("");
   const {data,loading,dbMode,insert,update,saveRem}=useData();
+  const { user, perfil, loading: authLoading } = useAuth();
+if(authLoading) return <Spinner/>;
+if(!user && !depQR) return <Login/>;
+if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
 
   if(loading||!data)return<Spinner/>;
   if(depQR)return<ModoQR depId={depQR} data={data} insert={insert} loading={loading}/>;
