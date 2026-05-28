@@ -2297,6 +2297,5 @@ if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
         {tab==="informes"       &&<InformesIA      data={data} contratoId={contratoId}/>}
         </div>
     </div>
-  </AppRouter>
   );
 }
