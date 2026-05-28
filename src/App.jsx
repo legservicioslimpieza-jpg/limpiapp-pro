@@ -2240,6 +2240,7 @@ export default function App(){
   const { user, perfil, loading: authLoading } = useAuth();
 if(authLoading) return <Spinner/>;
 if(!user && !depQR) return <Login/>;
+if(user && !perfil) return <Spinner/>;
 if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
 
   if(loading||!data)return<Spinner/>;
