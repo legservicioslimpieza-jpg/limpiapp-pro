@@ -2245,7 +2245,6 @@ export default function App(){
   const incAb=(contratoId?data.incidencias?.filter(i=>i.contrato_id===contratoId&&i.estado==="Abierta"):data.incidencias?.filter(i=>i.estado==="Abierta"))?.length||0;
 
   return (
-  <AuthProvider>
   <AppRouter>
     <div style={{minHeight:"100vh",background:C.pageBg,fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif"}}>
       {/* ── Barra superior ── */}
@@ -2295,6 +2294,5 @@ export default function App(){
         </div>
     </div>
   </AppRouter>
-</AuthProvider>
   );
 }
