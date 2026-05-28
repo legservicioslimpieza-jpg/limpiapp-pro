@@ -2287,8 +2287,9 @@ export default function App(){
         {tab==="supervisiones"  &&<Supervisiones   data={data} contratoId={contratoId} insert={insert}/>}
         {tab==="remuneraciones" &&<Remuneraciones  data={data} saveRem={saveRem} insert={insert} update={update}/>}
         {tab==="informes"       &&<InformesIA      data={data} contratoId={contratoId}/>}
+      </div>
     </div>
   </ProtectedRoute>
-  </AuthProvider>
+</AuthProvider>
   );
 }
