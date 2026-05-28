@@ -3,6 +3,7 @@ import { supabase, isConfigured } from "./supabase.js";
 import { AuthProvider } from "./contexts/AuthContext.jsx";
 import { ProtectedRoute } from "./components/ProtectedRoute.jsx";
 import { UserMenu } from "./components/ProtectedRoute.jsx";
+import AppRouter from "./AppRouter.jsx";
 
 /* ─── Paleta ERP corporativa ────────────────────────────────── */
 const C = {
@@ -2245,7 +2246,7 @@ export default function App(){
 
   return (
   <AuthProvider>
-  <ProtectedRoute>
+  <AppRouter>
     <div style={{minHeight:"100vh",background:C.pageBg,fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif"}}>
       {/* ── Barra superior ── */}
       <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",position:"sticky",top:0,zIndex:100}}>
@@ -2293,7 +2294,7 @@ export default function App(){
         {tab==="informes"       &&<InformesIA      data={data} contratoId={contratoId}/>}
         </div>
     </div>
-  </ProtectedRoute>
+  </AppRouter>
 </AuthProvider>
   );
 }
