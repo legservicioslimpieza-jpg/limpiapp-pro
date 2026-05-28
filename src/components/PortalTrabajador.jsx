@@ -32,7 +32,7 @@ function TabInicio({ trabajador, contratos, perfil }) {
     async function cargar() {
       const inicio = `${anioActual}-${String(mesActual).padStart(2,'0')}-01`
       const siguiente = mesActual===12 ? `${anioActual+1}-01-01` : `${anioActual}-${String(mesActual+1).padStart(2,'0')}-01`
-      const { data } = await supabase.from('asistencia').select('horas_extra,atraso_minutos').eq('trabajador_id', perfil.trabajador_id).gte('fecha', inicio).lt('fecha', siguiente)
+      const { data } = await supabase.from('asistencia').select('*').eq('trabajador_id', perfil.trabajador_id)
       if (data) {
         setResumen({
           dias: data.length,
