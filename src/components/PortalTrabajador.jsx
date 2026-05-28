@@ -9,7 +9,7 @@ const fmtFecha = (iso) => { if (!iso) return '—'; return new Date(iso).toLocal
 const fmtHora  = (iso) => { if (!iso) return '—'; return new Date(iso).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) }
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 const iniciales = (n='') => n.split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase()
-cconst parsePeriodo = (p) => {
+const parsePeriodo = (p) => {
   if(!p) return '—'
   const parts = p.split('-')
   const mes  = parts[0].length === 4 ? parseInt(parts[1]) : parseInt(parts[0])
