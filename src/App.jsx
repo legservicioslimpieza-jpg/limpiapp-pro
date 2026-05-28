@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isConfigured } from "./supabase.js";
+import { AuthProvider } from "./contexts/AuthContext.jsx";
+import { ProtectedRoute } from "./components/ProtectedRoute.jsx";
 
 /* ─── Paleta ERP corporativa ────────────────────────────────── */
 const C = {
@@ -2240,7 +2242,9 @@ export default function App(){
   const contratos=data.contratos||[];
   const incAb=(contratoId?data.incidencias?.filter(i=>i.contrato_id===contratoId&&i.estado==="Abierta"):data.incidencias?.filter(i=>i.estado==="Abierta"))?.length||0;
 
-  return(
+  return (
+  <AuthProvider>
+  <ProtectedRoute>
     <div style={{minHeight:"100vh",background:C.pageBg,fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif"}}>
       {/* ── Barra superior ── */}
       <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",position:"sticky",top:0,zIndex:100}}>
@@ -2285,5 +2289,7 @@ export default function App(){
         {tab==="informes"       &&<InformesIA      data={data} contratoId={contratoId}/>}
       </div>
     </div>
+  </ProtectedRoute>
+  </AuthProvider>
   );
 }
