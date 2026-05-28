@@ -2258,10 +2258,13 @@ export default function App(){
             </div>
           </div>
           <ContractSelector contratos={contratos} selected={contratoId} onSelect={setContratoId}/>
-          <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-            <div style={{width:7,height:7,borderRadius:"50%",background:dbMode?C.green:C.yellow}}/>
-            <span style={{fontSize:11,color:C.textMuted}}>{dbMode?"Supabase conectado":"Modo demo"}</span>
-          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+  <div style={{display:"flex",alignItems:"center",gap:6}}>
+    <div style={{width:7,height:7,borderRadius:"50%",background:dbMode?C.green:C.yellow}}/>
+    <span style={{fontSize:11,color:C.textMuted}}>{dbMode?"Supabase conectado":"Modo demo"}</span>
+  </div>
+  <UserMenu />
+</div>
         </div>
         {/* Tabs */}
         <div style={{maxWidth:1280,margin:"0 auto",padding:"0 24px",display:"flex",gap:0,overflowX:"auto"}}>
