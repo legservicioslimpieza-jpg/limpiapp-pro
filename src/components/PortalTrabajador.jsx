@@ -223,8 +223,14 @@ function imprimirLiq(liq) {
         {firmando===liq.id?'Registrando…':'✅ Confirmar recepción'}
       </button>
     )}
-  </div>
+ </div>
 )}
+        </div>
+      )
+    })}
+  </div>
+)
+}
 
 // ═══════════════════════════════════════════════
 // TAB ASISTENCIA
