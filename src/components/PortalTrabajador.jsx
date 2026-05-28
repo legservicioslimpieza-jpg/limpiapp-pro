@@ -89,7 +89,39 @@ function TabLiquidaciones({ trabajadorId, nombreTrabajador }) {
   const [loading, setLoading] = useState(true)
   const [expandido, setExpandido] = useState(null)
   const [firmando, setFirmando] = useState(null)
-
+function imprimirLiq(liq) {
+  const w = window.open('','_blank')
+  w.document.write(`<!DOCTYPE html><html><head><title>Liquidación ${liq.periodo}</title>
+  <style>body{font-family:Arial;font-size:13px;padding:20px;max-width:600px;margin:0 auto}
+  h2{color:#1e3a8a;margin-bottom:4px}h3{color:#64748b;font-weight:normal;margin:0 0 16px}
+  .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9}
+  .section{background:#f8fafc;padding:10px 14px;border-radius:8px;margin-bottom:12px}
+  .total{font-weight:bold;font-size:15px}.liquido{background:#dbeafe;padding:12px;border-radius:8px;display:flex;justify-content:space-between;font-size:16px;font-weight:bold;color:#1d4ed8}
+  @media print{@page{margin:12mm}}</style></head><body>
+  <h2>Liquidación de Sueldo</h2>
+  <h3>LEG Servicios de Limpieza EIRL · RUT 78.086.977-1</h3>
+  <div class="section">
+    <div class="row"><span>Trabajador</span><span>${liq.firmado_por??''}</span></div>
+    <div class="row"><span>Período</span><span>${parsePeriodo(liq.periodo)}</span></div>
+    <div class="row"><span>Días trabajados</span><span>${liq.dias_trabajados}</span></div>
+  </div>
+  <div class="section">
+    <p style="font-weight:bold;color:#15803d;margin:0 0 6px">HABERES</p>
+    ${[['Sueldo base',liq.sueldo_base],['Sueldo proporcional',liq.sueldo_proporcional],['Gratificación',liq.gratificacion],['Horas extra',liq.horas_extra_valor],['Bono asistencia',liq.bono_asistencia],['Bono movilización',liq.bono_movilizacion],['Bono colación',liq.bono_colacion]].filter(([,v])=>v!=null&&v!==0).map(([k,v])=>`<div class="row"><span>${k}</span><span>${clp(v)}</span></div>`).join('')}
+    <div class="row total"><span>Total haberes</span><span>${clp(liq.total_haberes)}</span></div>
+  </div>
+  <div class="section">
+    <p style="font-weight:bold;color:#dc2626;margin:0 0 6px">DESCUENTOS</p>
+    ${[['AFP',liq.cotiz_afp],['Salud (7%)',liq.cotiz_salud],['Cesantía',liq.ces_trabajador],['IUSC',liq.iusc]].filter(([,v])=>v!=null&&v!==0).map(([k,v])=>`<div class="row"><span>${k}</span><span>-${clp(v)}</span></div>`).join('')}
+    <div class="row total"><span>Total descuentos</span><span>-${clp(liq.total_descuentos)}</span></div>
+  </div>
+  <div class="liquido"><span>LÍQUIDO A PAGAR</span><span>${clp(liq.liquido)}</span></div>
+  ${liq.firmado_at?`<p style="margin-top:16px;color:#15803d;font-size:12px">✅ Recibido conforme el ${fmtFecha(liq.firmado_at)} por ${liq.firmado_por}</p>`:''}
+  </body></html>`)
+  w.document.close()
+  setTimeout(()=>w.print(),800)
+}
+  
   useEffect(() => {
     async function cargar() {
       const { data } = await supabase.from('liquidaciones').select('*').eq('trabajador_id', trabajadorId).order('periodo', { ascending: false })
@@ -135,46 +167,64 @@ function TabLiquidaciones({ trabajadorId, nombreTrabajador }) {
             </div>
 
             {abierto && (
-              <div style={{marginTop:'0.75rem'}}>
-                <div style={T.divider}/>
-                <p style={{...T.label,marginBottom:'0.4rem'}}>Haberes</p>
-                {[['Sueldo base',liq.sueldo_base],['Sueldo proporcional',liq.sueldo_proporcional],['Gratificación',liq.gratificacion],['Horas extra',liq.horas_extra_valor],['Bono asistencia',liq.bono_asistencia],['Bono movilización',liq.bono_movilizacion],['Bono colación',liq.bono_colacion],['Otros haberes',liq.otros_haberes],['Total haberes',liq.total_haberes]].filter(([,v])=>v!=null&&v!==0).map(([k,v])=>(
-                  <div key={k} style={{...T.row,marginBottom:'0.3rem'}}>
-                    <span style={{fontSize:'0.82rem',color:'#475569'}}>{k}</span>
-                    <span style={{fontSize:'0.82rem',fontWeight:600,color:'#0f172a'}}>{clp(v)}</span>
-                  </div>
-                ))}
-                <div style={T.divider}/>
-                <p style={{...T.label,marginBottom:'0.4rem'}}>Descuentos</p>
-                {[['AFP',liq.cotiz_afp],['Salud (7%)',liq.cotiz_salud],['Cesantía',liq.ces_trabajador],['IUSC',liq.iusc],['Otros',liq.otros_descuentos],['Total descuentos',liq.total_descuentos]].filter(([,v])=>v!=null&&v!==0).map(([k,v])=>(
-                  <div key={k} style={{...T.row,marginBottom:'0.3rem'}}>
-                    <span style={{fontSize:'0.82rem',color:'#475569'}}>{k}</span>
-                    <span style={{fontSize:'0.82rem',fontWeight:600,color:'#dc2626'}}>-{clp(v)}</span>
-                  </div>
-                ))}
-                <div style={T.divider}/>
-                <div style={{...T.row,marginBottom:'0.75rem'}}>
-                  <span style={{fontWeight:700,color:'#0f172a'}}>Líquido a pagar</span>
-                  <span style={{fontSize:'1.1rem',fontWeight:700,color:'#0f4c81'}}>{clp(liq.liquido)}</span>
-                </div>
-                {firmado ? (
-                  <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'0.6rem',padding:'0.6rem 0.85rem',fontSize:'0.78rem',color:'#15803d'}}>
-                    ✅ Recibido conforme el {fmtFecha(liq.firmado_at)} por {liq.firmado_por}
-                  </div>
-                ) : (
-                  <button onClick={e=>{e.stopPropagation();firmar(liq)}} disabled={firmando===liq.id}
-                    style={{width:'100%',padding:'0.7rem',background:firmando===liq.id?'#e2e8f0':'#0f4c81',color:'#fff',border:'none',borderRadius:'0.6rem',fontWeight:700,fontSize:'0.9rem',cursor:'pointer'}}>
-                    {firmando===liq.id?'Registrando…':'✅ Confirmar recepción'}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )
-      })}
+  <div style={{marginTop:'0.75rem'}}>
+    <div style={T.divider}/>
+
+    {/* Botón imprimir */}
+    <button onClick={e=>{e.stopPropagation(); imprimirLiq(liq)}}
+      style={{width:'100%',padding:'0.5rem',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:'0.6rem',fontSize:'0.8rem',fontWeight:600,color:'#475569',cursor:'pointer',marginBottom:'0.75rem'}}>
+      🖨 Imprimir liquidación
+    </button>
+
+    {/* Haberes */}
+    <div style={{background:'#f0fdf4',borderRadius:'0.6rem',padding:'0.6rem 0.75rem',marginBottom:'0.5rem'}}>
+      <p style={{...T.label,color:'#15803d',marginBottom:'0.4rem'}}>Haberes</p>
+      {[['Sueldo base',liq.sueldo_base],['Sueldo proporcional',liq.sueldo_proporcional],['Gratificación',liq.gratificacion],['Horas extra',liq.horas_extra_valor],['Bono asistencia',liq.bono_asistencia],['Bono movilización',liq.bono_movilizacion],['Bono colación',liq.bono_colacion],['Otros haberes',liq.otros_haberes]].filter(([,v])=>v!=null&&v!==0).map(([k,v])=>(
+        <div key={k} style={{display:'flex',justifyContent:'space-between',padding:'0.2rem 0',borderBottom:'1px solid #dcfce7'}}>
+          <span style={{fontSize:'0.8rem',color:'#166534'}}>{k}</span>
+          <span style={{fontSize:'0.8rem',fontWeight:600,color:'#166534'}}>{clp(v)}</span>
+        </div>
+      ))}
+      <div style={{display:'flex',justifyContent:'space-between',padding:'0.3rem 0',marginTop:'0.2rem'}}>
+        <span style={{fontSize:'0.82rem',fontWeight:700,color:'#15803d'}}>Total haberes</span>
+        <span style={{fontSize:'0.82rem',fontWeight:700,color:'#15803d'}}>{clp(liq.total_haberes)}</span>
+      </div>
     </div>
-  )
-}
+
+    {/* Descuentos */}
+    <div style={{background:'#fef2f2',borderRadius:'0.6rem',padding:'0.6rem 0.75rem',marginBottom:'0.5rem'}}>
+      <p style={{...T.label,color:'#dc2626',marginBottom:'0.4rem'}}>Descuentos legales</p>
+      {[['AFP',liq.cotiz_afp],['Salud (7%)',liq.cotiz_salud],['Cesantía',liq.ces_trabajador],['IUSC',liq.iusc],['Otros',liq.otros_descuentos]].filter(([,v])=>v!=null&&v!==0).map(([k,v])=>(
+        <div key={k} style={{display:'flex',justifyContent:'space-between',padding:'0.2rem 0',borderBottom:'1px solid #fecaca'}}>
+          <span style={{fontSize:'0.8rem',color:'#991b1b'}}>{k}</span>
+          <span style={{fontSize:'0.8rem',fontWeight:600,color:'#991b1b'}}>-{clp(v)}</span>
+        </div>
+      ))}
+      <div style={{display:'flex',justifyContent:'space-between',padding:'0.3rem 0',marginTop:'0.2rem'}}>
+        <span style={{fontSize:'0.82rem',fontWeight:700,color:'#dc2626'}}>Total descuentos</span>
+        <span style={{fontSize:'0.82rem',fontWeight:700,color:'#dc2626'}}>-{clp(liq.total_descuentos)}</span>
+      </div>
+    </div>
+
+    {/* Líquido */}
+    <div style={{background:'#eff6ff',borderRadius:'0.6rem',padding:'0.75rem',marginBottom:'0.75rem',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+      <span style={{fontWeight:700,color:'#1d4ed8',fontSize:'0.95rem'}}>Líquido a pagar</span>
+      <span style={{fontSize:'1.2rem',fontWeight:700,color:'#1d4ed8'}}>{clp(liq.liquido)}</span>
+    </div>
+
+    {/* Firma */}
+    {firmado ? (
+      <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'0.6rem',padding:'0.6rem 0.85rem',fontSize:'0.78rem',color:'#15803d'}}>
+        ✅ Recibido conforme el {fmtFecha(liq.firmado_at)} por {liq.firmado_por}
+      </div>
+    ) : (
+      <button onClick={e=>{e.stopPropagation();firmar(liq)}} disabled={firmando===liq.id}
+        style={{width:'100%',padding:'0.7rem',background:firmando===liq.id?'#e2e8f0':'#0f4c81',color:'#fff',border:'none',borderRadius:'0.6rem',fontWeight:700,fontSize:'0.9rem',cursor:'pointer'}}>
+        {firmando===liq.id?'Registrando…':'✅ Confirmar recepción'}
+      </button>
+    )}
+  </div>
+)}
 
 // ═══════════════════════════════════════════════
 // TAB ASISTENCIA
