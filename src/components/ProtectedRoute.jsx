@@ -116,8 +116,7 @@ export function ProtectedRoute({ children, roles }) {
 // Menú de usuario en la barra superior (nombre, rol, logout)
 // ─────────────────────────────────────────────────────────────
 
-import { useState } from 'react'
-import { useAuth } from '../contexts/AuthContext'
+
 
 const ROL_COLORS = {
   administrador: { bg: '#dbeafe', text: '#1d4ed8' },
