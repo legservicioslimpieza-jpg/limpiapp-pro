@@ -2238,6 +2238,7 @@ export default function App(){
   const [contratoId,setContratoId]=useState("");
   const {data,loading,dbMode,insert,update,saveRem}=useData();
   const { user, perfil, loading: authLoading } = useAuth();
+  useEffect(() => { if (user) reload(); }, [user]);
 if(authLoading) return <Spinner/>;
 if(!user && !depQR) return <Login/>;
 if(user && !perfil) return <Spinner/>;
