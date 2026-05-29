@@ -1696,6 +1696,101 @@ function ParametrosPanel({ data, update, insert }) {
   );
 }
 
+function AcusesRecibo({ data }) {
+  const hoy = new Date();
+  const periodoDefault = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,"0")}`;
+  const [periodo, setPeriodo] = useState(periodoDefault);
+
+  const liqPeriodo = (data.liquidaciones||[])
+    .filter(l => l.periodo === periodo)
+    .sort((a,b) => (a.trabajador_id||"").localeCompare(b.trabajador_id||""));
+
+  const firmadas   = liqPeriodo.filter(l => l.firmado_at).length;
+  const pendientes = liqPeriodo.length - firmadas;
+
+  const fmtFirma = (iso) => {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleString("es-CL", {timeZone:"America/Santiago",day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  };
+
+  const imprimir = () => {
+    const filas = liqPeriodo.map((l,i) => {
+      const t = (data.trabajadores||[]).find(w => w.id === l.trabajador_id);
+      return `<tr>
+        <td>${i+1}</td>
+        <td>${t?.nombre||"—"}</td>
+        <td>${t?.rut||"—"}</td>
+        <td style="text-align:right">${clp(l.liquido)}</td>
+        <td style="text-align:center;color:${l.firmado_at?"#15803d":"#b45309"};font-weight:700">${l.firmado_at ? "✓ Firmado" : "⏳ Pendiente"}</td>
+        <td>${fmtFirma(l.firmado_at)}</td>
+        <td>${l.firmado_por||"—"}</td>
+      </tr>`;
+    }).join("");
+    const w = window.open("","_blank");
+    w.document.write(`<!DOCTYPE html><html><head><title>Acuses ${periodo}</title>
+    <style>body{font-family:Arial;font-size:12px;margin:20px}h2{color:#1e3a8a;margin-bottom:4px}h3{color:#64748b;font-weight:normal;margin:0 0 4px}table{width:100%;border-collapse:collapse;margin-top:16px}th{background:#1e3a8a;color:#fff;padding:7px 10px;text-align:left;font-size:11px}td{padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:11px}tr:nth-child(even){background:#f8fafc}.res{background:#eff6ff;border-radius:6px;padding:10px 14px;margin:12px 0;font-size:12px;display:flex;gap:24px}.firma-section{margin-top:60px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:40px}.firma-box{text-align:center;border-top:1px solid #000;padding-top:8px;font-size:11px;color:#475569}@media print{@page{margin:12mm}}</style></head><body>
+    <h2>Registro de Acuses de Recibo — Liquidaciones de Sueldo</h2>
+    <h3>LEG Servicios de Limpieza EIRL · RUT 78.086.977-1 · Período: ${periodo}</h3>
+    <h3>Generado: ${new Date().toLocaleString("es-CL",{timeZone:"America/Santiago"})}</h3>
+    <div class="res"><span><strong>Total:</strong> ${liqPeriodo.length}</span><span style="color:#15803d"><strong>✓ Firmadas:</strong> ${firmadas}</span><span style="color:#b45309"><strong>⏳ Pendientes:</strong> ${pendientes}</span></div>
+    <table><thead><tr><th>N°</th><th>Trabajador</th><th>RUT</th><th>Líquido</th><th>Estado</th><th>Fecha y hora firma</th><th>Firmado por</th></tr></thead><tbody>${filas}</tbody></table>
+    <div class="firma-section">
+      <div class="firma-box">Empleador / Rep. Legal<br/>Ana María Guzmán Loyola<br/>RUT 12.083.247-6</div>
+      <div class="firma-box">Contador/a</div>
+      <div class="firma-box">Fiscalizador Inspección del Trabajo</div>
+    </div>
+    <p style="margin-top:20px;color:#94a3b8;font-size:10px">Documento generado desde LimpiApp Pro. Firmas electrónicas simples válidas según Ley 19.799.</p>
+    </body></html>`);
+    w.document.close();
+    setTimeout(()=>w.print(),800);
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:8}}>
+        <div>
+          <h2 style={{color:C.text,fontSize:16,fontWeight:600,margin:"0 0 3px"}}>✅ Acuses de Recibo</h2>
+          <p style={{color:C.textMuted,fontSize:12,margin:0}}>Registro de liquidaciones firmadas · Válido Ley 19.799 · Inspección del Trabajo</p>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div>
+            <label style={{display:"block",color:C.textMuted,fontSize:11,marginBottom:3}}>Período</label>
+            <input style={{...INP,width:120}} value={periodo} onChange={e=>setPeriodo(e.target.value)} placeholder="2026-05"/>
+          </div>
+          <div style={{marginTop:16}}><PrimaryBtn onClick={imprimir} color={C.accent}>🖨 Imprimir / PDF</PrimaryBtn></div>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+        <KPICard label="Total liquidaciones" value={liqPeriodo.length} color={C.accent}/>
+        <KPICard label="Firmadas" value={firmadas} color={C.green}/>
+        <KPICard label="Pendientes" value={pendientes} color={pendientes>0?C.yellow:C.green}/>
+      </div>
+      <Panel noPad>
+        {liqPeriodo.length===0 ? (
+          <div style={{textAlign:"center",padding:"40px",color:C.textMuted}}>
+            <div style={{fontSize:32,marginBottom:8}}>📋</div>
+            <p style={{fontWeight:600,color:C.text}}>Sin liquidaciones para {periodo}</p>
+            <p style={{fontSize:12}}>Genera las liquidaciones en la calculadora primero.</p>
+          </div>
+        ) : (
+          <DataTable
+            cols={[
+              {key:"n",     label:"N°",         render:(_r,i)=><span style={{color:C.textMuted}}>{i+1}</span>},
+              {key:"trab",  label:"Trabajador",  render:r=>{const t=(data.trabajadores||[]).find(w=>w.id===r.trabajador_id);return<span style={{fontWeight:600}}>{t?.nombre||"—"}</span>;}},
+              {key:"rut",   label:"RUT",         render:r=>{const t=(data.trabajadores||[]).find(w=>w.id===r.trabajador_id);return<span style={{color:C.textMuted,fontVariantNumeric:"tabular-nums"}}>{t?.rut||"—"}</span>;}},
+              {key:"liq",   label:"Líquido",     render:r=><span style={{fontVariantNumeric:"tabular-nums",fontWeight:600}}>{clp(r.liquido)}</span>},
+              {key:"estado",label:"Estado",      render:r=>r.firmado_at?<Tag text="✓ Firmado" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>:<Tag text="⏳ Pendiente" scheme={{bg:C.yellowBg,text:C.yellow,border:C.yellowBorder}}/>},
+              {key:"fecha", label:"Fecha firma", render:r=><span style={{color:C.textMuted,fontSize:12}}>{fmtFirma(r.firmado_at)}</span>},
+              {key:"quien", label:"Firmado por", render:r=><span style={{color:C.textMuted,fontSize:12}}>{r.firmado_por||"—"}</span>},
+            ]}
+            rows={liqPeriodo}
+          />
+        )}
+      </Panel>
+    </div>
+  );
+}
+
 function LibroRemuneraciones({ data }) {
   const hoy = new Date();
   const periodoDefault = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,"0")}`;
@@ -1953,13 +2048,14 @@ function Remuneraciones({ data, saveRem, insert, update }) {
           <p style={{color:C.textMuted,fontSize:12,margin:0}}>Liquidaciones y Libro de Remuneraciones · Ley del Trabajo Chile</p>
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          {[{key:"calculadora",label:"💰 Calculadora"},{key:"libro",label:"📋 Libro"},{key:"parametros",label:"⚙️ Parámetros"}].map(v=>(
+          {[{key:"calculadora",label:"💰 Calculadora"},{key:"libro",label:"📋 Libro"},{key:"acuses",label:"✅ Acuses"},{key:"parametros",label:"⚙️ Parámetros"}].map(v=>(
             <button key={v.key} onClick={()=>setVistaRem(v.key)} style={{background:vistaRem===v.key?C.accent:C.surface,color:vistaRem===v.key?"#fff":C.textMuted,border:`1px solid ${vistaRem===v.key?C.accent:C.border}`,borderRadius:6,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:vistaRem===v.key?600:400}}>{v.label}</button>
           ))}
         </div>
       </div>
 
       {vistaRem==="libro"      && <LibroRemuneraciones data={data}/>}
+      {vistaRem==="acuses"     && <AcusesRecibo data={data}/>}
       {vistaRem==="parametros" && <ParametrosPanel data={data} update={update} insert={insert}/>}
       {vistaRem==="calculadora" && <>
 
