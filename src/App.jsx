@@ -2236,7 +2236,7 @@ export default function App(){
     : null;
   const [tab,setTab]=useState("dashboard");
   const [contratoId,setContratoId]=useState("");
-  const {data,loading,dbMode,insert,update,saveRem}=useData();
+  const {data,loading,dbMode,insert,update,saveRem,reload}=useData();
   const { user, perfil, loading: authLoading } = useAuth();
   useEffect(() => { if (user) reload(); }, [user]);
 if(authLoading) return <Spinner/>;
