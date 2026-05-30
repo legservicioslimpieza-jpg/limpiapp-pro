@@ -127,7 +127,7 @@ function DataTable({cols,rows,empty="Sin registros"}) {
         <tbody>
           {rows.map((r,i)=>(
             <tr key={i} style={{borderBottom:`1px solid ${C.borderLight}`}}>
-              {cols.map(c=><td key={c.key} style={{padding:"10px 16px",color:C.text,verticalAlign:"middle"}}>{c.render?c.render(r):r[c.key]}</td>)}
+              {cols.map(c=><td key={c.key} style={{padding:"10px 16px",color:C.text,verticalAlign:"middle"}}>{c.render?c.render(r,i):r[c.key]}</td>)}
             </tr>
           ))}
         </tbody>
