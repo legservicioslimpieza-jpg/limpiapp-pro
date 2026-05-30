@@ -2318,6 +2318,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
 
       {vistaRem==="libro"      && <LibroRemuneraciones data={data}/>}
       {vistaRem==="acuses"     && <AcusesRecibo data={data}/>}
+      {vistaRem==="lre"        && <ExportadorLRE data={data}/>}
       {vistaRem==="parametros" && <ParametrosPanel data={data} update={update} insert={insert}/>}
       {vistaRem==="calculadora" && <>
 
