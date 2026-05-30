@@ -2310,7 +2310,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
           <p style={{color:C.textMuted,fontSize:12,margin:0}}>Liquidaciones y Libro de Remuneraciones · Ley del Trabajo Chile</p>
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          {[{key:"calculadora",label:"💰 Calculadora"},{key:"libro",label:"📋 Libro"},{key:"acuses",label:"✅ Acuses"},{key:"parametros",label:"⚙️ Parámetros"}].map(v=>(
+          {[{key:"calculadora",label:"💰 Calculadora"},{key:"libro",label:"📋 Libro"},{key:"acuses",label:"✅ Acuses"},{key:"lre",label:"📊 LRE"},{key:"parametros",label:"⚙️ Parámetros"}].map(v=>(
             <button key={v.key} onClick={()=>setVistaRem(v.key)} style={{background:vistaRem===v.key?C.accent:C.surface,color:vistaRem===v.key?"#fff":C.textMuted,border:`1px solid ${vistaRem===v.key?C.accent:C.border}`,borderRadius:6,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:vistaRem===v.key?600:400}}>{v.label}</button>
           ))}
         </div>
