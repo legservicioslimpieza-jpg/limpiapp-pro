@@ -1712,9 +1712,12 @@ function ExportadorLRE({ data }) {
 
   // ── Tablas de validación DT ────────────────────────
   const AFP_COD = {
-    'Capital':31,'Cuprum':13,'Habitat':14,'Modelo':103,
-    'Plan Vital':11,'PlanVital':11,'Provida':6,'Uno':19,'AFP Uno':19,
-    'AFP Capital':31,'AFP Cuprum':13,'AFP Habitat':14,'AFP Modelo':103,
+    'Capital':31,'CAPITAL':31,'Cuprum':13,'CUPRUM':13,
+    'Habitat':14,'HABITAT':14,'Modelo':103,'MODELO':103,
+    'Plan Vital':11,'PLAN VITAL':11,'PlanVital':11,'PLANVITAL':11,
+    'Provida':6,'PROVIDA':6,'Uno':19,'UNO':19,
+    'AFP Uno':19,'AFP Capital':31,'AFP Cuprum':13,
+    'AFP Habitat':14,'AFP Modelo':103,'AFP MODELO':103,
   };
   // Código mutual: 1=ACHS, 2=Mutual CCHC, 3=IST
   const MUTUAL_COD = 1; // ACHS (ajustar si cambia)
