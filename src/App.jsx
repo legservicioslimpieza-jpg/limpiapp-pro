@@ -450,7 +450,7 @@ function Trabajadores({data,insert,update,contratoId}){
               <FL label="Bono movilización ($)"><input type="number" style={INP} value={form.bono_movilizacion||0} onChange={e=>setForm({...form,bono_movilizacion:Number(e.target.value)})}/></FL>
               <FL label="Bono colación ($)"><input type="number" style={INP} value={form.bono_colacion||0} onChange={e=>setForm({...form,bono_colacion:Number(e.target.value)})}/></FL>
               <FL label="Tipo de trabajador">
-                <select style={INP} value={form.es_pensionado?"pensionado":"activo"} onChange={e=>setForm({...form,es_pensionado:e.target.value==="pensionado"})}>
+                <select style={INP} value={form.pensionado?"pensionado":"activo"} onChange={e=>setForm({...form,pensionado:e.target.value==="pensionado"})}>
                   <option value="activo">Activo (cotiza AFP y CES)</option>
                   <option value="pensionado">Pensionado (exento AFP y CES)</option>
                 </select>
@@ -470,7 +470,7 @@ function Trabajadores({data,insert,update,contratoId}){
             {key:"rut",label:"RUT",render:r=><span style={{color:C.textMuted,fontVariantNumeric:"tabular-nums"}}>{r.rut||"—"}</span>},
             {key:"cargo",label:"Cargo",render:r=><Tag text={r.cargo} scheme={r.cargo==="Supervisor"||r.cargo==="Supervisora"?{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}:{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
             {key:"sueldo",label:"Sueldo Base",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:C.text}}>{r.sueldo_base?clp(r.sueldo_base):"—"}</span>},
-            {key:"afp",label:"AFP",render:r=>r.es_pensionado?<Tag text="PENSIONADO" scheme={{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}}/>:<span style={{color:C.textMuted}}>{r.afp||"—"}</span>},
+            {key:"afp",label:"AFP",render:r=>r.pensionado?<Tag text="PENSIONADO" scheme={{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}}/>:<span style={{color:C.textMuted}}>{r.afp||"—"}</span>},
             {key:"activo",label:"Estado",render:r=><Tag text={r.activo?"Activo":"Inactivo"} scheme={r.activo?{bg:C.greenBg,text:C.green,border:C.greenBorder}:{bg:"#f9fafb",text:C.textMuted,border:C.border}}/>},
             {key:"edit",label:"",render:r=><button onClick={()=>{setTab("datos");setForm({...r});}} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
           ]}
@@ -1494,7 +1494,7 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
     dias_mes=30
   } = input;
 
-  const esPensionado  = trabajador.es_pensionado || false;
+  const esPensionado  = trabajador.pensionado || false;
   const esIndefinido  = (trabajador.tipo_contrato||'PLAZO FIJO') === 'INDEFINIDO';
   const afpRate       = tasas.find(a=>a.nombre===trabajador.afp)||{tasa_trabajador:0,sis:0};
   const utm           = params.utm || 68034;
@@ -2340,7 +2340,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
                   {trabajador.metodo_gratificacion==="ANTICIPO PORCENTAJE" && ` — ${trabajador.gratificacion_porcentaje||25}%`}
                   {trabajador.metodo_gratificacion==="ANTICIPO MONTO FIJO" && ` — ${clp(trabajador.gratificacion_monto||0)}/mes`}
                 </p>
-                {trabajador.es_pensionado && <p style={{color:C.purple,fontWeight:600}}>PENSIONADO — Exento AFP y CES</p>}
+                {trabajador.pensionado && <p style={{color:C.purple,fontWeight:600}}>PENSIONADO — Exento AFP y CES</p>}
               </div>
             )}
             <FL label="Contrato (opcional)">
@@ -2450,7 +2450,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
                       <b>Ausencias:</b>{res.dias_licencia_medica>0?` Licencia médica: ${res.dias_licencia_medica}d`:''}{res.dias_permiso_sin_goce>0?` · Permiso sin goce: ${res.dias_permiso_sin_goce}d`:''}{res.dias_vacaciones>0?` · Vacaciones: ${res.dias_vacaciones}d`:''}{res.dias_inasistencia>0?` · Inasistencia: ${res.dias_inasistencia}d`:''}
                     </p>
                   )}
-                  <p style={{ color: C.text, fontSize: 12 }}><b>Días trabajados:</b> {res.dias_trabajados} · <b>AFP:</b> {trabajador?.es_pensionado?"PENSIONADO - Exento":res.afp} · <b>Salud:</b> {trabajador?.salud}</p>
+                  <p style={{ color: C.text, fontSize: 12 }}><b>Días trabajados:</b> {res.dias_trabajados} · <b>AFP:</b> {trabajador?.pensionado?"PENSIONADO - Exento":res.afp} · <b>Salud:</b> {trabajador?.salud}</p>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -2478,7 +2478,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
                     <p style={{ fontWeight: 700, fontSize: 12, color: C.red, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Descuentos legales</p>
                     <table style={{ width: "100%" }}>
                       <tbody>
-                        <SlipRow label={trabajador?.es_pensionado?"AFP — PENSIONADO (Exento)":(`AFP ${res.afp} (${pct(res.tasa_afp)})`)} value={trabajador?.es_pensionado?"$0":clp(res.cotiz_afp)} />
+                        <SlipRow label={trabajador?.pensionado?"AFP — PENSIONADO (Exento)":(`AFP ${res.afp} (${pct(res.tasa_afp)})`)} value={trabajador?.pensionado?"$0":clp(res.cotiz_afp)} />
                         <SlipRow label="Salud (7.00%)" value={clp(res.cotiz_salud)} />
                         <SlipRow label={`Seg. Cesantía trab. (${pct(res.ces_trab_tasa||0)})`} value={res.ces_trab_tasa>0?clp(res.ces_trabajador):"$0 — Plazo Fijo"} />
                         {res.iusc>0&&<SlipRow label="IUSC (Imp. Único 2da Cat.)" value={clp(res.iusc)} />}
