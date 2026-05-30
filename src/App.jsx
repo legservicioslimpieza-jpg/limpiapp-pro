@@ -1695,7 +1695,269 @@ function ParametrosPanel({ data, update, insert }) {
     </div>
   );
 }
+// ═══════════════════════════════════════════════════════
+// EXPORTADOR LRE — Dirección del Trabajo Chile
+// Manual v8.0 Marzo 2023 — Delimitador: ; — Encoding: ANSI
+// Plazo: antes del día 15 del mes siguiente
+// ═══════════════════════════════════════════════════════
+function ExportadorLRE({ data }) {
+  const hoy = new Date();
+  const [periodo, setPeriodo] = useState(`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`);
+  const [errores, setErrores] = useState([]);
 
+  // ── Datos del período ──────────────────────────────
+  const liqPeriodo = (data.liquidaciones||[]).filter(l => l.periodo === periodo);
+  const params     = (data.parametros_legales||[]).find(p=>p.periodo===periodo)
+                  || (data.parametros_legales||[])[0] || {};
+
+  // ── Tablas de validación DT ────────────────────────
+  const AFP_COD = {
+    'Capital':31,'Cuprum':13,'Habitat':14,'Modelo':103,
+    'Plan Vital':11,'PlanVital':11,'Provida':6,'Uno':19,'AFP Uno':19,
+    'AFP Capital':31,'AFP Cuprum':13,'AFP Habitat':14,'AFP Modelo':103,
+  };
+  // Código mutual: 1=ACHS, 2=Mutual CCHC, 3=IST
+  const MUTUAL_COD = 1; // ACHS (ajustar si cambia)
+  // Región Arica y Parinacota = 15, Comuna Arica = 15101
+  const REGION   = 15;
+  const COMUNA   = 15101;
+  const RUT_EMP  = '780869771'; // RUT empresa sin puntos ni guión
+
+  const fmtRut = (r) => (r||'').replace(/\./g,'');
+
+  const fmtFecha = (iso) => {
+    if(!iso) return '';
+    const d = new Date(iso);
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const aa = d.getFullYear();
+    return `${dd}/${mm}/${aa}`;
+  };
+
+  const generarCSV = () => {
+    setErrores([]);
+    const warn = [];
+    const [anio, mes] = periodo.split('-');
+
+    const HEADERS = [
+      '1101','1102','1103','1104','1105','1106','1170','1146','1107',
+      '1108','1109','1141','1142','1143','1151','1110','1152',
+      '1115','1116','1117','1118','1155','1157','1131',
+      '2101','2102','2106','2111','2301','2302',
+      '3141','3143','3151','3161',
+      '4151','4152','4155',
+      '5201','5210','5220','5230','5240',
+      '5301','5341','5361','5362','5302',
+      '5410','5501','5564'
+    ];
+
+    const filas = liqPeriodo.map(liq => {
+      const t = (data.trabajadores||[]).find(w => w.id === liq.trabajador_id);
+      if (!t) { warn.push(`Sin trabajador para liquidación ${liq.id}`); return null; }
+
+      // RUT sin puntos, con guión
+      const rut = fmtRut(t.rut);
+      if (!rut) warn.push(`RUT vacío para ${t.nombre}`);
+
+      // AFP
+      const afpCod  = t.pensionado ? 100 : (AFP_COD[t.afp] || 0);
+      if (!t.pensionado && !AFP_COD[t.afp]) warn.push(`AFP "${t.afp}" sin código DT para ${t.nombre}`);
+      const afcFlag = t.pensionado ? 0 : 1;
+
+      // Haberes (enteros positivos)
+      const sueldo    = Math.round(liq.sueldo_proporcional || 0);
+      const extras    = Math.round(liq.horas_extra_valor   || 0);
+      const gratif    = Math.round(liq.gratificacion       || 0);
+      const bonoAsis  = Math.round(liq.bono_asistencia     || 0);
+      const colacion  = Math.round(liq.bono_colacion       || 0);
+      const movil     = Math.round(liq.bono_movilizacion   || 0);
+      const otrosH    = Math.round(liq.otros_haberes       || 0);
+
+      // Totales haberes por categoría LRE
+      const tot5210 = sueldo + extras + gratif + bonoAsis;  // Imponible y Tributable
+      const tot5220 = 0;                                    // Imponible NO Tributable
+      const tot5230 = colacion + movil + otrosH;            // NO Imponible NO Tributable
+      const tot5240 = 0;                                    // NO Imponible Tributable
+      const tot5201 = Math.round(liq.total_haberes || 0);
+
+      // Descuentos
+      const afp       = Math.round(liq.cotiz_afp       || 0);
+      const salud     = Math.round(liq.cotiz_salud     || 0);
+      const ces       = Math.round(liq.ces_trabajador  || 0);
+      const iusc      = Math.round(liq.iusc            || 0);
+      const otrosD    = Math.round(liq.otros_descuentos|| 0);
+      const totDesc   = Math.round(liq.total_descuentos|| 0);
+      const cotizTot  = afp + salud + ces; // 5341
+
+      // Aportes empleador (calculados sobre rem_imponible)
+      const topeUF    = Math.round((params.tope_imponible_uf||90) * (params.uf||38894));
+      const remImp    = Math.min(tot5210, topeUF);
+      const aporteAFC = t.pensionado ? 0 :
+        Math.round(remImp * (t.tipo_contrato==='plazo_fijo'
+          ? (params.ces_emp_plazo_fijo||0.03)
+          : (params.ces_emp_indefinido||0.024)));
+      const aporteMut = Math.round(remImp * (params.mutualidad||0.0093)); // 4152
+      const aporteSIS = t.pensionado ? 0 : Math.round(remImp * 0.0149);  // 4155 SIS ~1.49%
+      const totAportes = aporteAFC + aporteMut + aporteSIS;
+
+      // Fecha inicio contrato
+      const fechaInicio = t.fecha_inicio ? fmtFecha(t.fecha_inicio) : '';
+      if (!fechaInicio) warn.push(`Sin fecha inicio para ${t.nombre} — campo 1102 vacío`);
+
+      // Pensionado por vejez
+      const pensionadoVejez = t.pensionado ? 1 : 0;
+
+      // Días trabajados
+      const diasTrab = liq.dias_trabajados || 30;
+
+      return [
+        rut,            // 1101 RUT trabajador
+        fechaInicio,    // 1102 Fecha inicio contrato (OBLIGATORIO)
+        '',             // 1103 Fecha término (opcional)
+        '',             // 1104 Causal término (opcional)
+        REGION,         // 1105 Región = 15 Arica y Parinacota
+        COMUNA,         // 1106 Comuna = 15101 Arica
+        1,              // 1170 Tipo impuesto = 1 (2a Categoría)
+        0,              // 1146 Técnico extranjero = 0 (No)
+        101,            // 1107 Tipo jornada = 101 (Ordinaria Art.22)
+        0,              // 1108 Discapacidad/invalidez = 0 (No)
+        pensionadoVejez,// 1109 Pensionado vejez
+        afpCod,         // 1141 AFP
+        0,              // 1142 IPS (ExINP) = 0 (No pertenece)
+        102,            // 1143 FONASA = 102 (ajustar si ISAPRE)
+        afcFlag,        // 1151 AFC = 0 o 1
+        0,              // 1110 CCAF = 0 (No)
+        MUTUAL_COD,     // 1152 Org. administrador Ley 16.744 = 1 ACHS
+        diasTrab,       // 1115 Días trabajados en el mes
+        '',             // 1116 Días licencia médica (opcional)
+        '',             // 1117 Días vacaciones (opcional)
+        0,              // 1118 Subsidio trabajador joven = 0 (No)
+        0,              // 1155 APV individual = 0 (No)
+        0,              // 1157 APVC = 0 (No)
+        0,              // 1131 Indemnización todo evento = 0 (No)
+        sueldo,         // 2101 Sueldo (proporcional)
+        extras,         // 2102 Sobresueldo (horas extra)
+        gratif,         // 2106 Gratificación mensual
+        bonoAsis,       // 2111 Bono asistencia (otras remun. fijas)
+        colacion,       // 2301 Colación (no imponible no tributable)
+        movil,          // 2302 Movilización (no imponible no tributable)
+        afp,            // 3141 Cotización AFP o IPS (OBLIGATORIO)
+        salud,          // 3143 Cotización salud 7% (OBLIGATORIO)
+        ces,            // 3151 Cotización AFC trabajador
+        iusc,           // 3161 IUSC (OBLIGATORIO, 0 si no corresponde)
+        aporteAFC,      // 4151 AFC empleador
+        aporteMut,      // 4152 Seguro accidentes Ley 16.744 (OBLIGATORIO)
+        aporteSIS,      // 4155 Seguro invalidez y sobrevivencia SIS (OBLIGATORIO)
+        tot5201,        // 5201 Total haberes (OBLIGATORIO)
+        tot5210,        // 5210 Total hab. imponibles tributables (OBLIGATORIO)
+        tot5220,        // 5220 Total hab. imponibles NO tributables (OBLIGATORIO)
+        tot5230,        // 5230 Total hab. NO imponibles NO tributables (OBLIGATORIO)
+        tot5240,        // 5240 Total hab. NO imponibles tributables (OBLIGATORIO)
+        totDesc,        // 5301 Total descuentos (OBLIGATORIO)
+        cotizTot,       // 5341 Total descuentos cotizaciones trabajador (OBLIGATORIO)
+        iusc,           // 5361 Total descuentos impuesto remuneraciones (OBLIGATORIO)
+        0,              // 5362 Descuentos impuesto indemnizaciones (opcional)
+        otrosD,         // 5302 Total otros descuentos (OBLIGATORIO)
+        totAportes,     // 5410 Total aportes empleador (OBLIGATORIO)
+        Math.round(liq.liquido||0), // 5501 Total líquido (OBLIGATORIO)
+        0               // 5564 Total indemnizaciones tributables (OBLIGATORIO)
+      ].join(';');
+    }).filter(Boolean);
+
+    if (filas.length === 0) {
+      setErrores(['No hay liquidaciones para el período seleccionado.']);
+      return;
+    }
+
+    const csvContent = [HEADERS.join(';'), ...filas].join('\r\n');
+    const nombreArchivo = `${RUT_EMP}_${anio}${mes}.csv`;
+
+    // Descargar como CSV ANSI (texto puro ASCII, sin acentos en datos)
+    const blob = new Blob([csvContent], { type: 'text/plain;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = nombreArchivo; a.click();
+    URL.revokeObjectURL(url);
+
+    if (warn.length > 0) setErrores(warn);
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20,flexWrap:'wrap',gap:12}}>
+        <div>
+          <h2 style={{color:C.text,fontSize:16,fontWeight:600,margin:'0 0 4px'}}>📊 Exportador LRE — Dirección del Trabajo</h2>
+          <p style={{color:C.textMuted,fontSize:12,margin:0}}>
+            Genera el archivo CSV para declaración mensual en <strong>dt.gob.cl → Mi DT → Libro de Remuneraciones Electrónico</strong>
+          </p>
+          <p style={{color:C.textMuted,fontSize:11,margin:'4px 0 0',fontStyle:'italic'}}>
+            Plazo: día 15 del mes siguiente · Delimitador: punto y coma (;) · Codificación: ANSI
+          </p>
+        </div>
+        <div style={{display:'flex',gap:8,alignItems:'flex-end'}}>
+          <div>
+            <label style={{display:'block',color:C.textMuted,fontSize:11,marginBottom:3}}>Período (AAAA-MM)</label>
+            <input style={{...INP,width:110}} value={periodo} onChange={e=>setPeriodo(e.target.value)} placeholder="2026-05"/>
+          </div>
+          <PrimaryBtn onClick={generarCSV} color={C.accent}>⬇ Generar CSV</PrimaryBtn>
+        </div>
+      </div>
+
+      {/* Alertas */}
+      {errores.length > 0 && (
+        <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,padding:'10px 14px',marginBottom:16}}>
+          <p style={{fontWeight:700,color:'#dc2626',fontSize:13,margin:'0 0 6px'}}>⚠ Advertencias — revisa antes de subir al DT:</p>
+          {errores.map((e,i)=><p key={i} style={{color:'#991b1b',fontSize:12,margin:'2px 0'}}>{e}</p>)}
+        </div>
+      )}
+
+      {/* KPIs */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:20}}>
+        <KPICard label="Liquidaciones" value={liqPeriodo.length} color={C.accent}/>
+        <KPICard label="Región DT" value="15 — Arica" color={C.green}/>
+        <KPICard label="Mutual" value="ACHS (cód 1)" color={C.yellow}/>
+        <KPICard label="Plazo" value="Día 15" color={liqPeriodo.length>0?C.green:C.yellow}/>
+      </div>
+
+      {/* Tabla preview */}
+      <Panel noPad>
+        {liqPeriodo.length === 0 ? (
+          <div style={{textAlign:'center',padding:'40px',color:C.textMuted}}>
+            <div style={{fontSize:32,marginBottom:8}}>📊</div>
+            <p style={{fontWeight:600,color:C.text}}>Sin liquidaciones para {periodo}</p>
+            <p style={{fontSize:12}}>Genera las liquidaciones en la calculadora primero.</p>
+          </div>
+        ) : (
+          <DataTable
+            cols={[
+              {key:'trab',  label:'Trabajador',    render:r=>{const t=(data.trabajadores||[]).find(w=>w.id===r.trabajador_id);return<span style={{fontWeight:600}}>{t?.nombre||'—'}</span>;}},
+              {key:'rut',   label:'RUT (DT)',      render:r=>{const t=(data.trabajadores||[]).find(w=>w.id===r.trabajador_id);return<span style={{fontFamily:'monospace',fontSize:12}}>{fmtRut(t?.rut)}</span>;}},
+              {key:'afp',   label:'AFP (cód)',     render:r=>{const t=(data.trabajadores||[]).find(w=>w.id===r.trabajador_id);return<span>{t?.pensionado?'Pensionado (100)':((t?.afp||'—')+' ('+( AFP_COD[t?.afp]||'?')+')')}</span>;}},
+              {key:'dias',  label:'Días',          render:r=><span>{r.dias_trabajados||30}</span>},
+              {key:'5210',  label:'Imp.Trib.',     render:r=>{const s=Math.round((r.sueldo_proporcional||0)+(r.horas_extra_valor||0)+(r.gratificacion||0)+(r.bono_asistencia||0));return<span style={{fontVariantNumeric:'tabular-nums'}}>{clp(s)}</span>;}},
+              {key:'5230',  label:'No Imp.',       render:r=>{const ni=Math.round((r.bono_colacion||0)+(r.bono_movilizacion||0)+(r.otros_haberes||0));return<span style={{fontVariantNumeric:'tabular-nums'}}>{clp(ni)}</span>;}},
+              {key:'liq',   label:'Líquido',       render:r=><span style={{fontWeight:700,fontVariantNumeric:'tabular-nums'}}>{clp(r.liquido)}</span>},
+              {key:'ok',    label:'Estado',        render:r=>{const t=(data.trabajadores||[]).find(w=>w.id===r.trabajador_id);const ok=t&&fmtRut(t.rut)&&(t.pensionado||AFP_COD[t.afp]);return ok?<Tag text="✓ OK" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>:<Tag text="⚠ Revisar" scheme={{bg:C.yellowBg,text:C.yellow,border:C.yellowBorder}}/>;}}
+            ]}
+            rows={liqPeriodo}
+          />
+        )}
+      </Panel>
+
+      {/* Instrucciones */}
+      <div style={{background:'#f0f9ff',border:'1px solid #bae6fd',borderRadius:8,padding:'12px 16px',marginTop:16,fontSize:12,color:'#0c4a6e'}}>
+        <p style={{fontWeight:700,margin:'0 0 6px'}}>📋 Pasos para subir el LRE a la DT:</p>
+        <p style={{margin:'2px 0'}}>1. Descarga el CSV con el botón "⬇ Generar CSV"</p>
+        <p style={{margin:'2px 0'}}>2. Entra a <strong>dt.gob.cl → Mi DT → Clave Única</strong> → perfil Empleador Persona Jurídica</p>
+        <p style={{margin:'2px 0'}}>3. Selecciona <strong>Libro de Remuneraciones Electrónico</strong></p>
+        <p style={{margin:'2px 0'}}>4. Elige el mes, marca <strong>Archivo CSV</strong>, sube el archivo</p>
+        <p style={{margin:'2px 0'}}>5. La DT validará en 24-48 hrs y notificará por email</p>
+        <p style={{margin:'6px 0 0',color:'#0369a1',fontWeight:600}}>⚠ Verificar: AFP de cada trabajador · Mutual correcta (ACHS=1, Mutual CCHC=2, IST=3) · Fecha inicio contrato</p>
+      </div>
+    </div>
+  );
+}
 function AcusesRecibo({ data }) {
   const hoy = new Date();
   const periodoDefault = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,"0")}`;
