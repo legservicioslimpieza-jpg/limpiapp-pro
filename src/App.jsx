@@ -1729,13 +1729,11 @@ function ExportadorLRE({ data }) {
   const fmtRut = (r) => (r||'').replace(/\./g,'');
 
   const fmtFecha = (iso) => {
-    if(!iso) return '';
-    const d = new Date(iso);
-    const dd = String(d.getDate()).padStart(2,'0');
-    const mm = String(d.getMonth()+1).padStart(2,'0');
-    const aa = d.getFullYear();
-    return `${dd}/${mm}/${aa}`;
-  };
+    const fmtFecha = (iso) => {
+  if(!iso) return '';
+  const parts = iso.split('T')[0].split('-');
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+};
 
   const generarCSV = () => {
     setErrores([]);
