@@ -1725,16 +1725,12 @@ function ExportadorLRE({ data }) {
   const REGION   = 15;
   const COMUNA   = 15101;
   const RUT_EMP  = '780869771'; // RUT empresa sin puntos ni guión
-
   const fmtRut = (r) => (r||'').replace(/\./g,'');
-
   const fmtFecha = (iso) => {
-    const fmtFecha = (iso) => {
-  if(!iso) return '';
-  const parts = iso.split('T')[0].split('-');
-  return `${parts[2]}/${parts[1]}/${parts[0]}`;
-};
-
+    if(!iso) return '';
+    const parts = iso.split('T')[0].split('-');
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  };
   const generarCSV = () => {
     setErrores([]);
     const warn = [];
