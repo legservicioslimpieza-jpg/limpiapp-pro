@@ -397,7 +397,7 @@ function Trabajadores({data,insert,update,contratoId}){
   const isNew=form&&!data.trabajadores.find(t=>t.id===form.id);
   const asignadosIds=contratoId?(data.asignaciones||[]).filter(a=>a.contrato_id===contratoId&&a.activo).map(a=>a.trabajador_id):null;
   const trabajadoresFiltrados=asignadosIds?data.trabajadores.filter(t=>asignadosIds.includes(t.id)):data.trabajadores;
-  const openNew=()=>{setTab("datos");setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:500000,tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO"});};
+  const openNew=()=>{setTab("datos");setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:500000,tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:""});};
   const save=async()=>{if(!form.nombre.trim())return;const ok=isNew?await insert("trabajadores",form):await update("trabajadores",form);if(ok)setForm(null);};
   return(
     <div>
@@ -415,6 +415,7 @@ function Trabajadores({data,insert,update,contratoId}){
               <FL label="Tipo contrato"><select style={INP} value={form.tipo_contrato||"PLAZO FIJO"} onChange={e=>setForm({...form,tipo_contrato:e.target.value})}><option>PLAZO FIJO</option><option>INDEFINIDO</option><option>HONORARIOS</option></select></FL>
               <FL label="Teléfono"><input style={INP} value={form.telefono} onChange={e=>setForm({...form,telefono:e.target.value})} placeholder="+569XXXXXXXX"/></FL>
               <FL label="Email"><input style={INP} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="correo@empresa.cl"/></FL>
+              <FL label="Fecha ingreso a la empresa"><input type="date" style={INP} value={form.fecha_inicio||""} onChange={e=>setForm({...form,fecha_inicio:e.target.value})}/></FL>
             </div>
           )}
           {tab==="remuneracion"&&(
@@ -471,6 +472,16 @@ function Trabajadores({data,insert,update,contratoId}){
             {key:"cargo",label:"Cargo",render:r=><Tag text={r.cargo} scheme={r.cargo==="Supervisor"||r.cargo==="Supervisora"?{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}:{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
             {key:"sueldo",label:"Sueldo Base",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:C.text}}>{r.sueldo_base?clp(r.sueldo_base):"—"}</span>},
             {key:"afp",label:"AFP",render:r=>r.pensionado?<Tag text="PENSIONADO" scheme={{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}}/>:<span style={{color:C.textMuted}}>{r.afp||"—"}</span>},
+            {key:"ingreso",label:"Ingreso",render:r=>{
+              if(!r.fecha_inicio) return <span style={{color:C.textMuted}}>—</span>;
+              const parts=r.fecha_inicio.split('T')[0].split('-');
+              const fecha=`${parts[2]}/${parts[1]}/${parts[0]}`;
+              const hoy=new Date(); const ini=new Date(r.fecha_inicio);
+              const meses=Math.floor((hoy-ini)/(1000*60*60*24*30.44));
+              const anios=Math.floor(meses/12); const mRest=meses%12;
+              const antig=anios>0?`${anios}a ${mRest}m`:`${meses}m`;
+              return <span style={{color:C.textMuted,fontSize:12}}>{fecha}<br/><span style={{color:C.green,fontWeight:600}}>{antig}</span></span>;
+            }},
             {key:"activo",label:"Estado",render:r=><Tag text={r.activo?"Activo":"Inactivo"} scheme={r.activo?{bg:C.greenBg,text:C.green,border:C.greenBorder}:{bg:"#f9fafb",text:C.textMuted,border:C.border}}/>},
             {key:"edit",label:"",render:r=><button onClick={()=>{setTab("datos");setForm({...r});}} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
           ]}
@@ -2244,6 +2255,55 @@ function LibroRemuneraciones({ data }) {
   );
 }
 
+function reimprimirLiq(liq, data) {
+  const t   = (data.trabajadores||[]).find(w => w.id === liq.trabajador_id) || {};
+  const clpF = n => n!=null ? new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP',maximumFractionDigits:0}).format(n) : '—';
+  const pct  = (a,b) => b>0 ? (a/b*100).toFixed(2)+'%' : '0%';
+  const fila = (label, val, color='#dc2626') =>
+    val ? `<tr><td style="padding:5px 8px;color:#475569">${label}</td><td style="padding:5px 8px;text-align:right;color:${color}">${val}</td></tr>` : '';
+  const w = window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Liquidación ${liq.periodo} · ${t.nombre||''}</title>
+  <style>body{font-family:Arial;font-size:12px;margin:20px;color:#0f172a}h2{color:#1e3a8a;margin:0 0 2px}h3{color:#64748b;font-weight:400;margin:0 0 12px;font-size:11px}table{width:100%;border-collapse:collapse;margin-bottom:10px}.sec-title{background:#1e3a8a;color:#fff;padding:5px 8px;font-weight:700;font-size:11px}.total td{border-top:2px solid #e2e8f0;font-weight:700;padding:5px 8px}.liq{background:#dbeafe;padding:10px;border-radius:6px;display:flex;justify-content:space-between;font-size:15px;font-weight:700;color:#1d4ed8;margin:12px 0}.firma{margin-top:50px;display:grid;grid-template-columns:1fr 1fr;gap:40px}.firma-box{text-align:center;border-top:1px solid #000;padding-top:6px;font-size:10px;color:#475569}@media print{@page{margin:10mm}}</style></head><body>
+  <h2>Liquidación de Sueldo · ${liq.periodo}</h2>
+  <h3>LEG Servicios de Limpieza EIRL · RUT 78.086.977-1 · Arica, Región de Arica y Parinacota</h3>
+  <table>
+    <tr><td><b>Trabajador/a:</b> ${t.nombre||'—'} &nbsp;·&nbsp; <b>RUT:</b> ${t.rut||'—'}</td></tr>
+    <tr><td><b>Cargo:</b> ${t.cargo||'—'} &nbsp;·&nbsp; <b>Contrato:</b> ${(t.tipo_contrato||'').toUpperCase()} &nbsp;·&nbsp; <b>Período:</b> ${liq.periodo}</td></tr>
+    ${liq.descripcion?`<tr><td><b>Instituciones:</b> ${liq.descripcion}</td></tr>`:''}
+    <tr><td><b>Días trabajados:</b> ${liq.dias_trabajados} &nbsp;·&nbsp; <b>AFP:</b> ${t.pensionado?'PENSIONADO - Exento':(t.afp||'—')} &nbsp;·&nbsp; <b>Salud:</b> ${t.salud||'FONASA'}</td></tr>
+  </table>
+  <div class="sec-title">HABERES</div>
+  <table>
+    ${fila('Sueldo base',clpF(liq.sueldo_proporcional),'#0f172a')}
+    ${fila('Gratificación legal',clpF(liq.gratificacion),'#0f172a')}
+    ${liq.horas_extra_valor?fila('Horas extra',clpF(liq.horas_extra_valor),'#0f172a'):''}
+    ${liq.bono_asistencia?fila('Bono asistencia',clpF(liq.bono_asistencia),'#0f172a'):''}
+    ${liq.bono_movilizacion?fila('Bono movilización',clpF(liq.bono_movilizacion),'#0f172a'):''}
+    ${liq.bono_colacion?fila('Bono colación',clpF(liq.bono_colacion),'#0f172a'):''}
+    ${liq.otros_haberes?fila('Otros haberes',clpF(liq.otros_haberes),'#0f172a'):''}
+    <tr class="total"><td>TOTAL HABERES</td><td style="text-align:right;color:#1e3a8a">${clpF(liq.total_haberes)}</td></tr>
+    <tr><td style="padding:5px 8px;color:#64748b">Renta imponible</td><td style="padding:5px 8px;text-align:right;color:#64748b">${clpF(liq.rem_imponible)}</td></tr>
+  </table>
+  <div class="sec-title">DESCUENTOS LEGALES</div>
+  <table>
+    ${t.pensionado?`<tr><td style="padding:5px 8px;color:#475569">AFP — PENSIONADO (Exento)</td><td style="padding:5px 8px;text-align:right;color:#64748b">$0</td></tr>`:fila(`AFP ${t.afp||''} (${pct(liq.cotiz_afp,liq.rem_imponible)})`,clpF(liq.cotiz_afp))}
+    ${fila('Salud (7.00%)',clpF(liq.cotiz_salud))}
+    ${liq.ces_trabajador?fila('Seg. Cesantía trab.',clpF(liq.ces_trabajador)):`<tr><td style="padding:5px 8px;color:#475569">Seg. Cesantía trab. (0.00%)</td><td style="padding:5px 8px;text-align:right;color:#64748b">$0 — ${(t.tipo_contrato||'').toUpperCase()}</td></tr>`}
+    ${liq.iusc?fila('Impuesto único (IUSC)',clpF(liq.iusc)):''}
+    ${liq.otros_descuentos?fila('Otros descuentos',clpF(liq.otros_descuentos)):''}
+    <tr class="total"><td>TOTAL DESCUENTOS</td><td style="text-align:right;color:#dc2626">${clpF(liq.total_descuentos)}</td></tr>
+  </table>
+  <div class="liq"><span>LÍQUIDO A PAGAR</span><span>${clpF(liq.liquido)}</span></div>
+  ${liq.firmado_at?`<p style="color:#15803d;font-size:11px">✅ Recibido conforme por ${liq.firmado_por} el ${new Date(liq.firmado_at).toLocaleDateString('es-CL')}</p>`:''}
+  <div class="firma">
+    <div class="firma-box">Empleador / Rep. Legal<br/>Ana María Guzmán Loyola · RUT 12.083.247-6</div>
+    <div class="firma-box">Trabajador/a<br/>${t.nombre||'—'}</div>
+  </div>
+  </body></html>`);
+  w.document.close();
+  setTimeout(()=>w.print(),800);
+}
+
 function Remuneraciones({ data, saveRem, insert, update }) {
   const [vistaRem, setVistaRem] = useState("calculadora");
   const hoy = new Date();
@@ -2549,6 +2609,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
                 {key:"desc",      label:"Descuentos",  render:r=><span style={{color:C.red,fontVariantNumeric:"tabular-nums"}}>{clp(r.total_descuentos)}</span>},
                 {key:"liquido",   label:"Líquido",     render:r=><span style={{fontWeight:700,color:C.accent,fontVariantNumeric:"tabular-nums"}}>{clp(r.liquido)}</span>},
                 {key:"costo",     label:"Costo Empresa",render:r=><span style={{color:C.purple,fontVariantNumeric:"tabular-nums"}}>{clp(r.costo_empresa)}</span>},
+                {key:"print",     label:"",            render:r=><button onClick={()=>reimprimirLiq(r,data)} style={{color:C.accent,background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 10px",fontSize:12,cursor:"pointer"}}>🖨</button>},
               ]}
               rows={[...liqList].reverse()}
               empty="Sin liquidaciones generadas"
