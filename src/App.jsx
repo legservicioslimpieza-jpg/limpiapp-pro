@@ -1552,8 +1552,8 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
 
   // ── Costo empresa ──────────────────────────────────────────
   const sis               = esPensionado?0:Math.round(rem_imponible*(afpRate.sis||0));
-  const ces_emp_tasa      = esIndefinido?(params.ces_emp_indefinido||0.024):(params.ces_emp_plazo_fijo||0.030);
-  const ces_empleador     = Math.round(rem_imp_ces*ces_emp_tasa);
+  const ces_emp_tasa      = esPensionado?0:(esIndefinido?(params.ces_emp_indefinido||0.024):(params.ces_emp_plazo_fijo||0.030));
+  const ces_empleador     = esPensionado?0:Math.round(rem_imp_ces*ces_emp_tasa);
   const mutualidad_valor  = Math.round(rem_imponible*(params.mutualidad||0.0093));
   const aporte_patronal_valor = esPensionado?0:Math.round(rem_imponible*(params.aporte_patronal||0.010));
   const costo_empresa     = total_haberes+sis+ces_empleador+mutualidad_valor+aporte_patronal_valor;
