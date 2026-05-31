@@ -307,22 +307,39 @@ function Dashboard({data,contratoId}){
   );
 }
 
-/* ─── Contratos ─────────────────────────────────────────────── */
+/* ─── Centros de Costo (Contratos) ──────────────────────────── */
 const ESTADOS_CT=["Vigente","Postulación","Renovación","Inactivo"];
+const TIPO_CENTRO_TAG={
+  'LICITACION': {bg:'#eff6ff',text:'#1d4ed8',border:'#bfdbfe',label:'Licitación'},
+  'CORPORATIVO':{bg:'#f5f3ff',text:'#7c3aed',border:'#ddd6fe',label:'Corporativo'},
+  'EVENTUAL':   {bg:'#fef9c3',text:'#b45309',border:'#fde68a',label:'Eventual'},
+};
+const FINANC_TAG={
+  'financiado':         {bg:'#f0fdf4',text:'#15803d',border:'#86efac',icon:'🟢'},
+  'parcial':            {bg:'#fef9c3',text:'#b45309',border:'#fde68a',icon:'🟡'},
+  'sin_financiamiento': {bg:'#fef2f2',text:'#dc2626',border:'#fca5a5',icon:'🔴'},
+  'en_riesgo':          {bg:'#fff7ed',text:'#c2410c',border:'#fed7aa',icon:'🟠'},
+  'cerrado':            {bg:'#f9fafb',text:'#94a3b8',border:'#e2e8f0',icon:'⚫'},
+};
 function Contratos({data,insert,update}){
   const [form,setForm]=useState(null);
   const isNew=form&&!data.contratos.find(c=>c.id===form.id);
-  const openNew=()=>setForm({id:genId("CT"),cliente:"",instalacion:"",direccion:"",supervisor_id:data.trabajadores.find(t=>t.cargo==="Supervisor"||t.cargo==="Supervisora")?.id||"",estado:"Vigente",activo:true});
+  const openNew=()=>setForm({id:genId("CT"),cliente:"",instalacion:"",direccion:"",supervisor_id:data.trabajadores.find(t=>t.cargo==="Supervisor"||t.cargo==="Supervisora")?.id||"",estado:"Vigente",activo:true,tipo_centro_costo:"LICITACION",estado_financiero:"financiado"});
   const save=async()=>{if(!form.cliente.trim())return;const ok=isNew?await insert("contratos",form):await update("contratos",form);if(ok)setForm(null);};
+  const nLic=data.contratos.filter(c=>!c.tipo_centro_costo||c.tipo_centro_costo==="LICITACION").length;
+  const nCorp=data.contratos.filter(c=>c.tipo_centro_costo==="CORPORATIVO").length;
+  const nEvt=data.contratos.filter(c=>c.tipo_centro_costo==="EVENTUAL").length;
   return(
     <div>
-      <PageHeader title="Contratos" subtitle={`${data.contratos.length} registrados`} action={<PrimaryBtn onClick={openNew}>+ Nuevo contrato</PrimaryBtn>}/>
+      <PageHeader title="Centros de Costo" subtitle={`${nLic} licitaciones · ${nCorp} corporativos · ${nEvt} eventuales`} action={<PrimaryBtn onClick={openNew}>+ Nuevo contrato</PrimaryBtn>}/>
       {form&&(
         <FormCard onSave={save} onCancel={()=>setForm(null)} saveLabel={isNew?"Crear":"Actualizar"}>
           <FL label="Cliente / Institución"><input style={INP} value={form.cliente} onChange={e=>setForm({...form,cliente:e.target.value})} placeholder="Ej: Seremi de Transportes"/></FL>
           <FL label="Instalación"><input style={INP} value={form.instalacion} onChange={e=>setForm({...form,instalacion:e.target.value})} placeholder="Ej: Sucursal Arica"/></FL>
           <FL label="Dirección"><input style={INP} value={form.direccion} onChange={e=>setForm({...form,direccion:e.target.value})} placeholder="Ej: Chacabuco Nº901"/></FL>
+          <FL label="Tipo de centro"><select style={INP} value={form.tipo_centro_costo||"LICITACION"} onChange={e=>setForm({...form,tipo_centro_costo:e.target.value})}><option value="LICITACION">Licitación</option><option value="CORPORATIVO">Corporativo</option><option value="EVENTUAL">Eventual</option></select></FL>
           <FL label="Estado"><select style={INP} value={form.estado} onChange={e=>setForm({...form,estado:e.target.value,activo:["Vigente","Renovación"].includes(e.target.value)})}>{ESTADOS_CT.map(s=><option key={s}>{s}</option>)}</select></FL>
+          <FL label="Financiamiento"><select style={INP} value={form.estado_financiero||"financiado"} onChange={e=>setForm({...form,estado_financiero:e.target.value})}><option value="financiado">🟢 Financiado</option><option value="parcial">🟡 Parcial</option><option value="sin_financiamiento">🔴 Sin financiamiento</option><option value="en_riesgo">🟠 En riesgo</option><option value="cerrado">⚫ Cerrado</option></select></FL>
           <FL label="Supervisor"><select style={INP} value={form.supervisor_id||""} onChange={e=>setForm({...form,supervisor_id:e.target.value})}><option value="">— Sin asignar —</option>{data.trabajadores.map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}</select></FL>
           <FL label="ID Licitación"><input style={INP} value={form.licitacion_id||""} onChange={e=>setForm({...form,licitacion_id:e.target.value})} placeholder="Ej: 892200-1-LE26"/></FL>
         </FormCard>
@@ -331,9 +348,11 @@ function Contratos({data,insert,update}){
         <DataTable
           cols={[
             {key:"id",label:"ID",render:r=><code style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 6px",fontSize:11,color:C.textMuted}}>{r.id}</code>},
+            {key:"tipo",label:"Tipo",render:r=>{const t=TIPO_CENTRO_TAG[r.tipo_centro_costo||"LICITACION"]||TIPO_CENTRO_TAG["LICITACION"];return<Tag text={t.label} scheme={{bg:t.bg,text:t.text,border:t.border}}/>;}},
             {key:"cliente",label:"Cliente",render:r=><span style={{fontWeight:500}}>{r.cliente}</span>},
-            {key:"instalacion",label:"Instalación",render:r=><span style={{color:C.textMuted}}>{r.instalacion}</span>},
+            {key:"instalacion",label:"Instalación",render:r=><span style={{color:C.textMuted,fontSize:12}}>{r.instalacion}</span>},
             {key:"estado",label:"Estado",render:r=><Tag text={r.estado} scheme={ECTAG[r.estado]}/>},
+            {key:"financ",label:"Financiamiento",render:r=>{const f=FINANC_TAG[r.estado_financiero||"financiado"]||FINANC_TAG["financiado"];return<span style={{fontSize:11,color:f.text,background:f.bg,border:`1px solid ${f.border}`,borderRadius:4,padding:"2px 8px",display:"inline-block",whiteSpace:"nowrap"}}>{f.icon} {(r.estado_financiero||"financiado").replace(/_/g," ")}</span>;}},
             {key:"deps",label:"Dep.",render:r=><span style={{color:C.textMuted}}>{data.dependencias.filter(d=>d.contrato_id===r.id).length}</span>},
             {key:"tareas",label:"Tareas",render:r=><span style={{color:C.textMuted}}>{data.checklist.filter(c=>c.contrato_id===r.id).length}</span>},
             {key:"edit",label:"",render:r=><button onClick={()=>setForm({...r})} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
@@ -626,7 +645,6 @@ function ModoQR({ depId, data, insert, loading }) {
           </div>
           <div style={{color:"#94a3b8",fontSize:13}}>{marcadas.size} tarea{marcadas.size!==1?"s":""} registrada{marcadas.size!==1?"s":""}</div>
           {gps&&<div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📍 GPS registrado</div>}
-          {fotoPreview&&<img src={fotoPreview} alt="evidencia" style={{width:"100%",borderRadius:8,marginTop:8,maxHeight:140,objectFit:"cover"}}/>}
           {fotos.length>0&&<div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📷 {fotos.length} foto{fotos.length>1?"s":""} subida{fotos.length>1?"s":""} al servidor</div>}
         </div>
         <button style={{...btnG,maxWidth:420}} onClick={()=>{setConfirmado(false);setMarcadas(new Set());setObs('');}}>
@@ -1496,13 +1514,27 @@ function calcularIUSC(baseIUSC, utm, tabla) {
   return Math.max(0, Math.round(baseIUSC * tramo.tasa - tramo.factor_deduccion_utm * utm));
 }
 
+/* Calcula días activos de una asignación dentro de un período */
+function diasActivosEnPeriodo(fechaInicio, fechaTermino, periodo, diasMes) {
+  const [anio, mes] = periodo.split('-').map(Number);
+  const inicioMes = new Date(anio, mes-1, 1);
+  const finMes    = new Date(anio, mes-1, diasMes);
+  const iniAsig   = fechaInicio  ? new Date(fechaInicio.split('T')[0])  : inicioMes;
+  const finAsig   = fechaTermino ? new Date(fechaTermino.split('T')[0]) : finMes;
+  const inicio    = iniAsig > inicioMes ? iniAsig : inicioMes;
+  const fin       = finAsig < finMes   ? finAsig : finMes;
+  if (fin < inicio) return 0;
+  return Math.round((fin - inicio) / (1000*60*60*24)) + 1;
+}
+
 function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
   const {
     dias_trabajados=30, horas_extra=0, otros_haberes=0, otros_descuentos=0,
     contrato_id, periodo, descripcion='',
     dias_licencia_medica=0, dias_permiso_sin_goce=0,
     dias_vacaciones=0, dias_inasistencia=0,
-    dias_mes=30, sueldo_override=null, excluir_bonos=false
+    dias_mes=30, sueldo_override=null, excluir_bonos=false,
+    bonos_override=null, gratificacion_override=null
   } = input;
   const sueldoBase = sueldo_override > 0 ? sueldo_override : (trabajador.sueldo_base||0);
 
@@ -1525,19 +1557,23 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
   const sueldo_prop   = Math.round(sueldoBase * diasPagados / 30);
   const tope_grat     = Math.round(4.75 * utm / 12);
   let gratificacion   = 0;
-  const metGrat = trabajador.metodo_gratificacion || '25% MENSUAL';
-  if (metGrat === '25% MENSUAL') {
-    gratificacion = Math.min(Math.round(sueldo_prop * 0.25), tope_grat);
-  } else if (metGrat === 'ANTICIPO PORCENTAJE') {
-    gratificacion = Math.round(sueldo_prop * ((trabajador.gratificacion_porcentaje || 25) / 100));
-  } else if (metGrat === 'ANTICIPO MONTO FIJO') {
-    gratificacion = Math.round((trabajador.gratificacion_monto || 0) * diasPagados / 30);
+  if (gratificacion_override !== null && gratificacion_override !== undefined) {
+    gratificacion = Math.round(gratificacion_override * diasPagados / 30);
+  } else {
+    const metGrat = trabajador.metodo_gratificacion || '25% MENSUAL';
+    if (metGrat === '25% MENSUAL') {
+      gratificacion = Math.min(Math.round(sueldo_prop * 0.25), tope_grat);
+    } else if (metGrat === 'ANTICIPO PORCENTAJE') {
+      gratificacion = Math.round(sueldo_prop * ((trabajador.gratificacion_porcentaje || 25) / 100));
+    } else if (metGrat === 'ANTICIPO MONTO FIJO') {
+      gratificacion = Math.round((trabajador.gratificacion_monto || 0) * diasPagados / 30);
+    }
   }
   const valor_hora    = Math.round(sueldoBase/(params.horas_mensuales||180));
   const horas_extra_valor = Math.round(valor_hora*1.5*(horas_extra||0));
-  const bono_asis     = excluir_bonos?0:(diasPagados>=30?(trabajador.bono_asistencia||0):0);
-  const bono_movil    = excluir_bonos?0:(trabajador.bono_movilizacion||0);
-  const bono_cola     = excluir_bonos?0:(trabajador.bono_colacion||0);
+  const bono_asis     = excluir_bonos?0:(bonos_override ? (bonos_override.bono_asistencia||0) : (diasPagados>=30?(trabajador.bono_asistencia||0):0));
+  const bono_movil    = excluir_bonos?0:(bonos_override ? (bonos_override.bono_movilizacion||0) : (trabajador.bono_movilizacion||0));
+  const bono_cola     = excluir_bonos?0:(bonos_override ? (bonos_override.bono_colacion||0) : (trabajador.bono_colacion||0));
   const total_haberes = sueldo_prop+gratificacion+horas_extra_valor+bono_asis+bono_movil+bono_cola+(otros_haberes||0);
 
   // ── Renta imponible ────────────────────────────────────────
@@ -2323,8 +2359,8 @@ function Remuneraciones({ data, saveRem, insert, update }) {
   const [diasMes, setDiasMes] = useState(30);
   const [res, setRes] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [sueldoOverride, setSueldoOverride] = useState(0);
-  const [excluirBonos, setExcluirBonos] = useState(false);
+  const [asignacionesRem, setAsignacionesRem] = useState([]);
+  const [montosAuto, setMontosAuto] = useState(null);
   const [saved, setSaved] = useState(false);
   const slipRef = useRef();
 
@@ -2334,11 +2370,69 @@ function Remuneraciones({ data, saveRem, insert, update }) {
   const liqList = data.liquidaciones || [];
   const trabajador = data.trabajadores.find(t => t.id === tId);
 
+  // Auto-cargar asignaciones cuando cambia trabajador, período o días del mes
+  useEffect(() => {
+    if (!tId || !periodo) { setAsignacionesRem([]); setMontosAuto(null); return; }
+    const [anio, mes] = periodo.split('-').map(Number);
+    const inicioMes = new Date(anio, mes-1, 1);
+    const finMes    = new Date(anio, mes-1, diasMes);
+
+    const asigs = (data.asignaciones || []).filter(a => {
+      if (a.trabajador_id !== tId) return false;
+      if (a.afecta_remuneracion === false) return false;
+      const iniA = a.fecha_inicio_asig  ? new Date(a.fecha_inicio_asig.split('T')[0])  : new Date(2000,0,1);
+      const finA = a.fecha_termino_asig ? new Date(a.fecha_termino_asig.split('T')[0]) : new Date(2099,11,31);
+      return iniA <= finMes && finA >= inicioMes;
+    });
+
+    const asigsProp = asigs.map(a => {
+      const dias = diasActivosEnPeriodo(a.fecha_inicio_asig, a.fecha_termino_asig, periodo, diasMes);
+      const factor = dias / 30;
+      const contrato = (data.contratos||[]).find(c => c.id === a.contrato_id);
+      return {
+        ...a,
+        contrato_nombre: contrato?.cliente || a.contrato_id,
+        tipo_centro: contrato?.tipo_centro_costo || 'LICITACION',
+        dias_activos: dias,
+        sueldo_prop:        Math.round((a.sueldo_asignado||0) * factor),
+        bono_asistencia_prop: dias >= 30 ? (a.bono_asistencia||0) : 0,
+        bono_movil_prop:    Math.round((a.bono_movilizacion||0) * factor),
+        bono_cola_prop:     Math.round((a.bono_colacion||0) * factor),
+        gratif_prop:        Math.round((a.gratificacion_monto||0) * factor),
+        es_parcial:         dias < diasMes,
+      };
+    });
+
+    const totales = asigsProp.length > 0 ? {
+      sueldo:          asigsProp.reduce((s,a) => s+a.sueldo_prop, 0),
+      bono_asistencia: asigsProp.reduce((s,a) => s+a.bono_asistencia_prop, 0),
+      bono_movilizacion: asigsProp.reduce((s,a) => s+a.bono_movil_prop, 0),
+      bono_colacion:   asigsProp.reduce((s,a) => s+a.bono_cola_prop, 0),
+      gratificacion:   asigsProp.reduce((s,a) => s+a.gratif_prop, 0),
+    } : null;
+
+    setAsignacionesRem(asigsProp);
+    setMontosAuto(totales);
+
+    // Auto-rellenar descripción
+    if (asigsProp.length > 0) {
+      const descAuto = asigsProp.map(a =>
+        `${a.contrato_nombre}${a.es_parcial ? ` (${a.dias_activos} días)` : ''}`
+      ).join(' + ');
+      setDescripcion(descAuto);
+    }
+  }, [tId, periodo, diasMes]);
+
   const calcular = () => {
-    if (!trabajador || !params) { alert("Selecciona un trabajador y verifica que los parámetros legales estén cargados."); return; }
+    if (!trabajador || !params) { alert("Selecciona un trabajador y verifica parámetros."); return; }
     setRes(calcularLiquidacion(trabajador, params, tasas, iuscTabla, {
-      sueldo_override: sueldoOverride > 0 ? sueldoOverride : null,
-      excluir_bonos: excluirBonos,
+      sueldo_override:       montosAuto ? montosAuto.sueldo : null,
+      bonos_override:        montosAuto ? {
+        bono_asistencia:     montosAuto.bono_asistencia,
+        bono_movilizacion:   montosAuto.bono_movilizacion,
+        bono_colacion:       montosAuto.bono_colacion,
+      } : null,
+      gratificacion_override: montosAuto && montosAuto.gratificacion > 0 ? montosAuto.gratificacion : null,
       dias_trabajados: dias, horas_extra: hextra,
       otros_haberes: otrosH, otros_descuentos: otrosD,
       contrato_id: cId, periodo, descripcion,
@@ -2353,6 +2447,14 @@ function Remuneraciones({ data, saveRem, insert, update }) {
 
   const guardar = async () => {
     if (!res) return;
+    const existente = liqList.find(l => l.trabajador_id === tId && l.periodo === periodo);
+    if (existente) {
+      const firmada = existente.firmado_at;
+      const msg = firmada
+        ? `⚠ Esta liquidación fue firmada por ${existente.firmado_por||'el trabajador'} el ${new Date(existente.firmado_at).toLocaleDateString('es-CL')}.\n\nReemplazarla INVALIDARÁ su firma. ¿Continuar de todas formas?`
+        : `Ya existe una liquidación para ${trabajador?.nombre} en el período ${periodo}.\n¿Desea reemplazarla?`;
+      if (!window.confirm(msg)) return;
+    }
     setSaving(true);
     const ok = await saveRem(res);
     if (ok) setSaved(true);
@@ -2393,32 +2495,70 @@ function Remuneraciones({ data, saveRem, insert, update }) {
         <Panel title="Calculadora de liquidación">
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <FL label="Trabajador(a)">
-              <select style={INP} value={tId} onChange={e => { setTId(e.target.value); setRes(null); setSueldoOverride(0); setExcluirBonos(false); }}>
+              <select style={INP} value={tId} onChange={e => { setTId(e.target.value); setRes(null); setAsignacionesRem([]); setMontosAuto(null); }}>
                 <option value="">— Seleccionar —</option>
                 {data.trabajadores.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
               </select>
             </FL>
             {trabajador && (
               <div style={{ background: C.surfaceAlt, border: `1px solid ${C.border}`, borderRadius: 6, padding: "10px 12px", fontSize: 12 }}>
-                <p style={{ color: C.textMuted }}><b style={{ color: C.text }}>Sueldo base:</b> {clp(trabajador.sueldo_base)}</p>
                 <p style={{ color: C.textMuted }}><b style={{ color: C.text }}>AFP:</b> {trabajador.afp} · <b style={{ color: C.text }}>Salud:</b> {trabajador.salud}</p>
-                <p style={{ color: C.textMuted }}><b style={{ color: C.text }}>Gratificación:</b> {trabajador.metodo_gratificacion}
-                  {trabajador.metodo_gratificacion==="ANTICIPO PORCENTAJE" && ` — ${trabajador.gratificacion_porcentaje||25}%`}
-                  {trabajador.metodo_gratificacion==="ANTICIPO MONTO FIJO" && ` — ${clp(trabajador.gratificacion_monto||0)}/mes`}
-                </p>
                 {trabajador.pensionado && <p style={{color:C.purple,fontWeight:600}}>PENSIONADO — Exento AFP y CES</p>}
               </div>
             )}
-            <FL label="Sueldo base para este contrato ($)">
-              <input type="number" min={0} style={INP} value={sueldoOverride||0} onChange={e=>setSueldoOverride(Number(e.target.value))} placeholder="0 = usar sueldo del trabajador"/>
-              {sueldoOverride>0 && <span style={{fontSize:11,color:C.green,marginTop:3,display:"block"}}>✓ Override activo: {clp(sueldoOverride)}</span>}
-            </FL>
-            <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',background:excluirBonos?'#fef9c3':'#f8fafc',border:`1px solid ${excluirBonos?C.yellowBorder:C.border}`,borderRadius:6,cursor:'pointer'}} onClick={()=>setExcluirBonos(v=>!v)}>
-              <input type="checkbox" checked={excluirBonos} onChange={()=>setExcluirBonos(v=>!v)} style={{accentColor:C.accent,width:16,height:16}}/>
-              <span style={{fontSize:12,color:excluirBonos?C.yellow:C.textMuted,fontWeight:excluirBonos?600:400}}>
-                {excluirBonos?'⚠ Bonos del perfil EXCLUIDOS (colación, movilización, asistencia)':'Excluir bonos del perfil en esta liquidación'}
-              </span>
-            </div>
+            {/* ── Asignaciones auto-cargadas ── */}
+            {tId && periodo && (
+              <div>
+                <p style={{fontWeight:600,fontSize:11,color:C.textMuted,marginBottom:6,textTransform:'uppercase',letterSpacing:'0.5px'}}>
+                  Asignaciones activas · {periodo}
+                </p>
+                {asignacionesRem.length === 0 ? (
+                  <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:6,padding:'8px 12px',fontSize:12,color:C.yellow}}>
+                    ⚠ Sin asignaciones con remuneración para este período
+                  </div>
+                ) : (
+                  <>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:11,marginBottom:6}}>
+                      <thead>
+                        <tr style={{background:C.accentBg}}>
+                          <th style={{padding:'4px 6px',textAlign:'left',color:C.accentText,fontWeight:600}}>Centro</th>
+                          <th style={{padding:'4px 6px',textAlign:'right',color:C.accentText,fontWeight:600}}>Sueldo</th>
+                          <th style={{padding:'4px 6px',textAlign:'right',color:C.accentText,fontWeight:600}}>Bonos</th>
+                          <th style={{padding:'4px 6px',textAlign:'right',color:C.accentText,fontWeight:600}}>Días</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {asignacionesRem.map((a,i) => (
+                          <tr key={i} style={{borderBottom:`1px solid ${C.borderLight}`,background:a.es_parcial?C.yellowBg:'transparent'}}>
+                            <td style={{padding:'4px 6px',fontSize:11,color:C.text}}>{a.contrato_nombre}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',fontVariantNumeric:'tabular-nums',color:C.text}}>{clp(a.sueldo_prop)}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',fontVariantNumeric:'tabular-nums',color:C.textMuted}}>{clp(a.bono_movil_prop+a.bono_cola_prop+a.bono_asistencia_prop)}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:a.es_parcial?C.yellow:C.textMuted}}>{a.dias_activos}{a.es_parcial?' ⚠':''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      {montosAuto && (
+                        <tfoot>
+                          <tr style={{borderTop:`2px solid ${C.border}`,fontWeight:700}}>
+                            <td style={{padding:'4px 6px',color:C.text}}>SUELDO LEGAL TOTAL</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:C.accent}}>{clp(montosAuto.sueldo)}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:C.accent}}>{clp((montosAuto.bono_asistencia||0)+(montosAuto.bono_movilizacion||0)+(montosAuto.bono_colacion||0))}</td>
+                            <td></td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                    {asignacionesRem.length > 1 && (
+                      <div style={{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:6,padding:'6px 10px',fontSize:10,color:'#166534'}}>
+                        <b>Distribución financiera (referencia):</b>{' '}
+                        {asignacionesRem.map((a,i) => `${a.contrato_nombre}: ${clp(a.sueldo_prop)} (${a.porcentaje_costo}%)`).join(' · ')}
+                        <br/><span style={{color:'#b45309'}}>Este detalle es para control de costo. El trabajador recibe un único sueldo legal.</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
             <FL label="Contrato (opcional)">
               <select style={INP} value={cId} onChange={e => setCId(e.target.value)}>
                 <option value="">— Sin asignar —</option>
