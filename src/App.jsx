@@ -1491,8 +1491,9 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
     contrato_id, periodo, descripcion='',
     dias_licencia_medica=0, dias_permiso_sin_goce=0,
     dias_vacaciones=0, dias_inasistencia=0,
-    dias_mes=30
+    dias_mes=30, sueldo_override=null
   } = input;
+  const sueldoBase = sueldo_override > 0 ? sueldo_override : (trabajador.sueldo_base||0);
 
   const esPensionado  = trabajador.pensionado || false;
   const esIndefinido  = (trabajador.tipo_contrato||'PLAZO FIJO') === 'INDEFINIDO';
@@ -1510,7 +1511,7 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
   const diasPagados   = Math.min(30, Math.max(0, (dias_trabajados||30) - diasSinPagoEfectivos + (dias_vacaciones||0)));
 
   // ── Haberes ────────────────────────────────────────────────
-  const sueldo_prop   = Math.round((trabajador.sueldo_base||0) * diasPagados / 30);
+  const sueldo_prop   = Math.round(sueldoBase * diasPagados / 30);
   const tope_grat     = Math.round(4.75 * utm / 12);
   let gratificacion   = 0;
   const metGrat = trabajador.metodo_gratificacion || '25% MENSUAL';
@@ -1521,7 +1522,7 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
   } else if (metGrat === 'ANTICIPO MONTO FIJO') {
     gratificacion = Math.round((trabajador.gratificacion_monto || 0) * diasPagados / 30);
   }
-  const valor_hora    = Math.round((trabajador.sueldo_base||0)/(params.horas_mensuales||180));
+  const valor_hora    = Math.round(sueldoBase/(params.horas_mensuales||180));
   const horas_extra_valor = Math.round(valor_hora*1.5*(horas_extra||0));
   const bono_asis     = diasPagados>=30?(trabajador.bono_asistencia||0):0;
   const bono_movil    = trabajador.bono_movilizacion||0;
@@ -1563,7 +1564,7 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
     dias_permiso_sin_goce:dias_permiso_sin_goce||0, dias_vacaciones:dias_vacaciones||0,
     dias_inasistencia:dias_inasistencia||0,
     horas_extra:horas_extra||0, otros_haberes:otros_haberes||0, otros_descuentos:otros_descuentos||0,
-    sueldo_base:trabajador.sueldo_base||0, sueldo_proporcional:sueldo_prop,
+    sueldo_base:sueldoBase, sueldo_proporcional:sueldo_prop,
     gratificacion, horas_extra_valor, bono_asistencia:bono_asis,
     bono_movilizacion:bono_movil, bono_colacion:bono_cola,
     total_haberes, rem_imponible, afp:trabajador.afp,
@@ -2261,6 +2262,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
   const [diasMes, setDiasMes] = useState(30);
   const [res, setRes] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [sueldoOverride, setSueldoOverride] = useState(0);
   const [saved, setSaved] = useState(false);
   const slipRef = useRef();
 
@@ -2273,6 +2275,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
   const calcular = () => {
     if (!trabajador || !params) { alert("Selecciona un trabajador y verifica que los parámetros legales estén cargados."); return; }
     setRes(calcularLiquidacion(trabajador, params, tasas, iuscTabla, {
+      sueldo_override: sueldoOverride > 0 ? sueldoOverride : null,
       dias_trabajados: dias, horas_extra: hextra,
       otros_haberes: otrosH, otros_descuentos: otrosD,
       contrato_id: cId, periodo, descripcion,
@@ -2327,7 +2330,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
         <Panel title="Calculadora de liquidación">
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <FL label="Trabajador(a)">
-              <select style={INP} value={tId} onChange={e => { setTId(e.target.value); setRes(null); }}>
+              <select style={INP} value={tId} onChange={e => { setTId(e.target.value); setRes(null); setSueldoOverride(0); }}>
                 <option value="">— Seleccionar —</option>
                 {data.trabajadores.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
               </select>
@@ -2343,6 +2346,10 @@ function Remuneraciones({ data, saveRem, insert, update }) {
                 {trabajador.pensionado && <p style={{color:C.purple,fontWeight:600}}>PENSIONADO — Exento AFP y CES</p>}
               </div>
             )}
+            <FL label="Sueldo base para este contrato ($)">
+              <input type="number" min={0} style={INP} value={sueldoOverride||0} onChange={e=>setSueldoOverride(Number(e.target.value))} placeholder="0 = usar sueldo del trabajador"/>
+              {sueldoOverride>0 && <span style={{fontSize:11,color:C.green,marginTop:3,display:"block"}}>✓ Override activo: {clp(sueldoOverride)}</span>}
+            </FL>
             <FL label="Contrato (opcional)">
               <select style={INP} value={cId} onChange={e => setCId(e.target.value)}>
                 <option value="">— Sin asignar —</option>
