@@ -1532,7 +1532,7 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
   // ── Renta imponible ────────────────────────────────────────
   const tope_imp      = Math.round((params.tope_imponible_uf||90.0)*(params.uf||38894));
   const tope_ces      = Math.round((params.tope_cesantia_uf||135.2)*(params.uf||38894));
-  const rem_imponible = Math.min(sueldo_prop+gratificacion+horas_extra_valor, tope_imp);
+  const rem_imponible = Math.min(sueldo_prop+gratificacion+horas_extra_valor+bono_asis, tope_imp);
   const rem_imp_ces   = Math.min(sueldo_prop+gratificacion+horas_extra_valor, tope_ces);
 
   // ── Descuentos trabajador ──────────────────────────────────
