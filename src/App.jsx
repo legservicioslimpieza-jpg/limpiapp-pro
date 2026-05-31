@@ -1496,7 +1496,7 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
   const sueldoBase = sueldo_override > 0 ? sueldo_override : (trabajador.sueldo_base||0);
 
   const esPensionado  = trabajador.pensionado || false;
-  const esIndefinido  = (trabajador.tipo_contrato||'PLAZO FIJO') === 'INDEFINIDO';
+  const esIndefinido  = (trabajador.tipo_contrato||'').toUpperCase().includes('INDEFINIDO');
   const afpRate       = tasas.find(a=>a.nombre===trabajador.afp)||{tasa_trabajador:0,sis:0};
   const utm           = params.utm || 68034;
 
@@ -1790,8 +1790,9 @@ function ExportadorLRE({ data }) {
       // Aportes empleador (calculados sobre rem_imponible)
       const topeUF    = Math.round((params.tope_imponible_uf||90) * (params.uf||38894));
       const remImp    = Math.min(tot5210, topeUF);
+      const esPlazoFijo = (t.tipo_contrato||'').toLowerCase().replace(/\s+/g,'_') === 'plazo_fijo';
       const aporteAFC = t.pensionado ? 0 :
-        Math.round(remImp * (t.tipo_contrato==='plazo_fijo'
+        Math.round(remImp * (esPlazoFijo
           ? (params.ces_emp_plazo_fijo||0.03)
           : (params.ces_emp_indefinido||0.024)));
       const aporteMut = Math.round(remImp * (params.mutualidad||0.0093)); // 4152
