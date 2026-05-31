@@ -60,7 +60,7 @@ const Icon = {
 
 const TABS = [
   {key:"dashboard",      label:"Dashboard",      icon:Icon.dashboard},
-  {key:"contratos",      label:"Contratos",      icon:Icon.contratos},
+  {key:"contratos",      label:"C. Costo",      icon:Icon.contratos},
   {key:"dependencias",   label:"Dependencias",   icon:Icon.dependencias},
   {key:"trabajadores",   label:"Trabajadores",   icon:Icon.trabajadores},
   {key:"evidencias",     label:"Evidencias",     icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>},
@@ -2743,7 +2743,31 @@ function Remuneraciones({ data, saveRem, insert, update }) {
               cols={[
                 {key:"periodo",   label:"Período",    render:r=><span style={{fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{r.periodo}</span>},
                 {key:"trabajador",label:"Trabajador",  render:r=>{const t=data.trabajadores.find(w=>w.id===r.trabajador_id);return t?.nombre.split(" ").slice(0,2).join(" ")||"—";}},
-                {key:"contrato",  label:"Contrato",    render:r=>{const c=data.contratos.find(ct=>ct.id===r.contrato_id);return<span style={{color:C.textMuted,fontSize:12}}>{c?.cliente?.split(" ").slice(0,2).join(" ")||"—"}</span>;}},
+                {key:"centros",  label:"Centro(s) de costo", render:r=>{
+                  const [anio,mes] = (r.periodo||'2026-05').split('-').map(Number);
+                  const inicioMes = new Date(anio,mes-1,1);
+                  const finMes    = new Date(anio,mes-1,31);
+                  const asigs = (data.asignaciones||[]).filter(a=>{
+                    if(a.trabajador_id!==r.trabajador_id) return false;
+                    if(a.afecta_remuneracion===false) return false;
+                    const iniA=a.fecha_inicio_asig?new Date(a.fecha_inicio_asig.split('T')[0]):new Date(2000,0,1);
+                    const finA=a.fecha_termino_asig?new Date(a.fecha_termino_asig.split('T')[0]):new Date(2099,11,31);
+                    return iniA<=finMes && finA>=inicioMes;
+                  });
+                  if(!asigs.length) return <span style={{color:C.textMuted,fontSize:12}}>—</span>;
+                  const activas = asigs.filter(a=>a.estado_asig==='activa');
+                  const pctActivo = activas.reduce((s,a)=>s+(a.porcentaje_costo||0),0);
+                  const deficit = pctActivo < 100 && pctActivo > 0;
+                  return(
+                    <div style={{fontSize:11}}>
+                      {asigs.map((a,i)=>{
+                        const terminada=a.estado_asig==='terminada';
+                        return<span key={i} style={{display:'inline-block',marginRight:4,color:terminada?C.textMuted:C.text,textDecoration:terminada?'line-through':'none'}}>{a.contrato_id}</span>;
+                      })}
+                      {deficit&&<span style={{color:C.red,fontWeight:600,marginLeft:4}}>⚠{100-pctActivo}%</span>}
+                    </div>
+                  );
+                }},
                 {key:"dias",      label:"Días",        render:r=><span style={{color:C.textMuted}}>{r.dias_trabajados}</span>},
                 {key:"haberes",   label:"Total Haberes",render:r=><span style={{fontVariantNumeric:"tabular-nums"}}>{clp(r.total_haberes)}</span>},
                 {key:"desc",      label:"Descuentos",  render:r=><span style={{color:C.red,fontVariantNumeric:"tabular-nums"}}>{clp(r.total_descuentos)}</span>},
