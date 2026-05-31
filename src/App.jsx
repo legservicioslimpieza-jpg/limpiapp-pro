@@ -70,6 +70,7 @@ const TABS = [
   {key:"incidencias",    label:"Incidencias",    icon:Icon.incidencias},
   {key:"supervisiones",  label:"Supervisiones",  icon:Icon.supervisiones},
   {key:"remuneraciones", label:"Remuneraciones", icon:Icon.remuneraciones},
+  {key:"cumplimiento",   label:"Cumplimiento",   icon:Icon.incidencias},
   {key:"informes",       label:"Informes IA",    icon:Icon.informes},
 ];
 
@@ -177,7 +178,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -232,6 +233,67 @@ function ContractSelector({contratos,selected,onSelect}){
 }
 
 /* ─── Dashboard ─────────────────────────────────────────────── */
+/* ─── Días Hábiles Chile (Lun-Sáb, excl. domingos y feriados) ── */
+// Feriados se cargan desde tabla feriados_chile en Supabase
+// Fallback hardcodeado para cuando la tabla no está disponible
+const FERIADOS_FALLBACK = new Set([
+  '2026-01-01','2026-04-03','2026-04-04','2026-05-01','2026-05-21',
+  '2026-06-29','2026-07-16','2026-08-15','2026-09-18','2026-09-19',
+  '2026-10-12','2026-10-31','2026-11-01','2026-12-08','2026-12-25',
+]);
+function buildFeriadosSet(feriadosDB=[]) {
+  if(feriadosDB.length>0) return new Set(feriadosDB.map(f=>f.fecha?.split('T')[0]));
+  return FERIADOS_FALLBACK;
+}
+function esDiaHabil(f, feriadosSet=FERIADOS_FALLBACK){
+  if(f.getDay()===0) return false; // Domingo
+  return !feriadosSet.has(f.toISOString().split('T')[0]);
+}
+function sumarDiasHabiles(fechaBase, n, feriadosSet=FERIADOS_FALLBACK){
+  let f=new Date(fechaBase); f.setHours(12,0,0,0);
+  f.setDate(f.getDate()+1);
+  let count=0;
+  while(count<n){ if(esDiaHabil(f,feriadosSet)) count++; if(count<n) f.setDate(f.getDate()+1); }
+  return f;
+}
+function diasHabilesEntre(desde, hasta, feriadosSet=FERIADOS_FALLBACK){
+  let f=new Date(desde); f.setHours(12,0,0,0); f.setDate(f.getDate()+1);
+  const h=new Date(hasta); h.setHours(12,0,0,0);
+  let count=0;
+  while(f<=h){ if(esDiaHabil(f,feriadosSet)) count++; f.setDate(f.getDate()+1); }
+  return count;
+}
+function calcAlertaLicitacion(termino, diasAlerta=60, feriadosSet=FERIADOS_FALLBACK){
+  if(!termino) return null;
+  const hoy=new Date(); hoy.setHours(12,0,0,0);
+  const fin=new Date(termino); fin.setHours(12,0,0,0);
+  const diasCal=Math.round((fin-hoy)/(1000*60*60*24));
+  const diasHab=diasHabilesEntre(hoy,fin,feriadosSet);
+  let nivel='normal';
+  if(diasCal<=0)                               nivel='vencida';
+  else if(diasHab<=Math.round(diasAlerta*0.5)) nivel='roja';
+  else if(diasHab<=Math.round(diasAlerta*0.7)) nivel='naranja';
+  else if(diasHab<=diasAlerta)                 nivel='amarilla';
+  return {diasCal, diasHab, nivel};
+}
+function calcAlertaFiniquito(fechaSeparacion, feriadosSet=FERIADOS_FALLBACK){
+  if(!fechaSeparacion) return null;
+  const base=new Date(fechaSeparacion); base.setHours(12,0,0,0);
+  const hoy=new Date(); hoy.setHours(12,0,0,0);
+  const legal=sumarDiasHabiles(base,10,feriadosSet);
+  const objetivo=sumarDiasHabiles(base,8,feriadosSet);
+  const diasRestLegal=diasHabilesEntre(hoy,legal,feriadosSet);
+  const diasRestObj=diasHabilesEntre(hoy,objetivo,feriadosSet);
+  const diasTranscurridos=diasHabilesEntre(base,hoy,feriadosSet);
+  let semaforo='verde';
+  if(diasRestLegal<=0)    semaforo='vencido';
+  else if(diasRestObj<=0) semaforo='rojo';
+  else if(diasRestObj<=2) semaforo='naranja';
+  else if(diasRestObj<=5) semaforo='amarillo';
+  const fmtD=d=>d.toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'numeric'});
+  return {legal,objetivo,diasRestLegal,diasRestObj,diasTranscurridos,semaforo,fmtLegal:fmtD(legal),fmtObjetivo:fmtD(objetivo)};
+}
+
 function Dashboard({data,contratoId}){
   const hoy=new Date().toISOString().slice(0,10);
   const chks=(contratoId?data.checklist.filter(c=>c.contrato_id===contratoId):data.checklist).filter(c=>c.activa);
@@ -248,7 +310,132 @@ function Dashboard({data,contratoId}){
     <div>
       <PageHeader title="Dashboard operacional"
         subtitle={ct?`${ct.cliente} · ${ct.instalacion} · ${ct.direccion}`:"LEG Servicios de Limpieza — Vista consolidada"} />
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:20}}>
+
+      {/* ── Panel de Alertas Críticas ── */}
+      {(()=>{
+        const hoy=new Date(); hoy.setHours(12,0,0,0);
+        const feriadosSet=buildFeriadosSet(data.feriados_chile||[]);
+
+        // PANEL 1: Vencimiento de licitaciones
+        const alertasLic=(data.contratos||[]).filter(c=>c.fecha_termino_contrato&&c.activo).map(c=>{
+          const a=calcAlertaLicitacion(c.fecha_termino_contrato, c.dias_alerta||60, feriadosSet);
+          return{...c, alerta:a};
+        }).filter(c=>c.alerta&&c.alerta.nivel!=='normal').sort((a,b)=>a.alerta.diasCal-b.alerta.diasCal);
+
+        // PANEL 2: Finiquitos pendientes por trabajador (fecha_separacion individual)
+        const alertasFin=(data.trabajadores||[]).filter(t=>
+          t.fecha_separacion && t.finiquito_estado && t.finiquito_estado!=='firmado' && t.finiquito_estado!=='na'
+        ).map(t=>{
+          const af=calcAlertaFiniquito(t.fecha_separacion, feriadosSet);
+          return{...t, af};
+        }).filter(t=>t.af).sort((a,b)=>a.af.diasRestLegal-b.af.diasRestLegal);
+
+        if(!alertasLic.length && !alertasFin.length) return null;
+
+        const NIVEL={
+          vencida: {bg:'#f5f3ff',text:'#6d28d9',icon:'⚫',label:'Vencida'},
+          roja:    {bg:'#fef2f2',text:'#991b1b',icon:'🚨',label:'Crítico'},
+          naranja: {bg:'#fff7ed',text:'#9a3412',icon:'🟠',label:'Urgente'},
+          amarilla:{bg:'#fefce8',text:'#92400e',icon:'⚠️',label:'Atención'},
+        };
+        const SEM={
+          vencido: {bg:'#f5f3ff',text:'#6d28d9',icon:'⚫'},
+          rojo:    {bg:'#fef2f2',text:'#991b1b',icon:'🔴'},
+          naranja: {bg:'#fff7ed',text:'#9a3412',icon:'🟠'},
+          amarillo:{bg:'#fefce8',text:'#92400e',icon:'🟡'},
+          verde:   {bg:'#f0fdf4',text:'#166534',icon:'🟢'},
+        };
+        return(
+          <div style={{marginBottom:20,display:'flex',flexDirection:'column',gap:12}}>
+
+            {/* PANEL 2 — Finiquitos por trabajador */}
+            {alertasFin.length>0&&(
+              <div style={{background:'#fef2f2',border:'2px solid #fca5a5',borderRadius:8,padding:'12px 16px'}}>
+                <p style={{fontWeight:700,color:'#991b1b',fontSize:13,marginBottom:10}}>🚨 FINIQUITOS PENDIENTES</p>
+                {alertasFin.map((t,i)=>{
+                  const s=SEM[t.af.semaforo]||SEM.verde;
+                  const dia=Math.min(t.af.diasTranscurridos+1,10);
+                  return(
+                    <div key={i} style={{background:s.bg,border:`1px solid`,borderColor:s.text+'40',borderRadius:6,padding:'10px 12px',marginBottom:8}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+                        <div>
+                          <span style={{fontWeight:700,color:s.text,fontSize:13}}>{s.icon} {t.nombre}</span>
+                          <span style={{fontSize:11,color:s.text,marginLeft:8}}>Separación: {new Date(t.fecha_separacion).toLocaleDateString('es-CL')}</span>
+                          {t.motivo_termino&&<span style={{fontSize:11,color:s.text,marginLeft:8}}>· {t.motivo_termino}</span>}
+                        </div>
+                        <span style={{fontSize:12,fontWeight:700,color:s.text,whiteSpace:'nowrap'}}>
+                          {t.af.diasRestLegal<=0?'⚫ VENCIDO':`Día ${dia} de 10`}
+                        </span>
+                      </div>
+                      <div style={{fontSize:11,color:s.text,marginTop:6,display:'flex',gap:16}}>
+                        <span>🎯 Objetivo empresa: <b>{t.af.fmtObjetivo}</b></span>
+                        <span>⚖️ Máximo legal: <b>{t.af.fmtLegal}</b></span>
+                        <span>{t.af.diasRestLegal>0?`${t.af.diasRestLegal} día(s) hábil(es) restante(s)`:'PLAZO VENCIDO'}</span>
+                      </div>
+                      <div style={{fontSize:11,color:s.text,marginTop:4,display:'flex',gap:12}}>
+                        <span style={{opacity:0.7}}>Estado: <b>{t.finiquito_estado||'pendiente'}</b></span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* PANEL 1 — Vencimiento licitaciones */}
+            {alertasLic.length>0&&(
+              <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:8,padding:'12px 16px'}}>
+                <p style={{fontWeight:700,color:'#92400e',fontSize:13,marginBottom:8}}>⚠️ VENCIMIENTO DE LICITACIONES</p>
+                {alertasLic.map((c,i)=>{
+                  const n=NIVEL[c.alerta.nivel]||NIVEL.amarilla;
+                  const trab=(data.asignaciones||[]).filter(a=>a.contrato_id===c.id&&a.afecta_remuneracion!==false&&a.estado_asig==='activa').length;
+                  return(
+                    <div key={i} style={{background:n.bg,borderRadius:6,padding:'8px 12px',marginBottom:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <div>
+                        <span style={{fontWeight:600,color:n.text}}>{n.icon} {c.id} — {c.cliente}</span>
+                        <span style={{fontSize:11,color:n.text,marginLeft:8}}>
+                          Vence {new Date(c.fecha_termino_contrato).toLocaleDateString('es-CL')}
+                        </span>
+                        {trab>0&&<span style={{fontSize:11,color:n.text,marginLeft:8}}>· {trab} trabajador(es) activo(s)</span>}
+                        {c.probabilidad_renovacion&&<span style={{fontSize:11,color:n.text,marginLeft:8}}>· Renovación: {c.probabilidad_renovacion}</span>}
+                      </div>
+                      <span style={{fontSize:12,fontWeight:700,color:n.text,whiteSpace:'nowrap'}}>
+                        {c.alerta.diasCal<=0?'VENCIDA':`${c.alerta.diasHab} d. háb.`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {/* PANEL 3 — Cumplimiento mensual */}
+            {(()=>{
+              const oblsAlert=(data.obligaciones_mensuales||[]).filter(o=>{
+                if(o.estado==='pagado') return false;
+                const vence=new Date(o.fecha_vence); vence.setHours(12,0,0,0);
+                const diasCal=Math.round((vence-hoy)/(1000*60*60*24));
+                return diasCal<=5;
+              }).sort((a,b)=>new Date(a.fecha_vence)-new Date(b.fecha_vence));
+              if(!oblsAlert.length) return null;
+              return(
+                <div style={{background:'#f5f3ff',border:'1px solid #ddd6fe',borderRadius:8,padding:'12px 16px'}}>
+                  <p style={{fontWeight:700,color:'#6d28d9',fontSize:13,marginBottom:8}}>💼 VENCIMIENTOS TRIBUTARIOS Y PREVISIONALES</p>
+                  {oblsAlert.map((o,i)=>{
+                    const vence=new Date(o.fecha_vence); vence.setHours(12,0,0,0);
+                    const diasCal=Math.round((vence-hoy)/(1000*60*60*24));
+                    const col=diasCal<0?'#dc2626':diasCal===0?'#dc2626':diasCal<=2?'#c2410c':'#b45309';
+                    const ico=diasCal<0?'⚫':diasCal===0?'🔴':diasCal<=2?'🟠':'⚠️';
+                    return(
+                      <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid #ede9fe'}}>
+                        <span style={{fontSize:12,color:'#5b21b6'}}>{ico} {o.nombre}</span>
+                        <span style={{fontSize:12,fontWeight:700,color:col}}>
+                          {diasCal<0?`Vencida ${Math.abs(diasCal)}d`:diasCal===0?'HOY':`${diasCal} días`}
+                          <span style={{fontSize:10,fontWeight:400,color:'#6d28d9',marginLeft:6}}>{vence.toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit'})}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
         <KPICard label="Cumplimiento" value={`${cumPr}%`} sub="Prom. supervisiones" color={cumPr>=90?C.green:cumPr>=70?C.yellow:C.red}/>
         <KPICard label="Ejecución hoy" value={`${evHoy.length}/${diaria.length}`} sub="Tareas diarias" color={C.accent}/>
         <KPICard label="Incidencias abiertas" value={incAb} sub={incAb===0?"Sin pendientes":"Requieren atención"} color={incAb>0?C.red:C.green}/>
@@ -331,7 +518,7 @@ function Contratos({data,insert,update}){
   const nEvt=data.contratos.filter(c=>c.tipo_centro_costo==="EVENTUAL").length;
   return(
     <div>
-      <PageHeader title="Centros de Costo" subtitle={`${nLic} licitaciones · ${nCorp} corporativos · ${nEvt} eventuales`} action={<PrimaryBtn onClick={openNew}>+ Nuevo contrato</PrimaryBtn>}/>
+      <PageHeader title="Centros de Costo" subtitle={`${nLic} licitacion${nLic!==1?'es':''} · ${nCorp} corporativo${nCorp!==1?'s':''} · ${nEvt} eventual${nEvt!==1?'es':''}`} action={<PrimaryBtn onClick={openNew}>+ Nuevo centro</PrimaryBtn>}/>
       {form&&(
         <FormCard onSave={save} onCancel={()=>setForm(null)} saveLabel={isNew?"Crear":"Actualizar"}>
           <FL label="Cliente / Institución"><input style={INP} value={form.cliente} onChange={e=>setForm({...form,cliente:e.target.value})} placeholder="Ej: Seremi de Transportes"/></FL>
@@ -340,6 +527,11 @@ function Contratos({data,insert,update}){
           <FL label="Tipo de centro"><select style={INP} value={form.tipo_centro_costo||"LICITACION"} onChange={e=>setForm({...form,tipo_centro_costo:e.target.value})}><option value="LICITACION">Licitación</option><option value="CORPORATIVO">Corporativo</option><option value="EVENTUAL">Eventual</option></select></FL>
           <FL label="Estado"><select style={INP} value={form.estado} onChange={e=>setForm({...form,estado:e.target.value,activo:["Vigente","Renovación"].includes(e.target.value)})}>{ESTADOS_CT.map(s=><option key={s}>{s}</option>)}</select></FL>
           <FL label="Financiamiento"><select style={INP} value={form.estado_financiero||"financiado"} onChange={e=>setForm({...form,estado_financiero:e.target.value})}><option value="financiado">🟢 Financiado</option><option value="parcial">🟡 Parcial</option><option value="sin_financiamiento">🔴 Sin financiamiento</option><option value="en_riesgo">🟠 En riesgo</option><option value="cerrado">⚫ Cerrado</option></select></FL>
+          <FL label="Fecha inicio licitación"><input type="date" style={INP} value={form.fecha_inicio_contrato||""} onChange={e=>setForm({...form,fecha_inicio_contrato:e.target.value})}/></FL>
+          <FL label="Fecha término licitación"><input type="date" style={INP} value={form.fecha_termino_contrato||""} onChange={e=>setForm({...form,fecha_termino_contrato:e.target.value})}/></FL>
+          <FL label="Probabilidad renovación"><select style={INP} value={form.probabilidad_renovacion||"media"} onChange={e=>setForm({...form,probabilidad_renovacion:e.target.value})}><option value="alta">Alta</option><option value="media">Media</option><option value="baja">Baja</option><option value="descartada">Descartada</option></select></FL>
+          <FL label="Estado renovación"><select style={INP} value={form.estado_renovacion||"pendiente"} onChange={e=>setForm({...form,estado_renovacion:e.target.value})}><option value="vigente">Vigente</option><option value="en evaluacion">En evaluación</option><option value="pendiente">Pendiente</option><option value="adjudicada otra">Adjudicada otra empresa</option><option value="renovada">Renovada</option><option value="cerrada">Cerrada</option></select></FL>
+          <FL label="Días de alerta (aviso anticipado)"><input type="number" min={30} max={180} style={INP} value={form.dias_alerta||60} onChange={e=>setForm({...form,dias_alerta:Number(e.target.value)})}/></FL>
           <FL label="Supervisor"><select style={INP} value={form.supervisor_id||""} onChange={e=>setForm({...form,supervisor_id:e.target.value})}><option value="">— Sin asignar —</option>{data.trabajadores.map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}</select></FL>
           <FL label="ID Licitación"><input style={INP} value={form.licitacion_id||""} onChange={e=>setForm({...form,licitacion_id:e.target.value})} placeholder="Ej: 892200-1-LE26"/></FL>
         </FormCard>
@@ -353,6 +545,19 @@ function Contratos({data,insert,update}){
             {key:"instalacion",label:"Instalación",render:r=><span style={{color:C.textMuted,fontSize:12}}>{r.instalacion}</span>},
             {key:"estado",label:"Estado",render:r=><Tag text={r.estado} scheme={ECTAG[r.estado]}/>},
             {key:"financ",label:"Financiamiento",render:r=>{const f=FINANC_TAG[r.estado_financiero||"financiado"]||FINANC_TAG["financiado"];return<span style={{fontSize:11,color:f.text,background:f.bg,border:`1px solid ${f.border}`,borderRadius:4,padding:"2px 8px",display:"inline-block",whiteSpace:"nowrap"}}>{f.icon} {(r.estado_financiero||"financiado").replace(/_/g," ")}</span>;}},
+            {key:"vence",label:"Vencimiento",render:r=>{
+              if(!r.fecha_termino_contrato) return <span style={{color:C.textMuted,fontSize:11}}>—</span>;
+              const a=calcAlertaLicitacion(r.fecha_termino_contrato, r.dias_alerta||60);
+              const COL={vencida:'#7c3aed',roja:'#dc2626',naranja:'#c2410c',amarilla:'#b45309',normal:'#15803d'};
+              const ICO={vencida:'⚫',roja:'🚨',naranja:'🟠',amarilla:'⚠️',normal:'✅'};
+              const col=COL[a.nivel]; const ico=ICO[a.nivel];
+              return(
+                <div style={{fontSize:11}}>
+                  <span style={{color:C.textMuted}}>{new Date(r.fecha_termino_contrato).toLocaleDateString('es-CL')}</span>
+                  <br/><span style={{color:col,fontWeight:600}}>{ico} {a.diasCal<=0?'Vencida':`${a.diasHab} d. háb.`}</span>
+                </div>
+              );
+            }},
             {key:"deps",label:"Dep.",render:r=><span style={{color:C.textMuted}}>{data.dependencias.filter(d=>d.contrato_id===r.id).length}</span>},
             {key:"tareas",label:"Tareas",render:r=><span style={{color:C.textMuted}}>{data.checklist.filter(c=>c.contrato_id===r.id).length}</span>},
             {key:"edit",label:"",render:r=><button onClick={()=>setForm({...r})} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
@@ -435,6 +640,12 @@ function Trabajadores({data,insert,update,contratoId}){
               <FL label="Teléfono"><input style={INP} value={form.telefono} onChange={e=>setForm({...form,telefono:e.target.value})} placeholder="+569XXXXXXXX"/></FL>
               <FL label="Email"><input style={INP} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="correo@empresa.cl"/></FL>
               <FL label="Fecha ingreso a la empresa"><input type="date" style={INP} value={form.fecha_inicio||""} onChange={e=>setForm({...form,fecha_inicio:e.target.value})}/></FL>
+              {/* Desvinculación */}
+              <FL label="Fecha separación laboral"><input type="date" style={INP} value={form.fecha_separacion||""} onChange={e=>setForm({...form,fecha_separacion:e.target.value||null})}/></FL>
+              {form.fecha_separacion&&<>
+                <FL label="Motivo término"><select style={INP} value={form.motivo_termino||""} onChange={e=>setForm({...form,motivo_termino:e.target.value})}><option value="">— Seleccionar —</option><option value="Art. 159 N°4 Vencimiento plazo">Art. 159 N°4 Vencimiento plazo</option><option value="Art. 161 Necesidades empresa">Art. 161 Necesidades empresa</option><option value="Art. 159 N°1 Mutuo acuerdo">Art. 159 N°1 Mutuo acuerdo</option><option value="Art. 160 Falta grave">Art. 160 Falta grave</option></select></FL>
+                <FL label="Estado finiquito"><select style={INP} value={form.finiquito_estado||"pendiente"} onChange={e=>setForm({...form,finiquito_estado:e.target.value})}><option value="pendiente">⏳ Pendiente</option><option value="preparado">📄 Preparado</option><option value="disponible">✅ Disponible trabajador</option><option value="firmado">✍️ Firmado</option></select></FL>
+              </>}
             </div>
           )}
           {tab==="remuneracion"&&(
@@ -2787,6 +2998,160 @@ function Remuneraciones({ data, saveRem, insert, update }) {
 }
 
 /* ─── Informes IA ───────────────────────────────────────────── */
+/* ─── Cumplimiento Mensual ───────────────────────────────────── */
+function Cumplimiento({data,insert,update}){
+  const hoy=new Date();
+  const todayStr=hoy.toISOString().slice(0,10);
+  const periodoActual=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
+  const [periodoVer,setPeriodoVer]=useState(periodoActual);
+  const [saving,setSaving]=useState(false);
+
+  // Auto-generar obligaciones del período si no existen
+  useEffect(()=>{
+    const existentes=(data.obligaciones_mensuales||[]).map(o=>o.id);
+    const [y,m]=periodoVer.split('-').map(Number);
+    const nm=m===12?1:m+1; const ny=m===12?y+1:y;
+    const nextM=`${ny}-${String(nm).padStart(2,'0')}`;
+    const obligaciones=[
+      {id:`OBL-${periodoVer}-PREVIRED`,tipo:'previred',categoria:'previsional',subtipo:'cotizaciones',
+       nombre:'Cotizaciones Previred',periodo:periodoVer,fecha_vence:`${nextM}-13`,estado:'pendiente'},
+      {id:`OBL-${periodoVer}-LRE`,tipo:'lre',categoria:'laboral',subtipo:'lre',
+       nombre:'Libro Remuneraciones Electrónico (DT)',periodo:periodoVer,fecha_vence:`${nextM}-15`,estado:'pendiente'},
+      {id:`OBL-${periodoVer}-F29`,tipo:'f29',categoria:'tributaria',subtipo:'iva',
+       nombre:'Declaración F29 IVA — Internet con pago',periodo:periodoVer,fecha_vence:`${nextM}-20`,estado:'pendiente'},
+    ];
+    const faltantes=obligaciones.filter(o=>!existentes.includes(o.id));
+    if(faltantes.length>0) faltantes.forEach(o=>insert('obligaciones_mensuales',o));
+  },[periodoVer]);
+
+  const CAT_TAG={
+    previsional:{bg:'#f5f3ff',text:'#6d28d9',border:'#ddd6fe',icon:'💼'},
+    tributaria: {bg:'#eff6ff',text:'#1d4ed8',border:'#bfdbfe',icon:'📋'},
+    laboral:    {bg:'#f0fdf4',text:'#15803d',border:'#86efac',icon:'📂'},
+    municipal:  {bg:'#fff7ed',text:'#c2410c',border:'#fed7aa',icon:'🏛️'},
+    otra:       {bg:'#f9fafb',text:'#374151',border:'#e5e7eb',icon:'📌'},
+  };
+  const ESTADO={
+    pendiente:{bg:'#fef9c3',text:'#92400e',border:'#fde68a',label:'⏳ Pendiente'},
+    preparado:{bg:'#eff6ff',text:'#1d4ed8',border:'#bfdbfe',label:'📄 Preparado'},
+    pagado:   {bg:'#f0fdf4',text:'#15803d',border:'#86efac',label:'✅ Pagado'},
+    vencido:  {bg:'#fef2f2',text:'#dc2626',border:'#fca5a5',label:'⚫ Vencido'},
+  };
+
+  const oblsPeriodo=(data.obligaciones_mensuales||[])
+    .filter(o=>o.periodo===periodoVer)
+    .sort((a,b)=>new Date(a.fecha_vence)-new Date(b.fecha_vence));
+
+  const cambiarEstado=async(obl,nuevoEstado)=>{
+    setSaving(true);
+    const updates={...obl,estado:nuevoEstado};
+    if(nuevoEstado==='preparado' && !obl.fecha_preparacion) updates.fecha_preparacion=todayStr;
+    if(nuevoEstado==='pagado' && !obl.fecha_pago) updates.fecha_pago=todayStr;
+    await update('obligaciones_mensuales',updates);
+    setSaving(false);
+  };
+
+  const fmtFch=f=>f?new Date(f).toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'numeric'}):null;
+
+  return(
+    <div>
+      <PageHeader title="Cumplimiento Mensual" subtitle="Obligaciones previsionales, tributarias y laborales"/>
+      <div style={{display:'flex',gap:12,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
+        <FL label="Período"><input type="month" style={{...INP,width:160}} value={periodoVer} onChange={e=>setPeriodoVer(e.target.value)}/></FL>
+        <div style={{display:'flex',gap:6,marginTop:18,flexWrap:'wrap'}}>
+          {['pendiente','preparado','pagado'].map(e=>{
+            const count=oblsPeriodo.filter(o=>o.estado===e).length;
+            if(!count) return null;
+            const st=ESTADO[e];
+            return<span key={e} style={{fontSize:11,padding:'3px 10px',background:st.bg,color:st.text,border:`1px solid ${st.border}`,borderRadius:12}}>{st.label} {count}</span>;
+          })}
+        </div>
+      </div>
+
+      <div style={{display:'flex',flexDirection:'column',gap:12}}>
+        {oblsPeriodo.map(obl=>{
+          const vence=new Date(obl.fecha_vence); vence.setHours(12,0,0,0);
+          const hoyD=new Date(); hoyD.setHours(12,0,0,0);
+          const diasCal=Math.round((vence-hoyD)/(1000*60*60*24));
+          const cat=CAT_TAG[obl.categoria||'otra']||CAT_TAG.otra;
+          const st=ESTADO[obl.estado]||ESTADO.pendiente;
+          const pagada=obl.estado==='pagado';
+          let alertColor=C.green;
+          if(pagada)         alertColor=C.green;
+          else if(diasCal<0) alertColor='#dc2626';
+          else if(diasCal<=2)alertColor='#c2410c';
+          else if(diasCal<=5)alertColor='#b45309';
+          const borderColor=pagada?'#86efac':diasCal<=2&&!pagada?'#fca5a5':C.border;
+
+          return(
+            <div key={obl.id} style={{background:C.surface,border:`1px solid ${borderColor}`,borderRadius:8,padding:'14px 16px'}}>
+              {/* Header */}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:18}}>{cat.icon}</span>
+                  <div>
+                    <span style={{fontWeight:700,fontSize:13,color:C.text}}>{obl.nombre}</span>
+                    <div style={{display:'flex',gap:6,marginTop:3}}>
+                      <span style={{fontSize:10,padding:'1px 6px',background:cat.bg,color:cat.text,border:`1px solid ${cat.border}`,borderRadius:4}}>{obl.categoria||'otra'}</span>
+                      {obl.subtipo&&<span style={{fontSize:10,padding:'1px 6px',background:C.surfaceAlt,color:C.textMuted,borderRadius:4}}>{obl.subtipo}</span>}
+                      <span style={{fontSize:10,padding:'1px 6px',background:C.surfaceAlt,color:C.textMuted,borderRadius:4}}>Período {obl.periodo}</span>
+                    </div>
+                  </div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:13,fontWeight:700,color:alertColor}}>
+                    {pagada?'✅ Pagado':diasCal<0?`⚫ Venció hace ${Math.abs(diasCal)}d`:diasCal===0?'🔴 Vence HOY':`${diasCal} día${diasCal!==1?'s':''}`}
+                  </div>
+                  <div style={{fontSize:11,color:C.textMuted}}>
+                    Vence: <b>{fmtFch(obl.fecha_vence)}</b>
+                    {obl.tipo==='previred'&&<span style={{color:'#7c3aed',marginLeft:6,fontSize:10}}>Inamovible</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Fechas de gestión */}
+              {(obl.fecha_preparacion||obl.fecha_pago)&&(
+                <div style={{display:'flex',gap:16,marginBottom:8,fontSize:11,color:C.textMuted}}>
+                  {obl.fecha_preparacion&&<span>📄 Preparado: <b style={{color:'#1d4ed8'}}>{fmtFch(obl.fecha_preparacion)}</b></span>}
+                  {obl.fecha_pago&&<span>✅ Pagado: <b style={{color:'#15803d'}}>{fmtFch(obl.fecha_pago)}</b></span>}
+                  {obl.monto>0&&<span>💰 <b style={{color:C.text}}>{clp(obl.monto)}</b></span>}
+                </div>
+              )}
+
+              {/* Botones de estado */}
+              <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                {['pendiente','preparado','pagado'].map(e=>{
+                  const s=ESTADO[e];
+                  return(
+                    <button key={e} disabled={saving} onClick={()=>cambiarEstado(obl,e)}
+                      style={{fontSize:11,padding:'4px 12px',borderRadius:6,cursor:'pointer',
+                        background:obl.estado===e?s.bg:'transparent',
+                        color:obl.estado===e?s.text:C.textMuted,
+                        border:`1px solid ${obl.estado===e?s.border:C.border}`,
+                        fontWeight:obl.estado===e?700:400,opacity:saving?0.6:1}}>
+                      {s.label}
+                    </button>
+                  );
+                })}
+                {pagada&&(
+                  <input type="number" placeholder="Monto $" defaultValue={obl.monto||''}
+                    onBlur={e=>update('obligaciones_mensuales',{...obl,monto:Number(e.target.value)})}
+                    style={{...INP,width:130,fontSize:11,padding:'4px 8px'}}/>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {oblsPeriodo.length===0&&(
+          <div style={{textAlign:'center',padding:40,color:C.textMuted,fontSize:13}}>
+            <p>Generando obligaciones para {periodoVer}...</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function InformesIA({data,contratoId}){
   const [tipo,setTipo]=useState("operacional");
   const [informe,setInforme]=useState("");
@@ -2892,6 +3257,7 @@ if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
         {tab==="incidencias"    &&<Incidencias     data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="supervisiones"  &&<Supervisiones   data={data} contratoId={contratoId} insert={insert}/>}
         {tab==="remuneraciones" &&<Remuneraciones  data={data} saveRem={saveRem} insert={insert} update={update}/>}
+        {tab==="cumplimiento"   &&<Cumplimiento    data={data} insert={insert} update={update}/>}
         {tab==="informes"       &&<InformesIA      data={data} contratoId={contratoId}/>}
         </div>
     </div>
