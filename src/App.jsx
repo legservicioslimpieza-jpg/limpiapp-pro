@@ -1491,7 +1491,7 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
     contrato_id, periodo, descripcion='',
     dias_licencia_medica=0, dias_permiso_sin_goce=0,
     dias_vacaciones=0, dias_inasistencia=0,
-    dias_mes=30, sueldo_override=null
+    dias_mes=30, sueldo_override=null, excluir_bonos=false
   } = input;
   const sueldoBase = sueldo_override > 0 ? sueldo_override : (trabajador.sueldo_base||0);
 
@@ -1524,16 +1524,16 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
   }
   const valor_hora    = Math.round(sueldoBase/(params.horas_mensuales||180));
   const horas_extra_valor = Math.round(valor_hora*1.5*(horas_extra||0));
-  const bono_asis     = diasPagados>=30?(trabajador.bono_asistencia||0):0;
-  const bono_movil    = trabajador.bono_movilizacion||0;
-  const bono_cola     = trabajador.bono_colacion||0;
+  const bono_asis     = excluir_bonos?0:(diasPagados>=30?(trabajador.bono_asistencia||0):0);
+  const bono_movil    = excluir_bonos?0:(trabajador.bono_movilizacion||0);
+  const bono_cola     = excluir_bonos?0:(trabajador.bono_colacion||0);
   const total_haberes = sueldo_prop+gratificacion+horas_extra_valor+bono_asis+bono_movil+bono_cola+(otros_haberes||0);
 
   // ── Renta imponible ────────────────────────────────────────
   const tope_imp      = Math.round((params.tope_imponible_uf||90.0)*(params.uf||38894));
   const tope_ces      = Math.round((params.tope_cesantia_uf||135.2)*(params.uf||38894));
   const rem_imponible = Math.min(sueldo_prop+gratificacion+horas_extra_valor+bono_asis, tope_imp);
-  const rem_imp_ces   = Math.min(sueldo_prop+gratificacion+horas_extra_valor, tope_ces);
+  const rem_imp_ces   = Math.min(sueldo_prop+gratificacion+horas_extra_valor+bono_asis, tope_ces);
 
   // ── Descuentos trabajador ──────────────────────────────────
   const salud_tasa    = params.salud_trabajador||0.07;
@@ -2263,6 +2263,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
   const [res, setRes] = useState(null);
   const [saving, setSaving] = useState(false);
   const [sueldoOverride, setSueldoOverride] = useState(0);
+  const [excluirBonos, setExcluirBonos] = useState(false);
   const [saved, setSaved] = useState(false);
   const slipRef = useRef();
 
@@ -2276,6 +2277,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
     if (!trabajador || !params) { alert("Selecciona un trabajador y verifica que los parámetros legales estén cargados."); return; }
     setRes(calcularLiquidacion(trabajador, params, tasas, iuscTabla, {
       sueldo_override: sueldoOverride > 0 ? sueldoOverride : null,
+      excluir_bonos: excluirBonos,
       dias_trabajados: dias, horas_extra: hextra,
       otros_haberes: otrosH, otros_descuentos: otrosD,
       contrato_id: cId, periodo, descripcion,
@@ -2330,7 +2332,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
         <Panel title="Calculadora de liquidación">
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <FL label="Trabajador(a)">
-              <select style={INP} value={tId} onChange={e => { setTId(e.target.value); setRes(null); setSueldoOverride(0); }}>
+              <select style={INP} value={tId} onChange={e => { setTId(e.target.value); setRes(null); setSueldoOverride(0); setExcluirBonos(false); }}>
                 <option value="">— Seleccionar —</option>
                 {data.trabajadores.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
               </select>
@@ -2350,6 +2352,12 @@ function Remuneraciones({ data, saveRem, insert, update }) {
               <input type="number" min={0} style={INP} value={sueldoOverride||0} onChange={e=>setSueldoOverride(Number(e.target.value))} placeholder="0 = usar sueldo del trabajador"/>
               {sueldoOverride>0 && <span style={{fontSize:11,color:C.green,marginTop:3,display:"block"}}>✓ Override activo: {clp(sueldoOverride)}</span>}
             </FL>
+            <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',background:excluirBonos?'#fef9c3':'#f8fafc',border:`1px solid ${excluirBonos?C.yellowBorder:C.border}`,borderRadius:6,cursor:'pointer'}} onClick={()=>setExcluirBonos(v=>!v)}>
+              <input type="checkbox" checked={excluirBonos} onChange={()=>setExcluirBonos(v=>!v)} style={{accentColor:C.accent,width:16,height:16}}/>
+              <span style={{fontSize:12,color:excluirBonos?C.yellow:C.textMuted,fontWeight:excluirBonos?600:400}}>
+                {excluirBonos?'⚠ Bonos del perfil EXCLUIDOS (colación, movilización, asistencia)':'Excluir bonos del perfil en esta liquidación'}
+              </span>
+            </div>
             <FL label="Contrato (opcional)">
               <select style={INP} value={cId} onChange={e => setCId(e.target.value)}>
                 <option value="">— Sin asignar —</option>
