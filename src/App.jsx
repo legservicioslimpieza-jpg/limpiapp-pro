@@ -553,12 +553,21 @@ function Contratos({data,insert,update}){
             {key:"vence",label:"Vencimiento",render:r=>{
               if(!r.fecha_termino_contrato) return <span style={{color:C.textMuted,fontSize:11}}>—</span>;
               const a=calcAlertaLicitacion(r.fecha_termino_contrato, r.dias_alerta||60);
+              const fechaDisplay=new Date(r.fecha_termino_contrato.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL');
+              if(!r.activo||r.estado==='Inactivo'){
+                return(
+                  <div style={{fontSize:11}}>
+                    <span style={{color:C.textMuted}}>{fechaDisplay}</span>
+                    <br/><span style={{color:'#6d28d9',fontWeight:600}}>⚫ Vencida</span>
+                  </div>
+                );
+              }
               const COL={vencida:'#7c3aed',roja:'#dc2626',naranja:'#c2410c',amarilla:'#b45309',normal:'#15803d'};
               const ICO={vencida:'⚫',roja:'🚨',naranja:'🟠',amarilla:'⚠️',normal:'✅'};
               const col=COL[a.nivel]; const ico=ICO[a.nivel];
               return(
                 <div style={{fontSize:11}}>
-                  <span style={{color:C.textMuted}}>{new Date(r.fecha_termino_contrato).toLocaleDateString('es-CL')}</span>
+                  <span style={{color:C.textMuted}}>{fechaDisplay}</span>
                   <br/><span style={{color:col,fontWeight:600}}>{ico} {a.diasCal<=0?'Vencida':`${a.diasHab} d. háb.`}</span>
                 </div>
               );
