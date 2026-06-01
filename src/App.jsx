@@ -3056,7 +3056,7 @@ function Cumplimiento({data,insert,update}){
     setSaving(false);
   };
 
-  const fmtFch=f=>f?new Date(f).toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'numeric'}):null;
+  const fmtFch=f=>f?new Date(f.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'numeric'}):null;
 
   return(
     <div>
@@ -3075,7 +3075,7 @@ function Cumplimiento({data,insert,update}){
 
       <div style={{display:'flex',flexDirection:'column',gap:12}}>
         {oblsPeriodo.map(obl=>{
-          const vence=new Date(obl.fecha_vence); vence.setHours(12,0,0,0);
+          const vence=new Date(obl.fecha_vence.split('T')[0]+'T12:00:00');
           const hoyD=new Date(); hoyD.setHours(12,0,0,0);
           const diasCal=Math.round((vence-hoyD)/(1000*60*60*24));
           const cat=CAT_TAG[obl.categoria||'otra']||CAT_TAG.otra;
