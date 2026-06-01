@@ -1,4 +1,4 @@
-  import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isConfigured } from "./supabase.js";
 import { useAuth } from "./contexts/AuthContext.jsx";
 import Login from "./components/Login.jsx";
@@ -266,7 +266,7 @@ function diasHabilesEntre(desde, hasta, feriadosSet=FERIADOS_FALLBACK){
 function calcAlertaLicitacion(termino, diasAlerta=60, feriadosSet=FERIADOS_FALLBACK){
   if(!termino) return null;
   const hoy=new Date(); hoy.setHours(12,0,0,0);
-  const fin=new Date(termino); fin.setHours(12,0,0,0);
+  const fin=new Date(termino.split('T')[0]+'T12:00:00');
   const diasCal=Math.round((fin-hoy)/(1000*60*60*24));
   const diasHab=diasHabilesEntre(hoy,fin,feriadosSet);
   let nivel='normal';
@@ -278,7 +278,7 @@ function calcAlertaLicitacion(termino, diasAlerta=60, feriadosSet=FERIADOS_FALLB
 }
 function calcAlertaFiniquito(fechaSeparacion, feriadosSet=FERIADOS_FALLBACK){
   if(!fechaSeparacion) return null;
-  const base=new Date(fechaSeparacion); base.setHours(12,0,0,0);
+  const base=new Date(fechaSeparacion.split('T')[0]+'T12:00:00');
   const hoy=new Date(); hoy.setHours(12,0,0,0);
   const legal=sumarDiasHabiles(base,10,feriadosSet);
   const objetivo=sumarDiasHabiles(base,8,feriadosSet);
@@ -360,7 +360,7 @@ function Dashboard({data,contratoId}){
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
                         <div>
                           <span style={{fontWeight:700,color:s.text,fontSize:13}}>{s.icon} {t.nombre}</span>
-                          <span style={{fontSize:11,color:s.text,marginLeft:8}}>Separación: {new Date(t.fecha_separacion).toLocaleDateString('es-CL')}</span>
+                          <span style={{fontSize:11,color:s.text,marginLeft:8}}>Separación: {new Date(t.fecha_separacion.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}</span>
                           {t.motivo_termino&&<span style={{fontSize:11,color:s.text,marginLeft:8}}>· {t.motivo_termino}</span>}
                         </div>
                         <span style={{fontSize:12,fontWeight:700,color:s.text,whiteSpace:'nowrap'}}>
@@ -393,7 +393,7 @@ function Dashboard({data,contratoId}){
                       <div>
                         <span style={{fontWeight:600,color:n.text}}>{n.icon} {c.id} — {c.cliente}</span>
                         <span style={{fontSize:11,color:n.text,marginLeft:8}}>
-                          Vence {new Date(c.fecha_termino_contrato).toLocaleDateString('es-CL')}
+                          Vence {new Date(c.fecha_termino_contrato.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}
                         </span>
                         {trab>0&&<span style={{fontSize:11,color:n.text,marginLeft:8}}>· {trab} trabajador(es) activo(s)</span>}
                         {c.probabilidad_renovacion&&<span style={{fontSize:11,color:n.text,marginLeft:8}}>· Renovación: {c.probabilidad_renovacion}</span>}
@@ -445,7 +445,7 @@ function Dashboard({data,contratoId}){
         <KPICard label="Ejecución hoy" value={`${evHoy.length}/${diaria.length}`} sub="Tareas diarias" color={C.accent}/>
         <KPICard label="Incidencias abiertas" value={incAb} sub={incAb===0?"Sin pendientes":"Requieren atención"} color={incAb>0?C.red:C.green}/>
         <KPICard label="Contratos vigentes" value={data.contratos.filter(c=>c.activo&&c.estado==="Vigente").length} sub="Activos"/>
-        <KPICard label="Trabajadores" value={data.trabajadores.filter(t=>t.activo).length} sub="Activos"/>
+        <KPICard label="Trabajadores activos" value={data.trabajadores.filter(t=>t.activo).length} sub={`Desvinculados: ${data.trabajadores.filter(t=>!t.activo&&t.estado==='DESVINCULADO').length}`} color={C.accent}/>
         <KPICard label="Dependencias" value={contratoId?data.dependencias.filter(d=>d.contrato_id===contratoId&&d.activo).length:data.dependencias.filter(d=>d.activo).length} sub="En control"/>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
@@ -3109,7 +3109,10 @@ function Cumplimiento({data,insert,update}){
                   </div>
                   <div style={{fontSize:11,color:C.textMuted}}>
                     Vence: <b>{fmtFch(obl.fecha_vence)}</b>
-                    {obl.tipo==='previred'&&<span style={{color:'#7c3aed',marginLeft:6,fontSize:10}}>Inamovible</span>}
+                    {obl.tipo==='previred'
+                      ? <span style={{background:'#f5f3ff',color:'#7c3aed',border:'1px solid #ddd6fe',borderRadius:4,padding:'1px 6px',marginLeft:6,fontSize:10,fontWeight:600}}>Inamovible</span>
+                      : <span style={{background:'#f0fdf4',color:'#15803d',border:'1px solid #86efac',borderRadius:4,padding:'1px 6px',marginLeft:6,fontSize:10,fontWeight:600}}>Prorrogable</span>
+                    }
                   </div>
                 </div>
               </div>
