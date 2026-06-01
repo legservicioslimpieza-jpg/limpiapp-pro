@@ -44,6 +44,19 @@ const ESTAG = {
 /* ─── Formatters ────────────────────────────────────────────── */
 const clp = n => `$${Math.round(n||0).toLocaleString("es-CL")}`;
 const pct = n => `${((n||0)*100).toFixed(2)}%`;
+const dateOnly = v => v ? String(v).split("T")[0] : "";
+const dateNoon = v => { const d=dateOnly(v); return d ? `${d}T12:00:00` : null; };
+const parseNoon = v => v ? new Date(`${dateOnly(v)}T12:00:00`) : null;
+const isAsignacionVigenteHoy = a => {
+  if(!a || a.afecta_remuneracion===false) return false;
+  if(a.estado_asig!=="activa" || a.activo===false) return false;
+  const hoy=new Date(); hoy.setHours(12,0,0,0);
+  const ini=parseNoon(a.fecha_inicio_asig);
+  const fin=parseNoon(a.fecha_termino_asig);
+  if(ini && ini>hoy) return false;
+  if(fin && fin<hoy) return false;
+  return true;
+};
 
 /* ─── Íconos ────────────────────────────────────────────────── */
 const Icon = {
@@ -213,7 +226,34 @@ function useData(){
     await loadAll();return true;
   },[dbMode,loadAll]);
 
-  return{data,loading,dbMode,insert:(t,r)=>save(t,r,false),update:(t,r)=>save(t,r,true),saveRem,reload:loadAll};
+  const saveAsignacion=useCallback(async(record)=>{
+    if(!isConfigured||!dbMode)return false;
+    const clean={...record};
+    delete clean._edit;
+    delete clean._original_contrato_id;
+
+    // Blindaje zona horaria Chile: guardar fechas de asignación a mediodía local
+    // y convertir campos vacíos a NULL para poder limpiar fechas en Supabase.
+    clean.fecha_inicio_asig = dateNoon(clean.fecha_inicio_asig);
+    clean.fecha_termino_asig = dateNoon(clean.fecha_termino_asig);
+
+    Object.keys(clean).forEach(k=>{ if(clean[k]===undefined) delete clean[k]; });
+    const{error}=await supabase.from("asignaciones").upsert(clean,{onConflict:"trabajador_id,contrato_id"});
+    if(error){alert("Error asignación: "+error.message);return false;}
+    await loadAll();return true;
+  },[dbMode,loadAll]);
+
+  const terminarAsignacion=useCallback(async(asig,fechaTermino)=>{
+    if(!isConfigured||!dbMode)return false;
+    const{error}=await supabase.from("asignaciones")
+      .update({activo:false,estado_asig:"terminada",fecha_termino_asig:dateNoon(fechaTermino)})
+      .eq("trabajador_id",asig.trabajador_id)
+      .eq("contrato_id",asig.contrato_id);
+    if(error){alert("Error al terminar asignación: "+error.message);return false;}
+    await loadAll();return true;
+  },[dbMode,loadAll]);
+
+  return{data,loading,dbMode,insert:(t,r)=>save(t,r,false),update:(t,r)=>save(t,r,true),saveRem,saveAsignacion,terminarAsignacion,reload:loadAll};
 }
 
 function genId(p){return `${p}${Date.now()}`;}
@@ -629,21 +669,49 @@ function Dependencias({data,contratoId,insert,update}){
 /* ─── Trabajadores ──────────────────────────────────────────── */
 const AFP_LIST=["NO COTIZA","CAPITAL","CUPRUM","HABITAT","PLANVITAL","PROVIDA","MODELO","UNO"];
 const SALUD_LIST=["FONASA","ISAPRE BANMEDICA","ISAPRE COLMENA","ISAPRE CONSALUD","ISAPRE CRUZ BLANCA","ISAPRE NUEVA MASVIDA","ISAPRE VIDA TRES"];
-function Trabajadores({data,insert,update,contratoId}){
+function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,contratoId}){
   const [form,setForm]=useState(null);
   const [tab,setTab]=useState("datos");
+  const [asigForm,setAsigForm]=useState(null);
   const isNew=form&&!data.trabajadores.find(t=>t.id===form.id);
   const asignadosIds=contratoId?(data.asignaciones||[]).filter(a=>a.contrato_id===contratoId&&a.activo).map(a=>a.trabajador_id):null;
   const trabajadoresFiltrados=asignadosIds?data.trabajadores.filter(t=>asignadosIds.includes(t.id)):data.trabajadores;
-  const openNew=()=>{setTab("datos");setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:500000,tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:""});};
-  const save=async()=>{if(!form.nombre.trim())return;const ok=isNew?await insert("trabajadores",form):await update("trabajadores",form);if(ok)setForm(null);};
+  const openNew=()=>{setTab("datos");setAsigForm(null);setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:500000,tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:""});};
+  const save=async()=>{if(!form.nombre.trim())return;const ok=isNew?await insert("trabajadores",form):await update("trabajadores",form);if(ok){setForm(null);setAsigForm(null);}};
+
+  const asignacionesTrab=form?(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id):[];
+  const asignacionesActivas=asignacionesTrab.filter(isAsignacionVigenteHoy);
+  const pctTotal=asignacionesActivas.reduce((sum,a)=>sum+Number(a.porcentaje_costo||0),0);
+  const estadoPct=pctTotal===100?{txt:"✅ 100% financiado",col:C.green,bg:C.greenBg,border:C.greenBorder}:pctTotal>100?{txt:`❌ Exceso ${pctTotal-100}%`,col:C.red,bg:C.redBg,border:C.redBorder}:{txt:`⚠ Déficit ${100-pctTotal}%`,col:C.yellow,bg:C.yellowBg,border:C.yellowBorder};
+  const contratoNombre=id=>{const c=data.contratos.find(ct=>ct.id===id);return c?`${c.id} — ${c.cliente}`:id;};
+  const openNuevaAsignacion=()=>{
+    if(!form||isNew)return;
+    const restante=Math.max(0,100-pctTotal);
+    setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,sueldo_asignado:form.sueldo_base||0,bono_asistencia:form.bono_asistencia||0,bono_movilizacion:form.bono_movilizacion||0,bono_colacion:form.bono_colacion||0,gratificacion_monto:form.gratificacion_monto||0,porcentaje_costo:asignacionesActivas.length?restante:100,fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,horas_semanales:45,dias_semana:"Lun-Vie",horario:"",jornada:"",descripcion:""});
+  };
+  const guardarAsignacion=async()=>{
+    if(!asigForm?.contrato_id){alert("Selecciona un centro de costo");return;}
+    const registro={...asigForm,activo:asigForm.estado_asig!=="terminada",afecta_remuneracion:asigForm.afecta_remuneracion!==false,sueldo_asignado:Number(asigForm.sueldo_asignado||0),bono_asistencia:Number(asigForm.bono_asistencia||0),bono_movilizacion:Number(asigForm.bono_movilizacion||0),bono_colacion:Number(asigForm.bono_colacion||0),gratificacion_monto:Number(asigForm.gratificacion_monto||0),porcentaje_costo:Number(asigForm.porcentaje_costo||0),horas_semanales:Number(asigForm.horas_semanales||0)};
+    if(!registro.fecha_termino_asig) registro.fecha_termino_asig=null;
+    const ok=await saveAsignacion(registro);
+    if(ok)setAsigForm(null);
+  };
+  const terminarAsig=async(a)=>{
+    const hoy=new Date().toISOString().slice(0,10);
+    const fecha=window.prompt("Fecha de término de la asignación (AAAA-MM-DD)", hoy);
+    if(!fecha)return;
+    if(!window.confirm(`Terminar asignación ${a.contrato_id} con fecha ${fecha}?`))return;
+    await terminarAsignacion(a,fecha);
+    setAsigForm(null);
+  };
+
   return(
     <div>
       <PageHeader title="Trabajadores" subtitle={contratoId ? `${trabajadoresFiltrados.filter(t=>t.activo).length} asignados` : `${data.trabajadores.filter(t=>t.activo).length} activos`} action={<PrimaryBtn onClick={openNew}>+ Nuevo trabajador</PrimaryBtn>}/>
       {form&&(
         <div style={{background:C.surface,border:`1px solid ${C.accent}`,borderRadius:8,padding:20,marginBottom:16,boxShadow:`0 0 0 3px ${C.accent}14`}}>
           <div style={{display:"flex",gap:8,marginBottom:16,borderBottom:`1px solid ${C.borderLight}`,paddingBottom:12}}>
-            {["datos","remuneracion"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.textMuted,border:`1px solid ${tab===t?C.accent:C.border}`,borderRadius:6,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:tab===t?600:400}}>{t==="datos"?"Datos personales":"Remuneración"}</button>)}
+            {["datos","remuneracion","asignaciones"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.textMuted,border:`1px solid ${tab===t?C.accent:C.border}`,borderRadius:6,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:tab===t?600:400}}>{t==="datos"?"Datos personales":t==="remuneracion"?"Remuneración":"Asignaciones"}</button>)}
           </div>
           {tab==="datos"&&(
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
@@ -702,6 +770,69 @@ function Trabajadores({data,insert,update,contratoId}){
               </FL>
             </div>
           )}
+          {tab==="asignaciones"&&(
+            <div style={{marginBottom:12}}>
+              {isNew?
+                <AlertBanner type="warning" message="Primero crea el trabajador. Luego podrás asignarlo a uno o más centros de costo sin usar SQL."/>
+              :<>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:12}}>
+                  <div style={{background:estadoPct.bg,border:`1px solid ${estadoPct.border}`,borderRadius:7,padding:"8px 12px",fontSize:12,color:estadoPct.col,fontWeight:600}}>
+                    Financiamiento activo: {estadoPct.txt}
+                  </div>
+                  <PrimaryBtn onClick={openNuevaAsignacion} small>+ Nueva asignación</PrimaryBtn>
+                </div>
+
+                {asigForm&&(<div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:14,marginBottom:14}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                    <FL label="Centro de costo">
+                      <select style={INP} value={asigForm.contrato_id||""} disabled={!!asigForm._edit} onChange={e=>setAsigForm({...asigForm,contrato_id:e.target.value})}>
+                        <option value="">— Seleccionar —</option>
+                        {(data.contratos||[]).map(c=><option key={c.id} value={c.id}>{c.id} — {c.cliente}</option>)}
+                      </select>
+                    </FL>
+                    <FL label="Estado asignación"><select style={INP} value={asigForm.estado_asig||"activa"} onChange={e=>setAsigForm({...asigForm,estado_asig:e.target.value,activo:e.target.value!=="terminada"})}><option value="activa">Activa</option><option value="terminada">Terminada</option><option value="suspendida">Suspendida</option></select></FL>
+                    <FL label="Sueldo asignado / costo imputable ($)"><input type="number" style={INP} value={asigForm.sueldo_asignado||0} onChange={e=>setAsigForm({...asigForm,sueldo_asignado:Number(e.target.value)})}/></FL>
+                    <FL label="Porcentaje costo (%)"><input type="number" min={0} max={500} style={INP} value={asigForm.porcentaje_costo||0} onChange={e=>setAsigForm({...asigForm,porcentaje_costo:Number(e.target.value)})}/></FL>
+                    <FL label="Movilización ($)"><input type="number" style={INP} value={asigForm.bono_movilizacion||0} onChange={e=>setAsigForm({...asigForm,bono_movilizacion:Number(e.target.value)})}/></FL>
+                    <FL label="Colación ($)"><input type="number" style={INP} value={asigForm.bono_colacion||0} onChange={e=>setAsigForm({...asigForm,bono_colacion:Number(e.target.value)})}/></FL>
+                    <FL label="Bono asistencia ($)"><input type="number" style={INP} value={asigForm.bono_asistencia||0} onChange={e=>setAsigForm({...asigForm,bono_asistencia:Number(e.target.value)})}/></FL>
+                    <FL label="Gratificación monto ($)"><input type="number" style={INP} value={asigForm.gratificacion_monto||0} onChange={e=>setAsigForm({...asigForm,gratificacion_monto:Number(e.target.value)})}/></FL>
+                    <FL label="Fecha inicio"><input type="date" style={INP} value={dateOnly(asigForm.fecha_inicio_asig)} onChange={e=>setAsigForm({...asigForm,fecha_inicio_asig:e.target.value||null})}/></FL>
+                    <FL label="Fecha término"><input type="date" style={INP} value={dateOnly(asigForm.fecha_termino_asig)} onChange={e=>setAsigForm({...asigForm,fecha_termino_asig:e.target.value||null})}/></FL>
+                    <FL label="Horas semanales"><input type="number" style={INP} value={asigForm.horas_semanales||0} onChange={e=>setAsigForm({...asigForm,horas_semanales:Number(e.target.value)})}/></FL>
+                    <FL label="Días semana"><input style={INP} value={asigForm.dias_semana||""} onChange={e=>setAsigForm({...asigForm,dias_semana:e.target.value})} placeholder="Ej: Lun-Vie"/></FL>
+                    <FL label="Horario"><input style={INP} value={asigForm.horario||""} onChange={e=>setAsigForm({...asigForm,horario:e.target.value})} placeholder="08:00-17:00"/></FL>
+                    <FL label="Jornada"><input style={INP} value={asigForm.jornada||""} onChange={e=>setAsigForm({...asigForm,jornada:e.target.value})} placeholder="Lun-Vie 08:00-17:00 (1h colación)"/></FL>
+                    <FL label="Afecta remuneración"><select style={INP} value={asigForm.afecta_remuneracion===false?"no":"si"} onChange={e=>setAsigForm({...asigForm,afecta_remuneracion:e.target.value==="si"})}><option value="si">Sí, suma a liquidación</option><option value="no">No, solo control operacional</option></select></FL>
+                    <FL label="Descripción" span><input style={INP} value={asigForm.descripcion||""} onChange={e=>setAsigForm({...asigForm,descripcion:e.target.value})} placeholder="Ej: Anexo reducción jornada / apoyo domingos / servicio eventual"/></FL>
+                  </div>
+                  <div style={{display:"flex",gap:8,marginTop:12}}>
+                    <PrimaryBtn onClick={guardarAsignacion} color={C.green} small>{asigForm._edit?"Actualizar asignación":"Crear asignación"}</PrimaryBtn>
+                    <SecondaryBtn onClick={()=>setAsigForm(null)} small>Cancelar</SecondaryBtn>
+                  </div>
+                </div>)}
+
+                <DataTable
+                  cols={[
+                    {key:"centro",label:"Centro",render:r=><span style={{fontWeight:600}}>{contratoNombre(r.contrato_id)}</span>},
+                    {key:"estado",label:"Estado",render:r=><Tag text={r.estado_asig||"activa"} scheme={(r.estado_asig==="terminada"||r.activo===false)?{bg:"#f9fafb",text:C.textMuted,border:C.border}:{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>},
+                    {key:"sueldo",label:"Sueldo asignado",render:r=><span style={{fontVariantNumeric:"tabular-nums"}}>{clp(r.sueldo_asignado)}</span>},
+                    {key:"pct",label:"% costo",render:r=><span style={{fontWeight:700,color:Number(r.porcentaje_costo||0)===100?C.green:C.yellow}}>{Number(r.porcentaje_costo||0)}%</span>},
+                    {key:"bonos",label:"Bonos",render:r=><span style={{fontSize:12,color:C.textMuted}}>Mov {clp(r.bono_movilizacion)} · Col {clp(r.bono_colacion)}</span>},
+                    {key:"fechas",label:"Vigencia",render:r=><span style={{fontSize:12,color:C.textMuted}}>{dateOnly(r.fecha_inicio_asig)||"—"}<br/>{r.fecha_termino_asig?`hasta ${dateOnly(r.fecha_termino_asig)}`:"vigente"}</span>},
+                    {key:"jornada",label:"Jornada",render:r=><span style={{fontSize:12,color:C.textMuted}}>{r.jornada||r.horario||"—"}</span>},
+                    {key:"acciones",label:"",render:r=><div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+                      <button onClick={()=>setAsigForm({...r,_edit:true,_original_contrato_id:r.contrato_id})} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>
+                      {r.estado_asig!=="terminada"&&r.activo!==false&&<button onClick={()=>terminarAsig(r)} style={{color:C.red,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Terminar</button>}
+                    </div>},
+                  ]}
+                  rows={[...asignacionesTrab].sort((a,b)=>String(a.estado_asig).localeCompare(String(b.estado_asig)))}
+                  empty="Este trabajador aún no tiene asignaciones"
+                />
+                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Nota legal: <b>sueldo_asignado</b> es costo imputable al centro de costo. No reemplaza el sueldo legal de la ficha del trabajador.</p>
+              </>}
+            </div>
+          )}
           <div style={{display:"flex",gap:8,paddingTop:8,borderTop:`1px solid ${C.borderLight}`}}>
             <PrimaryBtn onClick={save} color={C.green}>{isNew?"Crear trabajador":"Actualizar"}</PrimaryBtn>
             <SecondaryBtn onClick={()=>setForm(null)}>Cancelar</SecondaryBtn>
@@ -727,7 +858,7 @@ function Trabajadores({data,insert,update,contratoId}){
               return <span style={{color:C.textMuted,fontSize:12}}>{fecha}<br/><span style={{color:C.green,fontWeight:600}}>{antig}</span></span>;
             }},
             {key:"activo",label:"Estado",render:r=><Tag text={r.activo?"Activo":"Inactivo"} scheme={r.activo?{bg:C.greenBg,text:C.green,border:C.greenBorder}:{bg:"#f9fafb",text:C.textMuted,border:C.border}}/>},
-            {key:"edit",label:"",render:r=><button onClick={()=>{setTab("datos");setForm({...r});}} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
+            {key:"edit",label:"",render:r=><button onClick={()=>{setTab("datos");setAsigForm(null);setForm({...r});}} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
           ]}
           rows={trabajadoresFiltrados}
         />
@@ -3215,7 +3346,7 @@ export default function App(){
     : null;
   const [tab,setTab]=useState("dashboard");
   const [contratoId,setContratoId]=useState("");
-  const {data,loading,dbMode,insert,update,saveRem,reload}=useData();
+  const {data,loading,dbMode,insert,update,saveRem,saveAsignacion,terminarAsignacion,reload}=useData();
   const { user, perfil, loading: authLoading } = useAuth();
   useEffect(() => { if (user) reload(); }, [user]);
 if(authLoading) return <Spinner/>;
@@ -3266,7 +3397,7 @@ if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
         {tab==="dashboard"      &&<Dashboard      data={data} contratoId={contratoId}/>}
         {tab==="contratos"      &&<Contratos       data={data} insert={insert} update={update}/>}
         {tab==="dependencias"   &&<Dependencias    data={data} contratoId={contratoId} insert={insert} update={update}/>}
-        {tab==="trabajadores"   &&<Trabajadores    data={data} insert={insert} update={update} contratoId={contratoId}/>}
+        {tab==="trabajadores"   &&<Trabajadores    data={data} insert={insert} update={update} saveAsignacion={saveAsignacion} terminarAsignacion={terminarAsignacion} contratoId={contratoId}/>}
         {tab==="evidencias"    &&<TabEvidencias   data={data} contratoId={contratoId}/>}
         {tab==="qr"            &&<TabQR           data={data} contratoId={contratoId}/>}
         {tab==="asistencia"     &&<Asistencia      data={data} contratoId={contratoId} insert={insert} update={update}/>}
