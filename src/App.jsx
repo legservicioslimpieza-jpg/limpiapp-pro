@@ -57,6 +57,8 @@ const isAsignacionVigenteHoy = a => {
   if(fin && fin<hoy) return false;
   return true;
 };
+const isAsignacionRemuneracional = a => a && a.afecta_remuneracion !== false;
+const isAsignacionOperacional = a => a && a.afecta_remuneracion === false;
 
 /* ─── Íconos ────────────────────────────────────────────────── */
 const Icon = {
@@ -681,6 +683,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
 
   const asignacionesTrab=form?(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id):[];
   const asignacionesActivas=asignacionesTrab.filter(isAsignacionVigenteHoy);
+  const asignacionesOperacionalesActivas=asignacionesTrab.filter(a=>isAsignacionOperacional(a)&&a.estado_asig==="activa"&&a.activo!==false);
   const pctTotal=asignacionesActivas.reduce((sum,a)=>sum+Number(a.porcentaje_costo||0),0);
   const estadoPct=pctTotal===100?{txt:"✅ 100% financiado",col:C.green,bg:C.greenBg,border:C.greenBorder}:pctTotal>100?{txt:`❌ Exceso ${pctTotal-100}%`,col:C.red,bg:C.redBg,border:C.redBorder}:{txt:`⚠ Déficit ${100-pctTotal}%`,col:C.yellow,bg:C.yellowBg,border:C.yellowBorder};
   const contratoNombre=id=>{const c=data.contratos.find(ct=>ct.id===id);return c?`${c.id} — ${c.cliente}`:id;};
@@ -776,11 +779,20 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                 <AlertBanner type="warning" message="Primero crea el trabajador. Luego podrás asignarlo a uno o más centros de costo sin usar SQL."/>
               :<>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:12}}>
-                  <div style={{background:estadoPct.bg,border:`1px solid ${estadoPct.border}`,borderRadius:7,padding:"8px 12px",fontSize:12,color:estadoPct.col,fontWeight:600}}>
-                    Financiamiento activo: {estadoPct.txt}
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <div style={{background:estadoPct.bg,border:`1px solid ${estadoPct.border}`,borderRadius:7,padding:"8px 12px",fontSize:12,color:estadoPct.col,fontWeight:600}}>
+                      Financiamiento remuneracional activo: {estadoPct.txt}
+                    </div>
+                    {asignacionesOperacionalesActivas.length>0&&(<div style={{background:C.accentBg,border:`1px solid #bfdbfe`,borderRadius:7,padding:"8px 12px",fontSize:12,color:C.accentText,fontWeight:600}}>
+                      👁 {asignacionesOperacionalesActivas.length} asignación(es) operacional(es), no afectan remuneración
+                    </div>)}
                   </div>
                   <PrimaryBtn onClick={openNuevaAsignacion} small>+ Nueva asignación</PrimaryBtn>
                 </div>
+
+                {asignacionesOperacionalesActivas.length>0&&(<div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:7,padding:"9px 12px",fontSize:11,color:C.textMuted,marginBottom:12}}>
+                  Modelo aplicado: los supervisores pueden tener varios centros operacionales para control y fiscalización. Solo las asignaciones marcadas como <b>remuneracionales</b> financian sueldo, bonos y liquidación.
+                </div>)}
 
                 {asigForm&&(<div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:14,marginBottom:14}}>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
@@ -803,7 +815,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     <FL label="Días semana"><input style={INP} value={asigForm.dias_semana||""} onChange={e=>setAsigForm({...asigForm,dias_semana:e.target.value})} placeholder="Ej: Lun-Vie"/></FL>
                     <FL label="Horario"><input style={INP} value={asigForm.horario||""} onChange={e=>setAsigForm({...asigForm,horario:e.target.value})} placeholder="08:00-17:00"/></FL>
                     <FL label="Jornada"><input style={INP} value={asigForm.jornada||""} onChange={e=>setAsigForm({...asigForm,jornada:e.target.value})} placeholder="Lun-Vie 08:00-17:00 (1h colación)"/></FL>
-                    <FL label="Afecta remuneración"><select style={INP} value={asigForm.afecta_remuneracion===false?"no":"si"} onChange={e=>setAsigForm({...asigForm,afecta_remuneracion:e.target.value==="si"})}><option value="si">Sí, suma a liquidación</option><option value="no">No, solo control operacional</option></select></FL>
+                    <FL label="Tipo de asignación"><select style={INP} value={asigForm.afecta_remuneracion===false?"no":"si"} onChange={e=>setAsigForm({...asigForm,afecta_remuneracion:e.target.value==="si"})}><option value="si">💰 Remuneracional: suma a liquidación</option><option value="no">👁 Operacional: supervisión/control, no suma</option></select></FL>
                     <FL label="Descripción" span><input style={INP} value={asigForm.descripcion||""} onChange={e=>setAsigForm({...asigForm,descripcion:e.target.value})} placeholder="Ej: Anexo reducción jornada / apoyo domingos / servicio eventual"/></FL>
                   </div>
                   <div style={{display:"flex",gap:8,marginTop:12}}>
@@ -816,8 +828,9 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   cols={[
                     {key:"centro",label:"Centro",render:r=><span style={{fontWeight:600}}>{contratoNombre(r.contrato_id)}</span>},
                     {key:"estado",label:"Estado",render:r=><Tag text={r.estado_asig||"activa"} scheme={(r.estado_asig==="terminada"||r.activo===false)?{bg:"#f9fafb",text:C.textMuted,border:C.border}:{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>},
-                    {key:"sueldo",label:"Sueldo asignado",render:r=><span style={{fontVariantNumeric:"tabular-nums"}}>{clp(r.sueldo_asignado)}</span>},
-                    {key:"pct",label:"% costo",render:r=><span style={{fontWeight:700,color:Number(r.porcentaje_costo||0)===100?C.green:C.yellow}}>{Number(r.porcentaje_costo||0)}%</span>},
+                    {key:"tipo",label:"Tipo",render:r=>isAsignacionRemuneracional(r)?<Tag text="💰 Remuneracional" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>:<Tag text="👁 Operacional" scheme={{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
+                    {key:"sueldo",label:"Sueldo asignado",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:isAsignacionRemuneracional(r)?C.text:C.textMuted}}>{isAsignacionRemuneracional(r)?clp(r.sueldo_asignado):"—"}</span>},
+                    {key:"pct",label:"% costo",render:r=>isAsignacionRemuneracional(r)?<span style={{fontWeight:700,color:Number(r.porcentaje_costo||0)===100?C.green:C.yellow}}>{Number(r.porcentaje_costo||0)}%</span>:<span style={{fontSize:11,color:C.textMuted}}>No aplica</span>},
                     {key:"bonos",label:"Bonos",render:r=><span style={{fontSize:12,color:C.textMuted}}>Mov {clp(r.bono_movilizacion)} · Col {clp(r.bono_colacion)}</span>},
                     {key:"fechas",label:"Vigencia",render:r=><span style={{fontSize:12,color:C.textMuted}}>{dateOnly(r.fecha_inicio_asig)||"—"}<br/>{r.fecha_termino_asig?`hasta ${dateOnly(r.fecha_termino_asig)}`:"vigente"}</span>},
                     {key:"jornada",label:"Jornada",render:r=><span style={{fontSize:12,color:C.textMuted}}>{r.jornada||r.horario||"—"}</span>},
@@ -826,10 +839,18 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                       {r.estado_asig!=="terminada"&&r.activo!==false&&<button onClick={()=>terminarAsig(r)} style={{color:C.red,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Terminar</button>}
                     </div>},
                   ]}
-                  rows={[...asignacionesTrab].sort((a,b)=>String(a.estado_asig).localeCompare(String(b.estado_asig)))}
+                  rows={[...asignacionesTrab].sort((a,b)=>{
+                    const termA=(a.estado_asig==="terminada"||a.activo===false)?1:0;
+                    const termB=(b.estado_asig==="terminada"||b.activo===false)?1:0;
+                    if(termA!==termB) return termA-termB;
+                    const opA=isAsignacionOperacional(a)?1:0;
+                    const opB=isAsignacionOperacional(b)?1:0;
+                    if(opA!==opB) return opA-opB;
+                    return String(a.contrato_id).localeCompare(String(b.contrato_id));
+                  })}
                   empty="Este trabajador aún no tiene asignaciones"
                 />
-                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Nota legal: <b>sueldo_asignado</b> es costo imputable al centro de costo. No reemplaza el sueldo legal de la ficha del trabajador.</p>
+                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Nota legal: <b>sueldo_asignado</b> es costo imputable al centro de costo solo en asignaciones remuneracionales. Las asignaciones operacionales sirven para supervisión, checklist, evidencias y control; no reemplazan ni incrementan el sueldo legal.</p>
               </>}
             </div>
           )}
