@@ -193,7 +193,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -1207,6 +1207,354 @@ function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onCl
   );
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   FASE 8D — DOCUMENTACIÓN LABORAL
+   Contrato de trabajo · ODI (DS40) · Reglamento Interno · Entrega EPP
+   Genera PDF imprimible (patrón window.open + print) pre-llenado.
+   ═══════════════════════════════════════════════════════════════ */
+
+const EMPRESA = {
+  razon:"LEG Servicios de Limpieza EIRL",
+  rut:"78.086.977-1",
+  giro:"Servicios de aseo y limpieza",
+  domicilio:"Arica, Región de Arica y Parinacota",
+  repNombre:"Ana María Guzmán Loyola",
+  repRut:"12.083.247-6",
+  repCargo:"Representante Legal",
+};
+
+// Catálogo EPP típico para empresa de aseo (editable al entregar)
+const CATALOGO_EPP = [
+  "Guantes de nitrilo",
+  "Guantes de goma uso doméstico",
+  "Mascarilla desechable",
+  "Mascarilla reutilizable / respirador",
+  "Antiparras / lentes de seguridad",
+  "Zapatos de seguridad antideslizantes",
+  "Botas de goma",
+  "Pechera plástica / delantal impermeable",
+  "Uniforme institucional (polera)",
+  "Uniforme institucional (pantalón)",
+  "Cofia / gorro",
+  "Protector auditivo",
+  "Faja lumbar",
+  "Credencial institucional",
+];
+
+// Matriz de riesgos ODI DS40 — riesgos típicos del rubro aseo
+const RIESGOS_ODI = [
+  {riesgo:"Caída a mismo nivel", consec:"Esguinces, contusiones, fracturas", medidas:"Señalizar piso mojado, usar calzado antideslizante, mantener vías despejadas, secar derrames de inmediato."},
+  {riesgo:"Caída a distinto nivel", consec:"Fracturas, TEC, lesiones graves", medidas:"Usar escaleras en buen estado, no subir a sillas/cajas, escalera afirmada por otra persona."},
+  {riesgo:"Contacto con productos químicos (cloro, desinfectantes, detergentes)", consec:"Dermatitis, quemaduras, irritación ocular y respiratoria", medidas:"Usar guantes, antiparras y mascarilla. No mezclar productos (cloro + amoníaco). Leer hoja de seguridad. Ventilar el área."},
+  {riesgo:"Sobreesfuerzo y manejo manual de carga", consec:"Lumbago, trastornos musculoesqueléticos", medidas:"Técnica correcta de levantamiento, no exceder límites Ley 21.012, uso de carros y faja lumbar."},
+  {riesgo:"Exposición a agentes biológicos (baños, basura, residuos)", consec:"Infecciones, contagios", medidas:"Uso de guantes, lavado de manos, manejo correcto de residuos, vacunación al día."},
+  {riesgo:"Golpes y cortes con objetos o herramientas", consec:"Heridas, contusiones", medidas:"Manipular con cuidado, descartar vidrios y cortopunzantes en contenedor rígido."},
+  {riesgo:"Contacto eléctrico (enceradoras, aspiradoras)", consec:"Quemaduras, electrocución", medidas:"Revisar cables, no operar equipos con manos mojadas, desconectar antes de limpiar."},
+];
+
+function htmlDocImprimir(titulo, cuerpoHtml){
+  const w = window.open("","_blank");
+  if(!w){alert("Habilita las ventanas emergentes para generar el documento.");return;}
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${titulo}</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:'Times New Roman',Georgia,serif;font-size:12.5px;line-height:1.55;color:#1a1a1a;margin:0;padding:26mm 22mm}
+    h1{font-size:16px;text-align:center;text-transform:uppercase;letter-spacing:.5px;margin:0 0 2px}
+    h2{font-size:13px;margin:18px 0 6px;border-bottom:1px solid #888;padding-bottom:3px}
+    .empresa{text-align:center;font-size:11px;color:#444;margin-bottom:18px}
+    .empresa b{color:#1e3a8a}
+    p{margin:7px 0;text-align:justify}
+    .clausula{margin:9px 0}
+    .clausula b{display:inline}
+    table{width:100%;border-collapse:collapse;margin:10px 0;font-family:Arial,sans-serif;font-size:10.5px}
+    th{background:#1e3a8a;color:#fff;padding:6px 8px;text-align:left;border:1px solid #1e3a8a}
+    td{padding:6px 8px;border:1px solid #cbd5e1;vertical-align:top}
+    tr:nth-child(even) td{background:#f8fafc}
+    .firmas{margin-top:54px;display:flex;justify-content:space-around;gap:40px}
+    .firma{flex:1;text-align:center;border-top:1px solid #000;padding-top:7px;font-size:11px}
+    .nota{margin-top:22px;font-size:10px;color:#777;font-family:Arial,sans-serif;text-align:center}
+    .lugar{margin-top:14px;font-size:11.5px}
+    @media print{@page{size:A4;margin:16mm}body{padding:0}}
+  </style></head><body>${cuerpoHtml}
+  <p class="nota">Documento generado por LimpiApp Pro · ${EMPRESA.razon} · ${new Date().toLocaleString("es-CL",{timeZone:"America/Santiago"})}</p>
+  </body></html>`);
+  w.document.close();
+  setTimeout(()=>w.print(),700);
+}
+
+// Construye descripción de lugares de prestación y jornada desde asignaciones remuneracionales activas
+function lugaresYJornada(trabajador, data){
+  const asigs=(data.asignaciones||[]).filter(a=>
+    a.trabajador_id===trabajador.id && a.estado_asig==='activa' && a.afecta_remuneracion!==false);
+  const lugares=[], jornadas=[];
+  asigs.forEach(a=>{
+    const ct=(data.contratos||[]).find(c=>c.id===a.contrato_id);
+    if(ct){
+      const dir=[ct.instalacion,ct.direccion].filter(Boolean).join(", ");
+      lugares.push(`${ct.cliente||ct.id}${dir?` (${dir})`:""}`);
+    }
+    const j=[a.jornada,a.horario].filter(Boolean).join(" — ");
+    if(j) jornadas.push(`${ct?(ct.cliente||ct.id):a.contrato_id}: ${j}${a.horas_semanales?` (${a.horas_semanales} hrs/sem)`:""}`);
+  });
+  return {
+    lugares: lugares.length?lugares.join("; "):"dependencias asignadas por el empleador en la ciudad de Arica",
+    jornadas: jornadas.length?jornadas:["Según distribución horaria informada por el empleador, respetando el máximo legal semanal del Código del Trabajo."],
+    totalHoras: asigs.reduce((s,a)=>s+Number(a.horas_semanales||0),0),
+  };
+}
+
+function fechaLargaCL(iso){
+  const d = iso ? new Date(`${dateOnly(iso)}T12:00:00`) : new Date();
+  return d.toLocaleDateString("es-CL",{day:"numeric",month:"long",year:"numeric",timeZone:"America/Santiago"});
+}
+
+function gratificacionTexto(t){
+  switch(t.metodo_gratificacion){
+    case "25% MENSUAL": return "El trabajador percibirá gratificación legal conforme al Art. 50 del Código del Trabajo, equivalente al 25% de lo devengado mensualmente con tope de 4,75 ingresos mínimos mensuales anuales, pagada mes a mes.";
+    case "ANTICIPO PORCENTAJE": return `El empleador anticipará mensualmente la gratificación legal en un ${t.gratificacion_porcentaje||25}% del sueldo base, conforme al Art. 50 del Código del Trabajo.`;
+    case "ANTICIPO MONTO FIJO": return `El empleador anticipará mensualmente la gratificación legal por un monto fijo de ${clp(t.gratificacion_monto||0)}, conforme al Art. 50 del Código del Trabajo.`;
+    default: return "La gratificación legal se liquidará y pagará anualmente conforme a los Arts. 47 y siguientes del Código del Trabajo, según las utilidades de la empresa.";
+  }
+}
+
+function imprimirContratoTrabajo(trabajador, data){
+  const lj = lugaresYJornada(trabajador, data);
+  const tipo = (trabajador.tipo_contrato||"PLAZO FIJO").toUpperCase();
+  const esIndef = tipo.includes("INDEF");
+  const duracion = esIndef
+    ? "El presente contrato es de carácter <b>indefinido</b>."
+    : "El presente contrato es de carácter <b>plazo fijo</b>, rigiendo desde la fecha de ingreso hasta el plazo que las partes acuerden por escrito, pudiendo transformarse en indefinido conforme al Art. 159 N°4 del Código del Trabajo.";
+  const jornadasHtml = lj.jornadas.map(j=>`<li>${j}</li>`).join("");
+  const cuerpo = `
+    <h1>Contrato Individual de Trabajo</h1>
+    <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut} · ${EMPRESA.domicilio}</div>
+    <p>En Arica, a ${fechaLargaCL()}, entre <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, giro ${EMPRESA.giro}, con domicilio en ${EMPRESA.domicilio}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, cédula de identidad N° ${EMPRESA.repRut}, en adelante "el empleador"; y don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}, en adelante "el trabajador", se ha convenido el siguiente contrato individual de trabajo:</p>
+
+    <div class="clausula"><b>PRIMERO: Naturaleza de los servicios.</b> El trabajador se obliga a desempeñar el cargo de <b>${trabajador.cargo||"Auxiliar de Aseo"}</b>, realizando labores de aseo, limpieza, sanitización y mantención de las dependencias que el empleador le asigne, así como toda otra función afín a su cargo que se le encomiende.</div>
+
+    <div class="clausula"><b>SEGUNDO: Lugar de prestación de servicios.</b> Los servicios se prestarán en: ${lj.lugares}. El empleador podrá modificar el lugar de prestación dentro de la misma ciudad conforme al Art. 12 del Código del Trabajo.</div>
+
+    <div class="clausula"><b>TERCERO: Jornada de trabajo.</b> La distribución de la jornada será la siguiente:
+      <ul>${jornadasHtml}</ul>
+      ${lj.totalHoras?`Total semanal pactado: <b>${lj.totalHoras} horas</b>. `:""}La jornada respeta el máximo legal vigente del Código del Trabajo. El trabajador tendrá derecho a colación según lo indicado en su distribución horaria, tiempo que no se considera trabajado.</div>
+
+    <div class="clausula"><b>CUARTO: Remuneración.</b> El empleador pagará al trabajador un sueldo base mensual de <b>${clp(trabajador.sueldo_base||0)}</b> (${trabajador.sueldo_base?numeroAPalabras(trabajador.sueldo_base):"—"} pesos). La remuneración se pagará por mensualidades vencidas, dentro de los primeros 5 días hábiles del mes siguiente, mediante transferencia o el medio que las partes acuerden.</div>
+
+    <div class="clausula"><b>QUINTO: Gratificación.</b> ${gratificacionTexto(trabajador)}</div>
+
+    <div class="clausula"><b>SEXTO: Bonos y asignaciones.</b> ${(trabajador.bono_movilizacion||trabajador.bono_colacion||trabajador.bono_asistencia)?`El trabajador percibirá las siguientes asignaciones no constitutivas de remuneración (Art. 41 inc. 2°): movilización ${clp(trabajador.bono_movilizacion||0)}, colación ${clp(trabajador.bono_colacion||0)}${trabajador.bono_asistencia?`, y bono de asistencia ${clp(trabajador.bono_asistencia||0)}`:""}.`:"No se pactan asignaciones adicionales a la fecha de suscripción, sin perjuicio de las que el empleador otorgue voluntariamente."}</div>
+
+    <div class="clausula"><b>SÉPTIMO: Cotizaciones previsionales.</b> El empleador deducirá y enterará las cotizaciones de previsión (AFP ${trabajador.afp||"—"}), salud (${trabajador.salud||"FONASA"} 7%) y seguro de cesantía que correspondan según la legislación vigente.${trabajador.pensionado?" Por tratarse de trabajador pensionado, queda exento de cotización de AFP, seguro de cesantía y SIS, cotizando únicamente salud.":""}</div>
+
+    <div class="clausula"><b>OCTAVO: Duración.</b> ${duracion} La fecha de ingreso del trabajador es el <b>${fechaLargaCL(trabajador.fecha_inicio)}</b>.</div>
+
+    <div class="clausula"><b>NOVENO: Obligaciones del trabajador.</b> El trabajador se obliga a cumplir el Reglamento Interno de Orden, Higiene y Seguridad de la empresa, a usar correctamente los elementos de protección personal (EPP) entregados, y a observar las instrucciones de prevención de riesgos informadas mediante la Obligación de Informar (ODI).</div>
+
+    <div class="clausula"><b>DÉCIMO: Domicilio y ejemplares.</b> Para todos los efectos legales las partes fijan domicilio en la ciudad de Arica, sometiéndose a la competencia de sus tribunales. El presente contrato se firma en dos ejemplares de igual tenor, quedando uno en poder de cada parte, declarando el trabajador haber recibido el suyo en este acto.</div>
+
+    <div class="firmas">
+      <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Trabajador</b></div>
+      <div class="firma">${EMPRESA.repNombre}<br/>RUT ${EMPRESA.repRut}<br/><b>p.p. ${EMPRESA.razon}</b></div>
+    </div>`;
+  htmlDocImprimir(`Contrato ${trabajador.nombre||""}`, cuerpo);
+}
+
+function imprimirODI(trabajador, data){
+  const lj = lugaresYJornada(trabajador, data);
+  const filas = RIESGOS_ODI.map(r=>`<tr><td><b>${r.riesgo}</b></td><td>${r.consec}</td><td>${r.medidas}</td></tr>`).join("");
+  const cuerpo = `
+    <h1>Obligación de Informar los Riesgos Laborales (ODI)</h1>
+    <div class="empresa">D.S. N°40 de 1969, Art. 21 · Ley N°16.744 — Derecho a Saber<br/><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
+    <p>En cumplimiento del Art. 21 del D.S. N°40 y de la Ley N°16.744, el empleador deja constancia de haber informado al trabajador individualizado de los riesgos que entrañan sus labores, las medidas preventivas y los métodos de trabajo correctos.</p>
+    <h2>Identificación del trabajador</h2>
+    <p><b>Nombre:</b> ${trabajador.nombre||"—"} &nbsp;·&nbsp; <b>RUT:</b> ${trabajador.rut||"—"} &nbsp;·&nbsp; <b>Cargo:</b> ${trabajador.cargo||"Auxiliar de Aseo"}<br/>
+    <b>Lugar(es) de trabajo:</b> ${lj.lugares}</p>
+    <h2>Matriz de riesgos, consecuencias y medidas preventivas</h2>
+    <table><thead><tr><th style="width:28%">Riesgo</th><th style="width:27%">Posibles consecuencias</th><th>Medidas preventivas / método correcto</th></tr></thead><tbody>${filas}</tbody></table>
+    <h2>Elementos de protección personal (EPP)</h2>
+    <p>El trabajador se obliga a usar de forma permanente y correcta los EPP entregados por el empleador (guantes, mascarilla, calzado de seguridad y demás según la tarea), y a dar aviso inmediato ante su deterioro o pérdida. El uso de EPP es obligatorio (Art. 53 D.S. N°594).</p>
+    <p style="margin-top:14px">El trabajador declara haber recibido esta información de manera clara y comprensible, comprometiéndose a respetar las instrucciones de prevención y a reportar todo accidente o condición insegura a su jefatura.</p>
+    <div class="firmas">
+      <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Trabajador — Recibí conforme</b></div>
+      <div class="firma">${EMPRESA.repNombre}<br/><b>p.p. ${EMPRESA.razon}</b></div>
+    </div>
+    <p class="lugar">Arica, ${fechaLargaCL()}.</p>`;
+  htmlDocImprimir(`ODI ${trabajador.nombre||""}`, cuerpo);
+}
+
+function imprimirActaReglamento(trabajador, data){
+  const cuerpo = `
+    <h1>Acta de Entrega del Reglamento Interno</h1>
+    <div class="empresa">Reglamento Interno de Orden, Higiene y Seguridad — Art. 156 Código del Trabajo<br/><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
+    <p>Conforme al Art. 156 del Código del Trabajo, el empleador deja constancia de haber entregado en forma gratuita al trabajador individualizado una copia del Reglamento Interno de Orden, Higiene y Seguridad vigente en la empresa.</p>
+    <h2>Identificación del trabajador</h2>
+    <p><b>Nombre:</b> ${trabajador.nombre||"—"} &nbsp;·&nbsp; <b>RUT:</b> ${trabajador.rut||"—"} &nbsp;·&nbsp; <b>Cargo:</b> ${trabajador.cargo||"Auxiliar de Aseo"}<br/>
+    <b>Fecha de ingreso:</b> ${fechaLargaCL(trabajador.fecha_inicio)}</p>
+    <p>El trabajador declara haber recibido el Reglamento Interno, haber tomado conocimiento de su contenido —en especial de las normas de orden, higiene y seguridad, del procedimiento de la Ley N°21.643 (Ley Karin) sobre acoso laboral, sexual y violencia en el trabajo— y se obliga a darle estricto cumplimiento.</p>
+    <div class="firmas">
+      <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Recibí conforme</b></div>
+      <div class="firma">${EMPRESA.repNombre}<br/><b>p.p. ${EMPRESA.razon}</b></div>
+    </div>
+    <p class="lugar">Arica, ${fechaLargaCL()}.</p>`;
+  htmlDocImprimir(`Acta Reglamento ${trabajador.nombre||""}`, cuerpo);
+}
+
+function imprimirActaEPP(trabajador, entregas){
+  const orden=[...entregas].sort((a,b)=>new Date(a.fecha_entrega||0)-new Date(b.fecha_entrega||0));
+  const filas = orden.length
+    ? orden.map(e=>`<tr><td>${dateOnly(e.fecha_entrega)||"—"}</td><td>${e.articulo||"—"}</td><td style="text-align:center">${e.cantidad||1}</td><td style="text-align:center">${e.talla||"—"}</td><td style="text-align:center">${e.estado==='devuelto'?'Devuelto':'Entregado'}</td><td>${e.observaciones||""}</td></tr>`).join("")
+    : `<tr><td colspan="6" style="text-align:center;color:#888">Sin entregas registradas</td></tr>`;
+  const cuerpo = `
+    <h1>Registro de Entrega de Elementos de Protección Personal</h1>
+    <div class="empresa">Art. 53 D.S. N°594 · Ley N°16.744<br/><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
+    <p>El empleador deja constancia de haber proporcionado gratuitamente al trabajador los elementos de protección personal (EPP) que se detallan, conforme al Art. 53 del D.S. N°594. El trabajador se obliga a usarlos correctamente y a mantenerlos en buen estado.</p>
+    <h2>Identificación del trabajador</h2>
+    <p><b>Nombre:</b> ${trabajador.nombre||"—"} &nbsp;·&nbsp; <b>RUT:</b> ${trabajador.rut||"—"} &nbsp;·&nbsp; <b>Cargo:</b> ${trabajador.cargo||"Auxiliar de Aseo"}</p>
+    <h2>Detalle de entregas</h2>
+    <table><thead><tr><th>Fecha</th><th>Artículo</th><th style="width:9%">Cant.</th><th style="width:9%">Talla</th><th style="width:13%">Estado</th><th>Observaciones</th></tr></thead><tbody>${filas}</tbody></table>
+    <p style="margin-top:14px">El trabajador declara haber recibido los EPP detallados en buen estado, comprometiéndose a su uso obligatorio y permanente durante la jornada, y a su devolución al término de la relación laboral.</p>
+    <div class="firmas">
+      <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Recibí conforme</b></div>
+      <div class="firma">${EMPRESA.repNombre}<br/><b>p.p. ${EMPRESA.razon}</b></div>
+    </div>
+    <p class="lugar">Arica, ${fechaLargaCL()}.</p>`;
+  htmlDocImprimir(`Acta EPP ${trabajador.nombre||""}`, cuerpo);
+}
+
+// Conversión simple de monto a palabras (para el contrato). Suficiente para sueldos.
+function numeroAPalabras(n){
+  n=Math.round(n||0);
+  if(n===0) return "cero";
+  const U=["","un","dos","tres","cuatro","cinco","seis","siete","ocho","nueve","diez","once","doce","trece","catorce","quince","dieciséis","diecisiete","dieciocho","diecinueve","veinte"];
+  const D=["","","veinti","treinta","cuarenta","cincuenta","sesenta","setenta","ochenta","noventa"];
+  const C=["","ciento","doscientos","trescientos","cuatrocientos","quinientos","seiscientos","setecientos","ochocientos","novecientos"];
+  const sub=x=>{ // 0..999
+    if(x===0) return "";
+    if(x===100) return "cien";
+    let s="";
+    const c=Math.floor(x/100), r=x%100;
+    if(c) s+=C[c]+" ";
+    if(r<=20) s+=U[r];
+    else { const d=Math.floor(r/10), u=r%10;
+      if(d===2) s+= u? "veinti"+U[u] : "veinte";
+      else s+= D[d]+(u?" y "+U[u]:""); }
+    return s.trim();
+  };
+  const millones=Math.floor(n/1000000), miles=Math.floor((n%1000000)/1000), resto=n%1000;
+  let out="";
+  if(millones) out+= (millones===1?"un millón":sub(millones)+" millones")+" ";
+  if(miles) out+= (miles===1?"mil":sub(miles)+" mil")+" ";
+  if(resto) out+= sub(resto);
+  return out.trim().replace(/\s+/g," ");
+}
+
+function genEppId(trabajadorId){
+  const ts=Date.now().toString(36).toUpperCase();
+  return `EPP-${(trabajadorId||'TR').slice(-4)}-${ts}`;
+}
+
+function TabDocumentos({trabajador, data, insert, update}){
+  const [eppForm,setEppForm]=useState(null);
+  const entregas=(data.entregas_epp||[]).filter(e=>e.trabajador_id===trabajador.id)
+    .sort((a,b)=>new Date(b.created_at||b.fecha_entrega||0)-new Date(a.created_at||a.fecha_entrega||0));
+
+  const openEpp=()=>setEppForm({
+    id:genEppId(trabajador.id), trabajador_id:trabajador.id,
+    articulo:CATALOGO_EPP[0], cantidad:1, talla:"", estado:"entregado",
+    fecha_entrega:new Date().toISOString().slice(0,10), observaciones:"",
+  });
+  const guardarEpp=async()=>{
+    if(!eppForm.articulo.trim()) return;
+    const rec={...eppForm, cantidad:Number(eppForm.cantidad||1),
+      fecha_entrega:eppForm.fecha_entrega?dateNoon(eppForm.fecha_entrega):null};
+    const isEdit=entregas.find(e=>e.id===eppForm.id);
+    const ok=await(isEdit?update('entregas_epp',rec):insert('entregas_epp',rec));
+    if(ok) setEppForm(null);
+  };
+  const marcarDevuelto=async(e)=>{
+    await update('entregas_epp',{...e,estado:e.estado==='devuelto'?'entregado':'devuelto'});
+  };
+
+  const docBtn={display:"flex",flexDirection:"column",alignItems:"flex-start",gap:4,padding:"14px 16px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",width:"100%"};
+
+  return (
+    <div>
+      <div style={{background:C.accentBg,border:`1px solid #bfdbfe`,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:C.accentText}}>
+        📁 <b>Documentación laboral (Fase 8D).</b> Genera los documentos de ingreso pre-llenados con los datos del trabajador y sus asignaciones. Cada uno abre listo para imprimir o guardar como PDF.
+      </div>
+
+      <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"0 0 8px"}}>Documentos de ingreso</p>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10,marginBottom:24}}>
+        <button style={docBtn} onClick={()=>imprimirContratoTrabajo(trabajador,data)}>
+          <span style={{fontSize:20}}>📄</span>
+          <span style={{fontWeight:600,color:C.text,fontSize:13}}>Contrato de trabajo</span>
+          <span style={{fontSize:11,color:C.textMuted}}>Art. 10 C. del Trabajo · jornada y lugar desde asignaciones</span>
+        </button>
+        <button style={docBtn} onClick={()=>imprimirODI(trabajador,data)}>
+          <span style={{fontSize:20}}>⚠️</span>
+          <span style={{fontWeight:600,color:C.text,fontSize:13}}>ODI — Derecho a Saber</span>
+          <span style={{fontSize:11,color:C.textMuted}}>D.S. N°40 · matriz de riesgos del rubro aseo</span>
+        </button>
+        <button style={docBtn} onClick={()=>imprimirActaReglamento(trabajador,data)}>
+          <span style={{fontSize:20}}>📕</span>
+          <span style={{fontWeight:600,color:C.text,fontSize:13}}>Acta Reglamento Interno</span>
+          <span style={{fontSize:11,color:C.textMuted}}>Art. 156 · recepción firmada (incl. Ley Karin)</span>
+        </button>
+        <button style={docBtn} onClick={()=>imprimirActaEPP(trabajador,entregas)}>
+          <span style={{fontSize:20}}>🧤</span>
+          <span style={{fontWeight:600,color:C.text,fontSize:13}}>Acta de entrega EPP</span>
+          <span style={{fontSize:11,color:C.textMuted}}>Art. 53 D.S. N°594 · consolida el historial</span>
+        </button>
+      </div>
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:0}}>Entrega de EPP — historial</p>
+        {!eppForm&&<PrimaryBtn onClick={openEpp} small>+ Registrar entrega</PrimaryBtn>}
+      </div>
+
+      {eppForm&&(
+        <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:14,marginBottom:14}}>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
+            <FL label="Artículo">
+              <input list="epp-catalogo" style={INP} value={eppForm.articulo} onChange={e=>setEppForm({...eppForm,articulo:e.target.value})} placeholder="Artículo EPP"/>
+              <datalist id="epp-catalogo">{CATALOGO_EPP.map(a=><option key={a} value={a}/>)}</datalist>
+            </FL>
+            <FL label="Cantidad"><input type="number" min={1} style={INP} value={eppForm.cantidad} onChange={e=>setEppForm({...eppForm,cantidad:e.target.value})}/></FL>
+            <FL label="Talla"><input style={INP} value={eppForm.talla} onChange={e=>setEppForm({...eppForm,talla:e.target.value})} placeholder="S/M/L/42…"/></FL>
+            <FL label="Fecha entrega"><input type="date" style={INP} value={eppForm.fecha_entrega||""} onChange={e=>setEppForm({...eppForm,fecha_entrega:e.target.value})}/></FL>
+            <FL label="Observaciones" span><input style={INP} value={eppForm.observaciones} onChange={e=>setEppForm({...eppForm,observaciones:e.target.value})} placeholder="Estado, motivo de reposición, etc."/></FL>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <PrimaryBtn onClick={guardarEpp} color={C.green}>Guardar entrega</PrimaryBtn>
+            <SecondaryBtn onClick={()=>setEppForm(null)}>Cancelar</SecondaryBtn>
+          </div>
+        </div>
+      )}
+
+      <Panel noPad>
+        <DataTable
+          cols={[
+            {key:"fecha_entrega",label:"Fecha",render:r=><span style={{color:C.textMuted}}>{dateOnly(r.fecha_entrega)||"—"}</span>},
+            {key:"articulo",label:"Artículo",render:r=><span style={{fontWeight:500}}>{r.articulo}</span>},
+            {key:"cantidad",label:"Cant.",render:r=>r.cantidad||1},
+            {key:"talla",label:"Talla",render:r=>r.talla||"—"},
+            {key:"estado",label:"Estado",render:r=><Tag text={r.estado==='devuelto'?"Devuelto":"Entregado"} scheme={r.estado==='devuelto'?{bg:C.yellowBg,text:C.yellow,border:C.yellowBorder}:{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>},
+            {key:"obs",label:"Observaciones",render:r=><span style={{fontSize:12,color:C.textMuted}}>{r.observaciones||"—"}</span>},
+            {key:"acc",label:"",render:r=>(
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>setEppForm({...r,fecha_entrega:dateOnly(r.fecha_entrega)})} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>
+                <button onClick={()=>marcarDevuelto(r)} style={{color:C.textMuted,background:"none",border:"none",cursor:"pointer",fontSize:12}}>{r.estado==='devuelto'?"Reactivar":"Devolver"}</button>
+              </div>
+            )},
+          ]}
+          rows={entregas}
+          empty="Sin entregas de EPP registradas. Usa «Registrar entrega» para iniciar el historial."
+        />
+      </Panel>
+    </div>
+  );
+}
+
 function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,contratoId}){
   const [form,setForm]=useState(null);
   const [tab,setTab]=useState("datos");
@@ -1263,7 +1611,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       {form&&(
         <div style={{background:C.surface,border:`1px solid ${C.accent}`,borderRadius:8,padding:20,marginBottom:16,boxShadow:`0 0 0 3px ${C.accent}14`}}>
           <div style={{display:"flex",gap:8,marginBottom:16,borderBottom:`1px solid ${C.borderLight}`,paddingBottom:12}}>
-            {["datos","remuneracion","asignaciones","anexos"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.textMuted,border:`1px solid ${tab===t?C.accent:C.border}`,borderRadius:6,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:tab===t?600:400}}>{t==="datos"?"Datos personales":t==="remuneracion"?"Remuneración":t==="asignaciones"?"Asignaciones":"Anexos"}</button>)}
+            {["datos","remuneracion","asignaciones","anexos","documentos"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.textMuted,border:`1px solid ${tab===t?C.accent:C.border}`,borderRadius:6,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:tab===t?600:400}}>{t==="datos"?"Datos personales":t==="remuneracion"?"Remuneración":t==="asignaciones"?"Asignaciones":t==="anexos"?"Anexos":"Documentos"}</button>)}
           </div>
           {tab==="datos"&&(
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
@@ -1453,6 +1801,17 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           )}
           {tab==="anexos"&&isNew&&(
             <AlertBanner type="warning" message="Primero crea el trabajador. Luego podrás registrar anexos de contrato."/>
+          )}
+          {tab==="documentos"&&form&&!isNew&&(
+            <TabDocumentos
+              trabajador={form}
+              data={data}
+              insert={insert}
+              update={update}
+            />
+          )}
+          {tab==="documentos"&&isNew&&(
+            <AlertBanner type="warning" message="Primero crea el trabajador. Luego podrás generar contrato, ODI, reglamento y registrar EPP."/>
           )}
           {(tab==="datos"||tab==="remuneracion")&&(
           <div style={{display:"flex",gap:8,paddingTop:8,borderTop:`1px solid ${C.borderLight}`}}>
