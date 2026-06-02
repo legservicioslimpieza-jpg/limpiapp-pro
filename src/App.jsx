@@ -671,10 +671,263 @@ function Dependencias({data,contratoId,insert,update}){
 /* ─── Trabajadores ──────────────────────────────────────────── */
 const AFP_LIST=["NO COTIZA","CAPITAL","CUPRUM","HABITAT","PLANVITAL","PROVIDA","MODELO","UNO"];
 const SALUD_LIST=["FONASA","ISAPRE BANMEDICA","ISAPRE COLMENA","ISAPRE CONSALUD","ISAPRE CRUZ BLANCA","ISAPRE NUEVA MASVIDA","ISAPRE VIDA TRES"];
+/* ─── Fase 8B — Cálculo Finiquito ───────────────────────────── */
+function calcularFiniquitoPreview(trabajador, asignaciones, fechaSep, motivo, cartaAviso, feriadosDB=[]) {
+  const feriadosSet = buildFeriadosSet(feriadosDB);
+  const hoy = new Date(); hoy.setHours(12,0,0,0);
+  const fechaIngreso = trabajador.fecha_inicio ? new Date(trabajador.fecha_inicio.split('T')[0]+'T12:00:00') : null;
+  const fechaTerm = new Date(fechaSep+'T12:00:00');
+  if(!fechaIngreso) return null;
+
+  const diasTotales = Math.round((fechaTerm - fechaIngreso)/(1000*60*60*24));
+  const mesesServicio = diasTotales / 30.44;
+  const sueldoBase = trabajador.sueldo_base || 0;
+  const sueldoDiario = Math.round(sueldoBase / 30);
+
+  // Vacaciones proporcionales: 1.25 días hábiles por mes (sin redondear hasta el monto final)
+  const diasVacPropDecimal = mesesServicio * 1.25;        // ej: 7 meses → 8.75 días
+  const diasVacProp = Math.round(diasVacPropDecimal * 10) / 10; // 1 decimal para mostrar
+  const vacacionesProp = Math.round(diasVacPropDecimal * sueldoDiario); // monto con precisión
+
+  // Aviso previo sustitutivo: solo Art.161 sin carta de aviso
+  const avisoPrevio = (motivo==='art161' && !cartaAviso) ? sueldoBase : 0;
+
+  // Indemnización: Art.161, mínimo 1 año completo
+  let indemnizacion = 0;
+  if (motivo==='art161') {
+    const anosCompletos = Math.floor(mesesServicio / 12);
+    const mesesResto = mesesServicio % 12;
+    if (anosCompletos >= 1) {
+      const periodos = anosCompletos + (mesesResto > 6 ? 1 : 0);
+      indemnizacion = Math.min(periodos, 11) * sueldoBase;
+    }
+  }
+
+  const totalBruto = vacacionesProp + avisoPrevio + indemnizacion;
+
+  // Fechas finiquito
+  const af = calcAlertaFiniquito(fechaSep, feriadosSet);
+
+  // Referencia financiera: suma asignaciones remuneracionales activas
+  const asigActivas = (asignaciones||[]).filter(a =>
+    a.trabajador_id === trabajador.id &&
+    a.afecta_remuneracion !== false &&
+    a.estado_asig === 'activa'
+  );
+  const refFinanciera = asigActivas.reduce((s,a) => s+(a.sueldo_asignado||0), 0);
+
+  return { diasTotales, mesesServicio:Math.round(mesesServicio*10)/10,
+    sueldoBase, sueldoDiario, diasVacProp, vacacionesProp,
+    avisoPrevio, indemnizacion, totalBruto, af, refFinanciera };
+}
+
+/* ─── Modal Desvinculación Guiada ───────────────────────────── */
+function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onClose}) {
+  const [paso, setPaso] = useState(1);
+  const [motivo, setMotivo] = useState('');
+  const [fechaSep, setFechaSep] = useState(new Date().toISOString().slice(0,10));
+  const [cartaAviso, setCartaAviso] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const feriadosDB = data.feriados_chile || [];
+  const MOTIVOS = [
+    {val:'art159n4', label:'Art. 159 N°4 — Vencimiento de plazo fijo'},
+    {val:'art161',   label:'Art. 161 — Necesidades de la empresa'},
+    {val:'art159n1', label:'Art. 159 N°1 — Mutuo acuerdo de partes'},
+    {val:'art160',   label:'Art. 160 — Falta grave (sin indemnización)'},
+  ];
+  const motivoLabel = MOTIVOS.find(m=>m.val===motivo)?.label || '';
+
+  const calcularPreview = () => {
+    if (!motivo || !fechaSep) return;
+    const p = calcularFiniquitoPreview(trabajador, data.asignaciones, fechaSep, motivo, cartaAviso, feriadosDB);
+    setPreview(p);
+    setPaso(3);
+  };
+
+  const confirmar = async () => {
+    setSaving(true);
+    // 1. Actualizar trabajador
+    await update('trabajadores', {
+      ...trabajador,
+      activo: false,
+      estado: 'DESVINCULADO',
+      fecha_separacion: dateNoon(fechaSep),
+      motivo_termino: motivoLabel,
+      finiquito_estado: 'pendiente',
+    });
+    // 2. Terminar asignaciones activas (remuneracionales y operacionales)
+    const asigActivas = (data.asignaciones||[]).filter(a =>
+      a.trabajador_id === trabajador.id &&
+      (a.estado_asig === 'activa' || a.activo !== false)
+    );
+    for (const a of asigActivas) {
+      await terminarAsignacion(a, fechaSep);
+    }
+    setSaving(false);
+    onClose(true); // true = refresh needed
+  };
+
+  const OVL = {position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16};
+  const BOX = {background:'#fff',borderRadius:12,padding:24,maxWidth:520,width:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'};
+
+  return(
+    <div style={OVL} onClick={e=>e.target===e.currentTarget&&onClose(false)}>
+      <div style={BOX}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+          <div>
+            <p style={{fontWeight:700,fontSize:15,color:'#991b1b'}}>🚨 Desvincular trabajador</p>
+            <p style={{fontSize:12,color:C.textMuted}}>{trabajador.nombre} · {trabajador.rut}</p>
+          </div>
+          <div style={{fontSize:11,color:C.textMuted,background:C.surfaceAlt,borderRadius:20,padding:'3px 12px'}}>
+            Paso {paso} de 4
+          </div>
+        </div>
+
+        {/* Indicador de pasos */}
+        <div style={{display:'flex',gap:4,marginBottom:20}}>
+          {[1,2,3,4].map(n=>(
+            <div key={n} style={{flex:1,height:4,borderRadius:2,background:n<=paso?'#dc2626':C.borderLight}}/>
+          ))}
+        </div>
+
+        {/* PASO 1: Motivo */}
+        {paso===1&&(
+          <div>
+            <p style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:12}}>Motivo de término</p>
+            {MOTIVOS.map(m=>(
+              <div key={m.val} onClick={()=>setMotivo(m.val)}
+                style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderRadius:8,border:`2px solid ${motivo===m.val?'#dc2626':C.border}`,background:motivo===m.val?'#fef2f2':'transparent',cursor:'pointer',marginBottom:8}}>
+                <div style={{width:16,height:16,borderRadius:'50%',border:`2px solid ${motivo===m.val?'#dc2626':C.border}`,background:motivo===m.val?'#dc2626':'transparent',flexShrink:0}}/>
+                <span style={{fontSize:12,color:motivo===m.val?'#991b1b':C.text,fontWeight:motivo===m.val?600:400}}>{m.label}</span>
+              </div>
+            ))}
+            {motivo==='art161'&&(
+              <div style={{background:'#fef9c3',border:'1px solid #fde68a',borderRadius:6,padding:'8px 12px',fontSize:11,color:'#92400e',marginTop:8}}>
+                ⚠️ Art. 161 requiere carta de aviso con 30 días de anticipación o pago sustitutivo.
+              </div>
+            )}
+            <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:16}}>
+              <button onClick={()=>onClose(false)} style={{padding:'8px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>Cancelar</button>
+              <button onClick={()=>motivo&&setPaso(2)} disabled={!motivo}
+                style={{padding:'8px 16px',borderRadius:6,border:'none',background:motivo?'#dc2626':'#e5e7eb',color:motivo?'#fff':C.textMuted,cursor:motivo?'pointer':'not-allowed',fontSize:12,fontWeight:600}}>
+                Siguiente →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* PASO 2: Fecha y carta */}
+        {paso===2&&(
+          <div>
+            <p style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:12}}>Fecha y condiciones</p>
+            <FL label="Fecha de separación laboral">
+              <input type="date" style={INP} value={fechaSep} onChange={e=>setFechaSep(e.target.value)}
+                max={new Date().toISOString().slice(0,10)}/>
+            </FL>
+            {(motivo==='art161'||motivo==='art159n4')&&(
+              <div onClick={()=>setCartaAviso(v=>!v)}
+                style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderRadius:8,border:`1px solid ${cartaAviso?C.green:C.border}`,background:cartaAviso?C.greenBg:'transparent',cursor:'pointer',marginTop:8}}>
+                <input type="checkbox" checked={cartaAviso} onChange={()=>{}} style={{accentColor:C.green,width:16,height:16}}/>
+                <span style={{fontSize:12,color:cartaAviso?C.green:C.textMuted,fontWeight:cartaAviso?600:400}}>
+                  ✅ Carta de aviso entregada con 30+ días de anticipación
+                </span>
+              </div>
+            )}
+            {motivo==='art161'&&!cartaAviso&&(
+              <p style={{fontSize:11,color:'#dc2626',marginTop:6}}>
+                Sin carta de aviso → se calculará indemnización sustitutiva (1 mes de sueldo adicional).
+              </p>
+            )}
+            <div style={{display:'flex',justifyContent:'space-between',gap:8,marginTop:16}}>
+              <button onClick={()=>setPaso(1)} style={{padding:'8px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>← Atrás</button>
+              <button onClick={calcularPreview} disabled={!fechaSep}
+                style={{padding:'8px 16px',borderRadius:6,border:'none',background:'#dc2626',color:'#fff',cursor:'pointer',fontSize:12,fontWeight:600}}>
+                Calcular →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* PASO 3: Vista previa finiquito */}
+        {paso===3&&preview&&(
+          <div>
+            <p style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:4}}>Vista previa del finiquito</p>
+            <p style={{fontSize:11,color:C.textMuted,marginBottom:12}}>Basado en sueldo base legal: {clp(preview.sueldoBase)}</p>
+            <div style={{background:'#f8fafc',borderRadius:8,padding:12,marginBottom:12}}>
+              <div style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:`1px solid ${C.borderLight}`,marginBottom:4}}>
+                <span style={{fontSize:12,color:C.textMuted}}>Tiempo servicio</span>
+                <span style={{fontSize:12,fontWeight:600}}>{preview.mesesServicio} meses ({preview.diasTotales} días)</span>
+              </div>
+              {[
+                {label:`Vacaciones proporcionales (${preview.diasVacProp} d.h. × ${clp(preview.sueldoDiario)})`, val:preview.vacacionesProp},
+                {label:'Aviso previo sustitutivo (1 mes sueldo)', val:preview.avisoPrevio, skip:!preview.avisoPrevio},
+                {label:`Indemnización años servicio (${Math.floor(preview.mesesServicio/12)} año(s))`, val:preview.indemnizacion, skip:!preview.indemnizacion},
+              ].filter(r=>!r.skip).map((r,i)=>(
+                <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'4px 0'}}>
+                  <span style={{fontSize:12,color:C.textMuted}}>{r.label}</span>
+                  <span style={{fontSize:12,fontWeight:500,color:C.text}}>{clp(r.val)}</span>
+                </div>
+              ))}
+              <div style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderTop:`2px solid ${C.border}`,marginTop:4}}>
+                <span style={{fontSize:13,fontWeight:700,color:C.text}}>Total bruto estimado</span>
+                <span style={{fontSize:14,fontWeight:700,color:'#1d4ed8'}}>{clp(preview.totalBruto)}</span>
+              </div>
+            </div>
+            {preview.refFinanciera>0&&(
+              <p style={{fontSize:10,color:C.textMuted,background:C.surfaceAlt,borderRadius:4,padding:'4px 8px',marginBottom:8}}>
+                📊 Referencia financiera: suma sueldo_asignado activo = {clp(preview.refFinanciera)} (solo para control de costos, no es base legal)
+              </p>
+            )}
+            <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',fontSize:11,color:'#991b1b',marginBottom:12}}>
+              <b>Plazo finiquito:</b> Objetivo empresa {preview.af?.fmtObjetivo} · Máximo legal {preview.af?.fmtLegal}
+            </div>
+            <p style={{fontSize:10,color:C.textMuted,marginBottom:12}}>
+              * Este cálculo es referencial. El finiquito final debe ser revisado y firmado con asesoría legal.
+            </p>
+            <div style={{display:'flex',justifyContent:'space-between',gap:8}}>
+              <button onClick={()=>setPaso(2)} style={{padding:'8px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>← Atrás</button>
+              <button onClick={()=>setPaso(4)}
+                style={{padding:'8px 16px',borderRadius:6,border:'none',background:'#dc2626',color:'#fff',cursor:'pointer',fontSize:12,fontWeight:600}}>
+                Confirmar →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* PASO 4: Confirmación final */}
+        {paso===4&&(
+          <div>
+            <p style={{fontWeight:600,fontSize:13,color:'#991b1b',marginBottom:12}}>⚠️ Confirmar desvinculación</p>
+            <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:12,marginBottom:16}}>
+              <p style={{fontSize:12,color:'#991b1b',marginBottom:6}}><b>Esta acción:</b></p>
+              <p style={{fontSize:11,color:'#991b1b'}}>✓ Marcará a {trabajador.nombre} como DESVINCULADO</p>
+              <p style={{fontSize:11,color:'#991b1b'}}>✓ Registrará fecha separación: {new Date(fechaSep+'T12:00:00').toLocaleDateString('es-CL')}</p>
+              <p style={{fontSize:11,color:'#991b1b'}}>✓ Motivo: {motivoLabel}</p>
+              <p style={{fontSize:11,color:'#991b1b'}}>✓ Cerrará todas las asignaciones activas con esta fecha</p>
+              <p style={{fontSize:11,color:'#991b1b'}}>✓ Activará alerta de finiquito en el Dashboard</p>
+              <p style={{fontSize:11,color:'#15803d',marginTop:6}}>✓ No se eliminarán datos — solo se cierran con fecha (trazabilidad completa)</p>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',gap:8}}>
+              <button onClick={()=>setPaso(3)} disabled={saving} style={{padding:'8px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>← Atrás</button>
+              <button onClick={confirmar} disabled={saving}
+                style={{padding:'8px 20px',borderRadius:6,border:'none',background:saving?'#e5e7eb':'#dc2626',color:saving?C.textMuted:'#fff',cursor:saving?'not-allowed':'pointer',fontSize:13,fontWeight:700}}>
+                {saving?'Procesando...':'🚨 Confirmar desvinculación'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,contratoId}){
   const [form,setForm]=useState(null);
   const [tab,setTab]=useState("datos");
   const [asigForm,setAsigForm]=useState(null);
+  const [showDesvincular,setShowDesvincular]=useState(false);
   const isNew=form&&!data.trabajadores.find(t=>t.id===form.id);
   const asignadosIds=contratoId?(data.asignaciones||[]).filter(a=>a.contrato_id===contratoId&&a.activo).map(a=>a.trabajador_id):null;
   const trabajadoresFiltrados=asignadosIds?data.trabajadores.filter(t=>asignadosIds.includes(t.id)):data.trabajadores;
@@ -710,6 +963,18 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
 
   return(
     <div>
+      {showDesvincular&&form&&(
+        <DesvinculacionModal
+          trabajador={form}
+          data={data}
+          update={update}
+          terminarAsignacion={terminarAsignacion}
+          onClose={(refresh)=>{
+            setShowDesvincular(false);
+            if(refresh) setForm(null);
+          }}
+        />
+      )}
       <PageHeader title="Trabajadores" subtitle={contratoId ? `${trabajadoresFiltrados.filter(t=>t.activo).length} asignados` : `${data.trabajadores.filter(t=>t.activo).length} activos`} action={<PrimaryBtn onClick={openNew}>+ Nuevo trabajador</PrimaryBtn>}/>
       {form&&(
         <div style={{background:C.surface,border:`1px solid ${C.accent}`,borderRadius:8,padding:20,marginBottom:16,boxShadow:`0 0 0 3px ${C.accent}14`}}>
@@ -729,8 +994,20 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               <FL label="Fecha separación laboral"><input type="date" style={INP} value={form.fecha_separacion||""} onChange={e=>setForm({...form,fecha_separacion:e.target.value||null})}/></FL>
               {form.fecha_separacion&&<>
                 <FL label="Motivo término"><select style={INP} value={form.motivo_termino||""} onChange={e=>setForm({...form,motivo_termino:e.target.value})}><option value="">— Seleccionar —</option><option value="Art. 159 N°4 Vencimiento plazo">Art. 159 N°4 Vencimiento plazo</option><option value="Art. 161 Necesidades empresa">Art. 161 Necesidades empresa</option><option value="Art. 159 N°1 Mutuo acuerdo">Art. 159 N°1 Mutuo acuerdo</option><option value="Art. 160 Falta grave">Art. 160 Falta grave</option></select></FL>
-                <FL label="Estado finiquito"><select style={INP} value={form.finiquito_estado||"pendiente"} onChange={e=>setForm({...form,finiquito_estado:e.target.value})}><option value="pendiente">⏳ Pendiente</option><option value="preparado">📄 Preparado</option><option value="disponible">✅ Disponible trabajador</option><option value="firmado">✍️ Firmado</option></select></FL>
+                <FL label="Estado finiquito"><select style={INP} value={form.finiquito_estado||"pendiente"} onChange={e=>setForm({...form,finiquito_estado:e.target.value})}><option value="pendiente">⏳ Pendiente</option><option value="preparado">📄 Preparado</option><option value="disponible">✅ Disponible trabajador</option><option value="firmado">✍️ Firmado</option><option value="pagado">💰 Pagado</option></select></FL>
               </>}
+              {/* Botón Desvincular — solo para trabajadores activos */}
+              {form.activo!==false&&!isNew&&(
+                <div style={{gridColumn:'1/-1',marginTop:8}}>
+                  <button onClick={()=>setShowDesvincular(true)}
+                    style={{width:'100%',padding:'10px 0',borderRadius:8,border:'2px solid #dc2626',background:'transparent',color:'#dc2626',cursor:'pointer',fontSize:13,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
+                    🚨 Iniciar proceso de desvinculación
+                  </button>
+                  <p style={{fontSize:10,color:C.textMuted,textAlign:'center',marginTop:4}}>
+                    Guiará el cálculo del finiquito y cerrará las asignaciones automáticamente
+                  </p>
+                </div>
+              )}
             </div>
           )}
           {tab==="remuneracion"&&(
