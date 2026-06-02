@@ -193,7 +193,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -671,6 +671,281 @@ function Dependencias({data,contratoId,insert,update}){
 /* ─── Trabajadores ──────────────────────────────────────────── */
 const AFP_LIST=["NO COTIZA","CAPITAL","CUPRUM","HABITAT","PLANVITAL","PROVIDA","MODELO","UNO"];
 const SALUD_LIST=["FONASA","ISAPRE BANMEDICA","ISAPRE COLMENA","ISAPRE CONSALUD","ISAPRE CRUZ BLANCA","ISAPRE NUEVA MASVIDA","ISAPRE VIDA TRES"];
+/* ─── Fase 8C — Gestión de Anexos ───────────────────────────── */
+const TIPOS_ANEXO = [
+  {val:'reduccion_jornada',      label:'Reducción de jornada'},
+  {val:'aumento_jornada',        label:'Aumento de jornada'},
+  {val:'reduccion_remuneracion', label:'Reducción de remuneración'},
+  {val:'aumento_remuneracion',   label:'Aumento de remuneración'},
+  {val:'cambio_horario',         label:'Cambio de horario'},
+  {val:'cambio_centro',          label:'Cambio de centro de costo'},
+  {val:'cambio_multiple',        label:'Cambio múltiple'},
+];
+const ESTADOS_ANEXO = [
+  {val:'borrador',        label:'📝 Borrador'},
+  {val:'pendiente_firma', label:'✏️ Pendiente firma'},
+  {val:'firmado',         label:'✅ Firmado'},
+  {val:'aplicado',        label:'⚡ Aplicado'},
+  {val:'anulado',         label:'❌ Anulado'},
+];
+
+function genAnexoId(trabajadorId){
+  const ts=Date.now().toString(36).toUpperCase();
+  return `ANX-${(trabajadorId||'TR').slice(-4)}-${ts}`;
+}
+
+function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTrabajador}){
+  const [form,setForm]=useState(null);
+  const anexos=(data.anexos_contrato||[]).filter(a=>a.trabajador_id===trabajador.id)
+    .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+
+  const openNew=()=>setForm({
+    id:genAnexoId(trabajador.id),
+    trabajador_id:trabajador.id,
+    tipo_anexo:'',
+    fecha_firma:'',
+    fecha_vigencia:'',
+    motivo:'',
+    sueldo_anterior:trabajador.sueldo_base||0,
+    sueldo_nuevo:trabajador.sueldo_base||0,
+    jornada_anterior:trabajador.jornada||'',
+    jornada_nueva:'',
+    horario_anterior:'',
+    horario_nuevo:'',
+    centro_anterior:'',
+    centro_nuevo:'',
+    porcentaje_anterior:0,
+    porcentaje_nuevo:0,
+    documento_url:'',
+    estado:'borrador',
+    observaciones:'',
+  });
+
+  const save=async()=>{
+    const rec={...form,
+      fecha_firma:form.fecha_firma?dateNoon(form.fecha_firma):null,
+      fecha_vigencia:form.fecha_vigencia?dateNoon(form.fecha_vigencia):null,
+    };
+    const isEdit=anexos.find(a=>a.id===form.id);
+    const ok=await(isEdit?update('anexos_contrato',rec):insert('anexos_contrato',rec));
+    if(ok) setForm(null);
+  };
+
+  const [confirmAplicar,setConfirmAplicar]=useState(null); // anexo a confirmar
+
+  const aplicarAnexo=async(anexo)=>{
+    if(anexo.estado!=='firmado') return;
+    setConfirmAplicar(anexo);
+  };
+
+  const ejecutarAplicacion=async()=>{
+    const anexo=confirmAplicar;
+    if(!anexo) return;
+    setConfirmAplicar(null);
+    // 1. Actualizar datos del trabajador
+    const cambiosTrab={};
+    if(anexo.sueldo_nuevo!=null && anexo.sueldo_nuevo!==anexo.sueldo_anterior)
+      cambiosTrab.sueldo_base=anexo.sueldo_nuevo;
+    if(anexo.jornada_nueva) cambiosTrab.jornada=anexo.jornada_nueva;
+    if(anexo.horario_nuevo) cambiosTrab.horario=anexo.horario_nuevo;
+    if(Object.keys(cambiosTrab).length>0)
+      await update('trabajadores',{...trabajador,...cambiosTrab});
+    // 2. Actualizar asignación si hay cambio de porcentaje/sueldo en un centro
+    if(saveAsignacion && anexo.centro_nuevo && anexo.porcentaje_nuevo>0){
+      const asigExistente=(data.asignaciones||[]).find(
+        a=>a.trabajador_id===trabajador.id && a.contrato_id===anexo.centro_nuevo && a.estado_asig==='activa'
+      );
+      if(asigExistente){
+        await saveAsignacion({
+          ...asigExistente,
+          porcentaje_costo: anexo.porcentaje_nuevo,
+          sueldo_asignado: anexo.sueldo_nuevo>0 ? anexo.sueldo_nuevo : asigExistente.sueldo_asignado,
+        });
+      }
+    }
+    // 3. Marcar anexo como aplicado (bloqueado)
+    await update('anexos_contrato',{...anexo,estado:'aplicado'});
+    // 4. Refrescar form del trabajador con nuevos datos
+    if(setFormTrabajador && Object.keys(cambiosTrab).length>0)
+      setFormTrabajador(prev=>({...prev,...cambiosTrab}));
+    setForm(null);
+  };
+
+  const tipoLabel=t=>TIPOS_ANEXO.find(x=>x.val===t)?.label||t;
+  const estadoLabel=e=>ESTADOS_ANEXO.find(x=>x.val===e)?.label||e;
+  const estadoColor={borrador:C.textMuted,pendiente_firma:'#b45309',firmado:C.green,aplicado:'#1d4ed8',anulado:'#dc2626'};
+
+  const showSueldo=['reduccion_remuneracion','aumento_remuneracion','cambio_multiple'].includes(form?.tipo_anexo);
+  const showJornada=['reduccion_jornada','aumento_jornada','cambio_horario','cambio_multiple'].includes(form?.tipo_anexo);
+  const showCentro=['cambio_centro','cambio_multiple'].includes(form?.tipo_anexo);
+
+  return(
+    <div style={{marginBottom:12}}>
+      {/* Modal confirmación fuerte para aplicar anexo */}
+      {confirmAplicar&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:1100,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:'#fff',borderRadius:12,padding:24,maxWidth:420,width:'100%',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
+            <p style={{fontWeight:700,fontSize:15,color:'#991b1b',marginBottom:8}}>⚡ Aplicar anexo</p>
+            <p style={{fontSize:12,color:C.text,marginBottom:12}}>
+              Se aplicarán los siguientes cambios a <b>{trabajador.nombre}</b>:
+            </p>
+            <div style={{background:'#f8fafc',borderRadius:6,padding:10,marginBottom:12,fontSize:11,color:C.text}}>
+              <p><b>Tipo:</b> {TIPOS_ANEXO.find(t=>t.val===confirmAplicar.tipo_anexo)?.label}</p>
+              {confirmAplicar.sueldo_nuevo!==confirmAplicar.sueldo_anterior&&<p><b>Sueldo:</b> {clp(confirmAplicar.sueldo_anterior)} → {clp(confirmAplicar.sueldo_nuevo)}</p>}
+              {confirmAplicar.jornada_nueva&&<p><b>Jornada:</b> {confirmAplicar.jornada_anterior} → {confirmAplicar.jornada_nueva}</p>}
+              {confirmAplicar.horario_nuevo&&<p><b>Horario:</b> {confirmAplicar.horario_anterior} → {confirmAplicar.horario_nuevo}</p>}
+              {confirmAplicar.centro_nuevo&&confirmAplicar.porcentaje_nuevo>0&&<p><b>Asignación {confirmAplicar.centro_nuevo}:</b> {confirmAplicar.porcentaje_anterior}% → {confirmAplicar.porcentaje_nuevo}%</p>}
+              <p style={{marginTop:6,color:C.green}}>✓ El anexo quedará bloqueado como Aplicado</p>
+            </div>
+            <p style={{fontSize:11,color:'#dc2626',marginBottom:14}}>Esta acción no se puede deshacer.</p>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button onClick={()=>setConfirmAplicar(null)} style={{padding:'8px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>Cancelar</button>
+              <button onClick={ejecutarAplicacion} style={{padding:'8px 18px',borderRadius:6,border:'none',background:'#1d4ed8',color:'#fff',cursor:'pointer',fontSize:12,fontWeight:700}}>⚡ Confirmar aplicación</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Aviso regla crítica */}
+      <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:7,padding:'8px 12px',fontSize:11,color:'#92400e',marginBottom:12,display:'flex',gap:8,alignItems:'flex-start'}}>
+        <span>⚠️</span>
+        <span><b>Regla 8C:</b> Crear un anexo NO modifica sueldo, jornada ni asignaciones. Los datos laborales solo se actualizan cuando el anexo pasa a estado <b>Aplicado</b>.</span>
+      </div>
+
+      {/* Formulario nuevo/edición */}
+      {form&&(
+        <div style={{background:'#f8fafc',border:`1px solid ${C.accent}`,borderRadius:8,padding:16,marginBottom:16}}>
+          <p style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>
+            {anexos.find(a=>a.id===form.id)?'Editar anexo':'Nuevo anexo de contrato'}
+          </p>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
+            <FL label="Tipo de anexo">
+              <select style={INP} value={form.tipo_anexo} onChange={e=>setForm({...form,tipo_anexo:e.target.value})}>
+                <option value="">— Seleccionar —</option>
+                {TIPOS_ANEXO.map(t=><option key={t.val} value={t.val}>{t.label}</option>)}
+              </select>
+            </FL>
+            <FL label="Estado">
+              <select style={INP} value={form.estado} onChange={e=>setForm({...form,estado:e.target.value})}>
+                {ESTADOS_ANEXO.map(e=><option key={e.val} value={e.val}>{e.label}</option>)}
+              </select>
+            </FL>
+            <FL label="Fecha firma"><input type="date" style={INP} value={form.fecha_firma?.split('T')[0]||''} onChange={e=>setForm({...form,fecha_firma:e.target.value})}/></FL>
+            <FL label="Fecha vigencia *"><input type="date" style={INP} value={form.fecha_vigencia?.split('T')[0]||''} onChange={e=>setForm({...form,fecha_vigencia:e.target.value})}/></FL>
+            <FL label="Motivo / observación" style={{gridColumn:'1/-1'}}>
+              <input style={INP} value={form.motivo||''} onChange={e=>setForm({...form,motivo:e.target.value})} placeholder="Ej: Reducción acordada por cierre CT007"/>
+            </FL>
+          </div>
+
+          {showSueldo&&(
+            <div style={{background:'#fff',border:`1px solid ${C.borderLight}`,borderRadius:6,padding:10,marginBottom:10}}>
+              <p style={{fontSize:11,fontWeight:600,color:C.textMuted,marginBottom:8}}>💰 Cambio remuneración</p>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                <FL label="Sueldo anterior ($)"><input type="number" style={{...INP,background:'#f9fafb',cursor:'not-allowed'}} value={form.sueldo_anterior} readOnly/></FL>
+                <FL label="Sueldo nuevo ($)"><input type="number" style={INP} value={form.sueldo_nuevo} onChange={e=>setForm({...form,sueldo_nuevo:Number(e.target.value)})}/></FL>
+              </div>
+              {form.sueldo_nuevo!==form.sueldo_anterior&&(
+                <p style={{fontSize:11,color:form.sueldo_nuevo<form.sueldo_anterior?'#dc2626':C.green,marginTop:4}}>
+                  {form.sueldo_nuevo<form.sueldo_anterior?'↓':'↑'} Diferencia: {clp(Math.abs(form.sueldo_nuevo-form.sueldo_anterior))}
+                </p>
+              )}
+            </div>
+          )}
+
+          {showJornada&&(
+            <div style={{background:'#fff',border:`1px solid ${C.borderLight}`,borderRadius:6,padding:10,marginBottom:10}}>
+              <p style={{fontSize:11,fontWeight:600,color:C.textMuted,marginBottom:8}}>🕐 Cambio jornada / horario</p>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                <FL label="Jornada anterior"><input style={{...INP,background:'#f9fafb'}} value={form.jornada_anterior||''} readOnly/></FL>
+                <FL label="Jornada nueva"><input style={INP} value={form.jornada_nueva||''} onChange={e=>setForm({...form,jornada_nueva:e.target.value})} placeholder="Ej: Lun-Vie 08:00-13:00"/></FL>
+                <FL label="Horario anterior"><input style={{...INP,background:'#f9fafb'}} value={form.horario_anterior||''} readOnly/></FL>
+                <FL label="Horario nuevo"><input style={INP} value={form.horario_nuevo||''} onChange={e=>setForm({...form,horario_nuevo:e.target.value})}/></FL>
+              </div>
+            </div>
+          )}
+
+          {showCentro&&(
+            <div style={{background:'#fff',border:`1px solid ${C.borderLight}`,borderRadius:6,padding:10,marginBottom:10}}>
+              <p style={{fontSize:11,fontWeight:600,color:C.textMuted,marginBottom:8}}>🏢 Cambio centro de costo</p>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                <FL label="Centro anterior">
+                  <select style={INP} value={form.centro_anterior||''} onChange={e=>setForm({...form,centro_anterior:e.target.value})}>
+                    <option value="">— Seleccionar —</option>
+                    {(data.contratos||[]).map(c=><option key={c.id} value={c.id}>{c.id} — {c.cliente}</option>)}
+                  </select>
+                </FL>
+                <FL label="Centro nuevo">
+                  <select style={INP} value={form.centro_nuevo||''} onChange={e=>setForm({...form,centro_nuevo:e.target.value})}>
+                    <option value="">— Seleccionar —</option>
+                    {(data.contratos||[]).map(c=><option key={c.id} value={c.id}>{c.id} — {c.cliente}</option>)}
+                  </select>
+                </FL>
+                <FL label="% anterior"><input type="number" style={INP} value={form.porcentaje_anterior||0} onChange={e=>setForm({...form,porcentaje_anterior:Number(e.target.value)})}/></FL>
+                <FL label="% nuevo"><input type="number" style={INP} value={form.porcentaje_nuevo||0} onChange={e=>setForm({...form,porcentaje_nuevo:Number(e.target.value)})}/></FL>
+              </div>
+            </div>
+          )}
+
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
+            <button onClick={()=>setForm(null)} style={{padding:'7px 14px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>Cancelar</button>
+            <button onClick={save} disabled={!form.tipo_anexo||!form.fecha_vigencia}
+              style={{padding:'7px 16px',borderRadius:6,border:'none',background:form.tipo_anexo&&form.fecha_vigencia?C.accent:'#e5e7eb',color:form.tipo_anexo&&form.fecha_vigencia?'#fff':C.textMuted,cursor:form.tipo_anexo&&form.fecha_vigencia?'pointer':'not-allowed',fontSize:12,fontWeight:600}}>
+              Guardar anexo
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Botón nuevo */}
+      {!form&&(
+        <button onClick={openNew} style={{marginBottom:12,padding:'7px 14px',borderRadius:6,border:`1px dashed ${C.accent}`,background:C.accentBg,color:C.accent,cursor:'pointer',fontSize:12,fontWeight:600}}>
+          + Nuevo anexo
+        </button>
+      )}
+
+      {/* Lista de anexos */}
+      {anexos.length===0&&!form&&(
+        <p style={{color:C.textMuted,fontSize:12,textAlign:'center',padding:20}}>Sin anexos registrados para este trabajador.</p>
+      )}
+      {anexos.map(a=>(
+        <div key={a.id} style={{background:'#fff',border:`1px solid ${a.estado==='aplicado'?'#86efac':a.estado==='pendiente_firma'?'#fde68a':C.borderLight}`,borderRadius:8,padding:12,marginBottom:8}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+            <div>
+              <p style={{fontWeight:600,fontSize:12,color:C.text}}>{tipoLabel(a.tipo_anexo)}</p>
+              <p style={{fontSize:11,color:C.textMuted,marginTop:2}}>{a.motivo||'Sin descripción'}</p>
+              <p style={{fontSize:10,color:C.textMuted,marginTop:2}}>
+                Vigencia: {a.fecha_vigencia?new Date(a.fecha_vigencia.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL'):'—'}
+                {a.fecha_firma&&` · Firma: ${new Date(a.fecha_firma.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}`}
+              </p>
+              {a.sueldo_nuevo&&a.sueldo_nuevo!==a.sueldo_anterior&&(
+                <p style={{fontSize:10,color:C.textMuted,marginTop:2}}>
+                  💰 {clp(a.sueldo_anterior)} → {clp(a.sueldo_nuevo)}
+                </p>
+              )}
+            </div>
+            <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:4}}>
+              <span style={{fontSize:11,fontWeight:600,color:estadoColor[a.estado]||C.textMuted}}>{estadoLabel(a.estado)}</span>
+              <div style={{display:'flex',gap:4}}>
+                {a.estado!=='aplicado'&&a.estado!=='anulado'&&(
+                  <button onClick={()=>setForm({...a,fecha_firma:a.fecha_firma?.split('T')[0]||'',fecha_vigencia:a.fecha_vigencia?.split('T')[0]||''})}
+                    style={{fontSize:11,color:C.accent,background:'none',border:`1px solid ${C.border}`,borderRadius:4,padding:'2px 8px',cursor:'pointer'}}>
+                    Editar
+                  </button>
+                )}
+                {a.estado==='firmado'&&(
+                  <button onClick={()=>aplicarAnexo(a)}
+                    style={{fontSize:11,color:'#fff',background:'#1d4ed8',border:'none',borderRadius:4,padding:'2px 8px',cursor:'pointer',fontWeight:600}}>
+                    ⚡ Aplicar
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ─── Fase 8B — Cálculo Finiquito ───────────────────────────── */
 function calcularFiniquitoPreview(trabajador, asignaciones, fechaSep, motivo, cartaAviso, feriadosDB=[]) {
   const feriadosSet = buildFeriadosSet(feriadosDB);
@@ -856,18 +1131,27 @@ function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onCl
             <p style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:4}}>Vista previa del finiquito</p>
             <p style={{fontSize:11,color:C.textMuted,marginBottom:12}}>Basado en sueldo base legal: {clp(preview.sueldoBase)}</p>
             <div style={{background:'#f8fafc',borderRadius:8,padding:12,marginBottom:12}}>
-              <div style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:`1px solid ${C.borderLight}`,marginBottom:4}}>
+              <div style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:`1px solid ${C.borderLight}`,marginBottom:6}}>
                 <span style={{fontSize:12,color:C.textMuted}}>Tiempo servicio</span>
                 <span style={{fontSize:12,fontWeight:600}}>{preview.mesesServicio} meses ({preview.diasTotales} días)</span>
               </div>
               {[
-                {label:`Vacaciones proporcionales (${preview.diasVacProp} d.h. × ${clp(preview.sueldoDiario)})`, val:preview.vacacionesProp},
-                {label:'Aviso previo sustitutivo (1 mes sueldo)', val:preview.avisoPrevio, skip:!preview.avisoPrevio},
-                {label:`Indemnización años servicio (${Math.floor(preview.mesesServicio/12)} año(s))`, val:preview.indemnizacion, skip:!preview.indemnizacion},
-              ].filter(r=>!r.skip).map((r,i)=>(
-                <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'4px 0'}}>
-                  <span style={{fontSize:12,color:C.textMuted}}>{r.label}</span>
-                  <span style={{fontSize:12,fontWeight:500,color:C.text}}>{clp(r.val)}</span>
+                {label:`Vacaciones proporcionales (${preview.diasVacProp} d.h. × ${clp(preview.sueldoDiario)})`,
+                 val:preview.vacacionesProp,
+                 nota: preview.vacacionesProp===0 ? 'Sin días acumulados' : null},
+                {label:'Aviso previo sustitutivo (1 mes sueldo)',
+                 val:preview.avisoPrevio,
+                 nota: preview.avisoPrevio===0 ? (motivo==='art161'?'Carta entregada oportunamente':'No aplica a este artículo') : null},
+                {label:`Indemnización años servicio`,
+                 val:preview.indemnizacion,
+                 nota: preview.indemnizacion===0 ? (motivo==='art161'?`No cumple 1 año (${preview.mesesServicio} meses)`:'No aplica a este artículo') : `${Math.floor(preview.mesesServicio/12)} año(s) × ${clp(preview.sueldoBase)}`},
+              ].map((r,i)=>(
+                <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',padding:'5px 0',borderBottom:`1px solid ${C.borderLight}`}}>
+                  <div>
+                    <span style={{fontSize:12,color:C.textMuted}}>{r.label}</span>
+                    {r.nota&&<p style={{fontSize:10,color:C.textMuted,marginTop:1,fontStyle:'italic'}}>{r.nota}</p>}
+                  </div>
+                  <span style={{fontSize:12,fontWeight:500,color:r.val>0?C.text:C.textMuted,minWidth:90,textAlign:'right'}}>{clp(r.val)}</span>
                 </div>
               ))}
               <div style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderTop:`2px solid ${C.border}`,marginTop:4}}>
@@ -979,7 +1263,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       {form&&(
         <div style={{background:C.surface,border:`1px solid ${C.accent}`,borderRadius:8,padding:20,marginBottom:16,boxShadow:`0 0 0 3px ${C.accent}14`}}>
           <div style={{display:"flex",gap:8,marginBottom:16,borderBottom:`1px solid ${C.borderLight}`,paddingBottom:12}}>
-            {["datos","remuneracion","asignaciones"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.textMuted,border:`1px solid ${tab===t?C.accent:C.border}`,borderRadius:6,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:tab===t?600:400}}>{t==="datos"?"Datos personales":t==="remuneracion"?"Remuneración":"Asignaciones"}</button>)}
+            {["datos","remuneracion","asignaciones","anexos"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.textMuted,border:`1px solid ${tab===t?C.accent:C.border}`,borderRadius:6,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:tab===t?600:400}}>{t==="datos"?"Datos personales":t==="remuneracion"?"Remuneración":t==="asignaciones"?"Asignaciones":"Anexos"}</button>)}
           </div>
           {tab==="datos"&&(
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
@@ -990,11 +1274,37 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               <FL label="Teléfono"><input style={INP} value={form.telefono} onChange={e=>setForm({...form,telefono:e.target.value})} placeholder="+569XXXXXXXX"/></FL>
               <FL label="Email"><input style={INP} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="correo@empresa.cl"/></FL>
               <FL label="Fecha ingreso a la empresa"><input type="date" style={INP} value={form.fecha_inicio||""} onChange={e=>setForm({...form,fecha_inicio:e.target.value})}/></FL>
-              {/* Desvinculación */}
-              <FL label="Fecha separación laboral"><input type="date" style={INP} value={form.fecha_separacion||""} onChange={e=>setForm({...form,fecha_separacion:e.target.value||null})}/></FL>
+              {/* Desvinculación — solo lectura mientras activo=true */}
+              {form.fecha_separacion&&(
+                <div style={{gridColumn:'1/-1',background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'6px 10px',fontSize:11,color:'#991b1b'}}>
+                  🔒 Datos de desvinculación — modificar solo desde el asistente
+                </div>
+              )}
+              <FL label="Fecha separación laboral">
+                <input type="date" style={{...INP,background:form.activo!==false&&form.fecha_separacion?'#fef2f2':undefined,cursor:form.activo!==false&&form.fecha_separacion?'not-allowed':'text'}}
+                  value={form.fecha_separacion?form.fecha_separacion.split('T')[0]:""}
+                  readOnly={form.activo!==false&&!!form.fecha_separacion}
+                  onChange={e=>(!form.fecha_separacion||form.activo===false)&&setForm({...form,fecha_separacion:e.target.value||null})}/>
+              </FL>
               {form.fecha_separacion&&<>
-                <FL label="Motivo término"><select style={INP} value={form.motivo_termino||""} onChange={e=>setForm({...form,motivo_termino:e.target.value})}><option value="">— Seleccionar —</option><option value="Art. 159 N°4 Vencimiento plazo">Art. 159 N°4 Vencimiento plazo</option><option value="Art. 161 Necesidades empresa">Art. 161 Necesidades empresa</option><option value="Art. 159 N°1 Mutuo acuerdo">Art. 159 N°1 Mutuo acuerdo</option><option value="Art. 160 Falta grave">Art. 160 Falta grave</option></select></FL>
-                <FL label="Estado finiquito"><select style={INP} value={form.finiquito_estado||"pendiente"} onChange={e=>setForm({...form,finiquito_estado:e.target.value})}><option value="pendiente">⏳ Pendiente</option><option value="preparado">📄 Preparado</option><option value="disponible">✅ Disponible trabajador</option><option value="firmado">✍️ Firmado</option><option value="pagado">💰 Pagado</option></select></FL>
+                <FL label="Motivo término">
+                  <select style={{...INP,background:'#fef2f2',cursor:'not-allowed'}} value={form.motivo_termino||""} disabled>
+                    <option value="">— Seleccionar —</option>
+                    <option value="Art. 159 N°4 Vencimiento plazo">Art. 159 N°4 Vencimiento plazo</option>
+                    <option value="Art. 161 Necesidades empresa">Art. 161 Necesidades empresa</option>
+                    <option value="Art. 159 N°1 Mutuo acuerdo">Art. 159 N°1 Mutuo acuerdo</option>
+                    <option value="Art. 160 Falta grave">Art. 160 Falta grave</option>
+                  </select>
+                </FL>
+                <FL label="Estado finiquito">
+                  <select style={INP} value={form.finiquito_estado||"pendiente"} onChange={e=>setForm({...form,finiquito_estado:e.target.value})}>
+                    <option value="pendiente">⏳ Pendiente</option>
+                    <option value="preparado">📄 Preparado</option>
+                    <option value="disponible">✅ Disponible trabajador</option>
+                    <option value="firmado">✍️ Firmado</option>
+                    <option value="pagado">💰 Pagado</option>
+                  </select>
+                </FL>
               </>}
               {/* Botón Desvincular — solo para trabajadores activos */}
               {form.activo!==false&&!isNew&&(
@@ -1130,7 +1440,20 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                 <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Nota legal: <b>sueldo_asignado</b> es costo imputable al centro de costo solo en asignaciones remuneracionales. Las asignaciones operacionales sirven para supervisión, checklist, evidencias y control; no reemplazan ni incrementan el sueldo legal.</p>
               </>}
             </div>
+          )
+          {tab==="anexos"&&form&&!isNew&&(
+            <TabAnexos
+              trabajador={form}
+              data={data}
+              insert={insert}
+              update={update}
+              saveAsignacion={saveAsignacion}
+              setFormTrabajador={setForm}
+            />
           )}
+          {tab==="anexos"&&isNew&&(
+            <AlertBanner type="warning" message="Primero crea el trabajador. Luego podrás registrar anexos de contrato."/>
+          )}}
           <div style={{display:"flex",gap:8,paddingTop:8,borderTop:`1px solid ${C.borderLight}`}}>
             <PrimaryBtn onClick={save} color={C.green}>{isNew?"Crear trabajador":"Actualizar"}</PrimaryBtn>
             <SecondaryBtn onClick={()=>setForm(null)}>Cancelar</SecondaryBtn>
