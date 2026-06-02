@@ -1440,7 +1440,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                 <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Nota legal: <b>sueldo_asignado</b> es costo imputable al centro de costo solo en asignaciones remuneracionales. Las asignaciones operacionales sirven para supervisión, checklist, evidencias y control; no reemplazan ni incrementan el sueldo legal.</p>
               </>}
             </div>
-          )
+          )}
           {tab==="anexos"&&form&&!isNew&&(
             <TabAnexos
               trabajador={form}
