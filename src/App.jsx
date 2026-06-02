@@ -1453,7 +1453,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           )}
           {tab==="anexos"&&isNew&&(
             <AlertBanner type="warning" message="Primero crea el trabajador. Luego podrás registrar anexos de contrato."/>
-          )}}
+          )}
           <div style={{display:"flex",gap:8,paddingTop:8,borderTop:`1px solid ${C.borderLight}`}}>
             <PrimaryBtn onClick={save} color={C.green}>{isNew?"Crear trabajador":"Actualizar"}</PrimaryBtn>
             <SecondaryBtn onClick={()=>setForm(null)}>Cancelar</SecondaryBtn>
