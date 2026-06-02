@@ -3424,20 +3424,28 @@ function Remuneraciones({ data, saveRem, insert, update }) {
     setSaved(false);
   };
 
+  const [dupAlerta, setDupAlerta] = useState(null); // {existente, res}
+
   const guardar = async () => {
     if (!res) return;
     const existente = liqList.find(l => l.trabajador_id === tId && l.periodo === periodo);
     if (existente) {
-      const firmada = existente.firmado_at;
-      const msg = firmada
-        ? `⚠ Esta liquidación fue firmada por ${existente.firmado_por||'el trabajador'} el ${new Date(existente.firmado_at).toLocaleDateString('es-CL')}.\n\nReemplazarla INVALIDARÁ su firma. ¿Continuar de todas formas?`
-        : `Ya existe una liquidación para ${trabajador?.nombre} en el período ${periodo}.\n¿Desea reemplazarla?`;
-      if (!window.confirm(msg)) return;
+      setDupAlerta({existente, res});
+      return;
     }
     setSaving(true);
     const ok = await saveRem(res);
     if (ok) setSaved(true);
     setSaving(false);
+  };
+
+  const confirmarReemplazo = async () => {
+    if (!dupAlerta) return;
+    setSaving(true);
+    const ok = await saveRem(dupAlerta.res);
+    if (ok) setSaved(true);
+    setSaving(false);
+    setDupAlerta(null);
   };
 
   const imprimir = () => {
@@ -3448,6 +3456,36 @@ function Remuneraciones({ data, saveRem, insert, update }) {
 
   return (
     <div>
+      {dupAlerta&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:1200,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:'#fff',borderRadius:12,padding:24,maxWidth:440,width:'100%',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
+            <p style={{fontWeight:700,fontSize:15,color:'#b45309',marginBottom:8}}>⚠️ Liquidacion ya existe</p>
+            <p style={{fontSize:12,color:C.text,marginBottom:4}}>
+              Ya existe una liquidacion para <b>{trabajador?.nombre}</b> en el periodo <b>{periodo}</b>.
+            </p>
+            {dupAlerta.existente.firmado_at&&(
+              <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'6px 10px',fontSize:11,color:'#991b1b',marginBottom:8}}>
+                🔏 Firmada el {new Date(dupAlerta.existente.firmado_at).toLocaleDateString('es-CL')}. Reemplazarla invalidara la firma.
+              </div>
+            )}
+            <p style={{fontSize:12,color:C.textMuted,marginBottom:16}}>¿Que deseas hacer?</p>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              <button onClick={()=>{setDupAlerta(null);setSaved(true);}}
+                style={{padding:'9px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'#f0fdf4',color:'#15803d',cursor:'pointer',fontSize:12,fontWeight:600,textAlign:'left'}}>
+                👁 Ver liquidacion existente (no reemplazar)
+              </button>
+              <button onClick={confirmarReemplazo}
+                style={{padding:'9px 16px',borderRadius:6,border:'1px solid #fca5a5',background:'#fef2f2',color:'#dc2626',cursor:'pointer',fontSize:12,fontWeight:600,textAlign:'left'}}>
+                🔄 Recalcular y reemplazar
+              </button>
+              <button onClick={()=>setDupAlerta(null)}
+                style={{padding:'9px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',color:C.textMuted,cursor:'pointer',fontSize:12,textAlign:'left'}}>
+                ✕ Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
         <div>
           <h1 style={{color:C.text,fontSize:18,fontWeight:600,margin:"0 0 3px"}}>Remuneraciones</h1>
