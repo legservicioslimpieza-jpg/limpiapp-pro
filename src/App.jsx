@@ -1317,8 +1317,19 @@ function gratificacionTexto(t){
   }
 }
 
-function imprimirContratoTrabajo(trabajador, data){
+// Funciones del cargo (cláusula PRIMERO) según el tipo de cargo (8D.5)
+function funcionesPorCargo(cargo){
+  const c=(cargo||"").toLowerCase();
+  if(/(supervisor|gerente|jefe|jefatura|encargad|coordinad|administrativ|adminis)/.test(c)){
+    return "realizando labores de supervisión, coordinación y control de los servicios de aseo y limpieza en las dependencias y clientes que el empleador le asigne, incluyendo la fiscalización del cumplimiento, la gestión del personal a su cargo y demás funciones propias de su cargo";
+  }
+  return "realizando labores de aseo, limpieza, sanitización y mantención de las dependencias que el empleador le asigne, así como toda otra función afín a su cargo que se le encomiende";
+}
+
+function imprimirContratoTrabajo(trabajador, data, overrides={}){
   const lj = lugaresYJornada(trabajador, data);
+  const lugar = (overrides.lugar!=null && String(overrides.lugar).trim()) ? overrides.lugar : lj.lugares;
+  const funciones = (overrides.funciones!=null && String(overrides.funciones).trim()) ? overrides.funciones : funcionesPorCargo(trabajador.cargo);
   const tipo = (trabajador.tipo_contrato||"PLAZO FIJO").toUpperCase();
   const esIndef = tipo.includes("INDEF");
   const duracion = esIndef
@@ -1330,9 +1341,9 @@ function imprimirContratoTrabajo(trabajador, data){
     <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut} · ${EMPRESA.domicilio}</div>
     <p>En Arica, a ${fechaLargaCL()}, entre <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, giro ${EMPRESA.giro}, con domicilio en ${EMPRESA.domicilio}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, cédula de identidad N° ${EMPRESA.repRut}, en adelante "el empleador"; y don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}, en adelante "el trabajador", se ha convenido el siguiente contrato individual de trabajo:</p>
 
-    <div class="clausula"><b>PRIMERO: Naturaleza de los servicios.</b> El trabajador se obliga a desempeñar el cargo de <b>${trabajador.cargo||"Auxiliar de Aseo"}</b>, realizando labores de aseo, limpieza, sanitización y mantención de las dependencias que el empleador le asigne, así como toda otra función afín a su cargo que se le encomiende.</div>
+    <div class="clausula"><b>PRIMERO: Naturaleza de los servicios.</b> El trabajador se obliga a desempeñar el cargo de <b>${trabajador.cargo||"Auxiliar de Aseo"}</b>, ${funciones}.</div>
 
-    <div class="clausula"><b>SEGUNDO: Lugar de prestación de servicios.</b> Los servicios se prestarán en: ${lj.lugares}. El empleador podrá modificar el lugar de prestación dentro de la misma ciudad conforme al Art. 12 del Código del Trabajo.</div>
+    <div class="clausula"><b>SEGUNDO: Lugar de prestación de servicios.</b> Los servicios se prestarán en: ${lugar}. El empleador podrá modificar el lugar de prestación dentro de la misma ciudad conforme al Art. 12 del Código del Trabajo.</div>
 
     <div class="clausula"><b>TERCERO: Jornada de trabajo.</b> La distribución de la jornada será la siguiente:
       <ul>${jornadasHtml}</ul>
@@ -1478,11 +1489,53 @@ function genDocTrabId(trabajadorId, tipo){
   return `DOC-${(tipo||'doc').slice(0,3).toUpperCase()}-${(trabajadorId||'TR').slice(-4)}-${ts}`;
 }
 
+// Cierre del ciclo documental: subir el PDF/imagen FIRMADO de un documento generado
+// por el ERP. NO crea fila nueva: actualiza la MISMA fila (archivo_url + estado=firmado).
+async function subirArchivoFirmado(doc, file, trabajador, update, quien){
+  if(!file) return false;
+  if(!isConfigured){ alert("El almacenamiento de archivos no está disponible en modo demo."); return false; }
+  try{
+    const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+    const path=`${trabajador.id}/firmado_${doc.tipo_documento}_v${doc.version||1}_${Date.now()}_${safe}`;
+    // Hash SHA-256 del archivo firmado (evidencia de integridad)
+    let hash=null;
+    try{
+      const buf=await file.arrayBuffer();
+      const h=await crypto.subtle.digest('SHA-256',buf);
+      hash=Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    }catch(e){ /* hash opcional */ }
+    const {error}=await supabase.storage.from(STORAGE_BUCKET).upload(path,file,{upsert:false,contentType:file.type||undefined});
+    if(error){ alert("Error al subir el archivo firmado: "+error.message+"\n\n¿Existe el bucket «"+STORAGE_BUCKET+"»?"); return false; }
+    const ahora=new Date().toISOString();
+    await update('documentos_trabajador',{
+      ...doc,
+      archivo_url:path,
+      nombre_archivo:file.name,
+      estado:'firmado',
+      metodo_firma:'fisica',
+      firmado_por:trabajador.nombre||null,
+      fecha_firma:ahora,
+      hash_documento:hash,
+      fecha_carga:ahora,
+      observaciones:(doc.observaciones?doc.observaciones+' · ':'')+`firmado físico subido por ${quien}`,
+    });
+    return true;
+  }catch(e){ alert("Error: "+e.message); return false; }
+}
+// Abre el selector de archivo y, al elegir, sube el firmado a la misma fila.
+function pickAndUploadFirmado(doc, trabajador, update, quien){
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept='.pdf,image/*';
+  inp.onchange=()=>{ const f=inp.files&&inp.files[0]; if(f) subirArchivoFirmado(doc,f,trabajador,update,quien); };
+  inp.click();
+}
+
 function TabDocumentos({trabajador, data, insert, update}){
   const [eppForm,setEppForm]=useState(null);
   const [subForm,setSubForm]=useState(null);      // formulario subir documento externo
   const [subiendo,setSubiendo]=useState(false);
   const [dupModal,setDupModal]=useState(null);    // modal de duplicado ERP
+  const [contratoModal,setContratoModal]=useState(null);  // pre-emisión del contrato (8D.5)
   const { user, perfil } = useAuth();
   const quien = perfil?.nombre || user?.email || 'sistema';
 
@@ -1524,6 +1577,18 @@ function TabDocumentos({trabajador, data, insert, update}){
   // Acciones del modal de duplicado
   const dupVerExistente=()=>{ dupModal?.fn?.(); setDupModal(null); };               // reimprime, sin nueva fila
   const dupNuevaVersion=async()=>{ const m=dupModal; setDupModal(null); m?.fn?.(); await insertarGenerado(m.tipo, proximaVersion(m.tipo)); };
+
+  // ── Contrato (8D.5): modal de pre-emisión con lugar y funciones editables ──
+  const openContrato=()=>{
+    const lj=lugaresYJornada(trabajador,data);
+    setContratoModal({ lugar: lj.lugares, funciones: funcionesPorCargo(trabajador.cargo) });
+  };
+  const generarContrato=async(crearFila)=>{
+    const ov={lugar:contratoModal.lugar, funciones:contratoModal.funciones};
+    imprimirContratoTrabajo(trabajador, data, ov);
+    if(crearFila) await insertarGenerado('contrato', proximaVersion('contrato'));
+    setContratoModal(null);
+  };
 
   // ── Camino 1: subir documento existente escaneado (empresa en marcha) ──
   const openSubir=()=>setSubForm({
@@ -1635,9 +1700,14 @@ function TabDocumentos({trabajador, data, insert, update}){
             {key:"fecha",label:"Fecha doc.",render:r=><span style={{color:C.textMuted}}>{dateOnly(r.fecha_documento)||"—"}</span>},
             {key:"archivo",label:"Archivo",render:r=>r.archivo_url?<button onClick={()=>verArchivo(r)} style={{color:C.accent,background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer"}}>📄 Ver</button>:<span style={{fontSize:11,color:C.textDim}}>—</span>},
             {key:"acc",label:"",render:r=>(
-              <select value={r.estado} onChange={e=>cambiarEstadoDoc(r,e.target.value)} style={{fontSize:11,border:`1px solid ${C.border}`,borderRadius:5,padding:"2px 6px",color:C.textMuted,cursor:"pointer",background:C.surface}}>
-                {Object.entries(ESTADO_DOC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-              </select>
+              <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                {r.origen==='generado_erp'&&(
+                  <button onClick={()=>pickAndUploadFirmado(r,trabajador,update,quien)} title="Subir el PDF/foto del documento firmado" style={{color:C.green,background:"none",border:`1px solid ${C.greenBorder}`,borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:500}}>⬆️ {r.archivo_url?"Reemplazar firmado":"Subir firmado"}</button>
+                )}
+                <select value={r.estado} onChange={e=>cambiarEstadoDoc(r,e.target.value)} style={{fontSize:11,border:`1px solid ${C.border}`,borderRadius:5,padding:"2px 6px",color:C.textMuted,cursor:"pointer",background:C.surface}}>
+                  {Object.entries(ESTADO_DOC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
             )},
           ]}
           rows={docs}
@@ -1648,7 +1718,7 @@ function TabDocumentos({trabajador, data, insert, update}){
       {/* ── Camino 2: generar documento nuevo desde el ERP ── */}
       <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"24px 0 8px"}}>Generar documento nuevo desde el ERP</p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10,marginBottom:24}}>
-        <button style={docBtn} onClick={()=>emitir('contrato',()=>imprimirContratoTrabajo(trabajador,data))}>
+        <button style={docBtn} onClick={openContrato}>
           <span style={{fontSize:20}}>📄</span>
           <span style={{fontWeight:600,color:C.text,fontSize:13}}>Contrato de trabajo</span>
           <span style={{fontSize:11,color:C.textMuted}}>Art. 10 C. del Trabajo · jornada y lugar desde asignaciones</span>
@@ -1669,7 +1739,7 @@ function TabDocumentos({trabajador, data, insert, update}){
           <span style={{fontSize:11,color:C.textMuted}}>Art. 53 D.S. N°594 · consolida el historial</span>
         </button>
       </div>
-      <p style={{fontSize:11,color:C.textDim,margin:"-16px 0 24px"}}>Cada documento generado queda en la carpeta de arriba con origen «ERP» y estado «Pendiente firma». Imprímelo o guárdalo como PDF; al firmarlo, cambia su estado a «Firmado».</p>
+      <p style={{fontSize:11,color:C.textDim,margin:"-16px 0 24px"}}>Ciclo completo: el documento generado queda «Pendiente firma». Imprímelo, fírmalo, escanéalo o fotografíalo, y usa <b>⬆️ Subir firmado</b> en su fila de la carpeta. El archivo firmado se adjunta a la <b>misma fila</b> (no se duplica) y el estado pasa a «Firmado».</p>
 
       {/* ── Entrega de EPP — historial de artículos ── */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -1741,6 +1811,280 @@ function TabDocumentos({trabajador, data, insert, update}){
           </div>
         );
       })()}
+
+      {contratoModal&&(()=>{
+        const existentes=docs.filter(d=>d.tipo_documento==='contrato'&&d.origen==='generado_erp'&&d.estado!=='anulado');
+        const yaHay=existentes.length>0;
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>e.target===e.currentTarget&&setContratoModal(null)}>
+            <div style={{background:'#fff',borderRadius:12,padding:24,maxWidth:560,width:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
+              <p style={{fontWeight:700,fontSize:15,color:C.text,margin:"0 0 4px"}}>📄 Generar contrato de trabajo</p>
+              <p style={{fontSize:12,color:C.textMuted,margin:"0 0 14px"}}>{trabajador.nombre} · {trabajador.cargo||"—"}. Revisa el lugar de prestación y las funciones antes de emitir.</p>
+              {yaHay&&(
+                <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:C.yellow}}>
+                  Ya existe un contrato (v{Math.max(...existentes.map(d=>Number(d.version||1)))}). Al generar uno nuevo se creará la <b>v{proximaVersion('contrato')}</b>, conservando el anterior.
+                </div>
+              )}
+              <FL label="Lugar de prestación de servicios (cláusula SEGUNDO)">
+                <textarea style={{...INP,minHeight:60,resize:"vertical"}} value={contratoModal.lugar} onChange={e=>setContratoModal({...contratoModal,lugar:e.target.value})}/>
+              </FL>
+              <div style={{height:10}}/>
+              <FL label="Funciones del cargo (cláusula PRIMERO)">
+                <textarea style={{...INP,minHeight:80,resize:"vertical"}} value={contratoModal.funciones} onChange={e=>setContratoModal({...contratoModal,funciones:e.target.value})}/>
+              </FL>
+              <p style={{fontSize:11,color:C.textDim,margin:"6px 0 16px"}}>La jornada, remuneración, gratificación y demás cláusulas se toman automáticamente de las asignaciones y datos del trabajador.</p>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <button onClick={()=>generarContrato(true)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.accent}`,background:C.accent,color:"#fff",cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:600}}>{yaHay?`🔄 Generar nueva versión (v${proximaVersion('contrato')})`:"📄 Generar contrato (v1)"} <span style={{display:"block",fontSize:11,fontWeight:400,opacity:.9}}>Imprime y agrega la fila a la carpeta documental.</span></button>
+                {yaHay&&<button onClick={()=>generarContrato(false)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:500,color:C.text}}>👁 Solo reimprimir <span style={{display:"block",fontSize:11,fontWeight:400,color:C.textMuted}}>Abre el PDF sin crear otra fila.</span></button>}
+                <button onClick={()=>setContratoModal(null)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,color:C.textMuted}}>✕ Cancelar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+function tipoAnexoLabel(t){ return TIPOS_ANEXO.find(x=>x.val===t)?.label||t; }
+
+function expedienteResumen(trabajador, data){
+  const docs=(data.documentos_trabajador||[]).filter(d=>d.trabajador_id===trabajador.id);
+  const anexos=(data.anexos_contrato||[]).filter(a=>a.trabajador_id===trabajador.id);
+  const epp=(data.entregas_epp||[]).filter(e=>e.trabajador_id===trabajador.id);
+  const liqs=(data.liquidaciones||[]).filter(l=>l.trabajador_id===trabajador.id)
+    .sort((a,b)=>(b.periodo||"").localeCompare(a.periodo||""));
+  const asigs=(data.asignaciones||[]).filter(a=>a.trabajador_id===trabajador.id&&a.estado_asig==='activa'&&a.activo!==false);
+  const remun=asigs.filter(a=>a.afecta_remuneracion!==false);
+  const oper=asigs.filter(a=>a.afecta_remuneracion===false);
+  return {docs,anexos,epp,liqs,asigs,remun,oper};
+}
+
+function imprimirExpediente(trabajador, data){
+  const R=expedienteResumen(trabajador,data);
+  const lj=lugaresYJornada(trabajador,data);
+  const filaDoc=R.docs.length
+    ? [...R.docs].sort((a,b)=>new Date(b.fecha_documento||b.fecha_carga||0)-new Date(a.fecha_documento||a.fecha_carga||0))
+        .map(d=>`<tr><td>${TIPO_DOC_LABEL[d.tipo_documento]||d.tipo_documento}${d.origen==='generado_erp'&&d.version?` v${d.version}`:''}</td><td>${ORIGEN_LABEL[d.origen]||d.origen}</td><td>${(ESTADO_DOC[d.estado]||{}).label||d.estado}</td><td>${dateOnly(d.fecha_documento)||"—"}</td></tr>`).join("")
+    : `<tr><td colspan="4" style="text-align:center;color:#888">Sin documentos</td></tr>`;
+  const filaAnx=R.anexos.length
+    ? R.anexos.map(a=>`<tr><td>${tipoAnexoLabel(a.tipo_anexo)}</td><td>${a.estado||"—"}</td><td>${dateOnly(a.fecha_vigencia)||"—"}</td></tr>`).join("")
+    : `<tr><td colspan="3" style="text-align:center;color:#888">Sin anexos</td></tr>`;
+  const ultLiq=R.liqs[0];
+  const desvin = trabajador.estado==='DESVINCULADO' || !trabajador.activo;
+  const cuerpo=`
+    <h1>Expediente Digital del Trabajador</h1>
+    <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut} · ${EMPRESA.domicilio}</div>
+    <h2>Identificación</h2>
+    <p><b>Nombre:</b> ${trabajador.nombre||"—"} &nbsp;·&nbsp; <b>RUT:</b> ${trabajador.rut||"—"} &nbsp;·&nbsp; <b>Cargo:</b> ${trabajador.cargo||"—"}<br/>
+    <b>Estado:</b> ${desvin?"DESVINCULADO":"ACTIVO"} &nbsp;·&nbsp; <b>Tipo de contrato:</b> ${(trabajador.tipo_contrato||"—")} &nbsp;·&nbsp; <b>Ingreso:</b> ${fechaLargaCL(trabajador.fecha_inicio)}<br/>
+    <b>Sueldo base:</b> ${clp(trabajador.sueldo_base||0)} &nbsp;·&nbsp; <b>AFP:</b> ${trabajador.afp||"—"} &nbsp;·&nbsp; <b>Salud:</b> ${trabajador.salud||"—"}</p>
+    <h2>Asignaciones vigentes</h2>
+    <p><b>Centro(s) remuneracional(es):</b> ${R.remun.length?lj.lugares:"—"}<br/>
+    <b>Centros operacionales:</b> ${R.oper.length} (no afectan remuneración)</p>
+    <h2>Documentos en carpeta (${R.docs.length})</h2>
+    <table><thead><tr><th>Documento</th><th>Origen</th><th>Estado</th><th>Fecha</th></tr></thead><tbody>${filaDoc}</tbody></table>
+    <h2>Anexos de contrato (${R.anexos.length})</h2>
+    <table><thead><tr><th>Tipo</th><th>Estado</th><th>Vigencia</th></tr></thead><tbody>${filaAnx}</tbody></table>
+    <h2>Elementos de protección personal</h2>
+    <p>${R.epp.length} entrega(s) de EPP registrada(s)${R.epp.length?` · última: ${dateOnly([...R.epp].sort((a,b)=>new Date(b.fecha_entrega||0)-new Date(a.fecha_entrega||0))[0]?.fecha_entrega)||"—"}`:""}.</p>
+    <h2>Liquidaciones</h2>
+    <p>${R.liqs.length} liquidación(es)${ultLiq?` · última período ${ultLiq.periodo}: líquido ${clp(ultLiq.liquido||0)} (${ultLiq.firmado_at?"firmada":"pendiente"})`:""}.</p>
+    ${desvin?`<h2>Desvinculación</h2><p><b>Motivo:</b> ${trabajador.motivo_termino||"—"} &nbsp;·&nbsp; <b>Fecha separación:</b> ${dateOnly(trabajador.fecha_separacion)||"—"} &nbsp;·&nbsp; <b>Finiquito:</b> ${trabajador.finiquito_estado||"pendiente"}.</p>`:""}
+    <p class="lugar">Expediente emitido en Arica, ${fechaLargaCL()}.</p>`;
+  htmlDocImprimir(`Expediente ${trabajador.nombre||""}`, cuerpo);
+}
+
+// Categorías documentales del expediente (8D.5)
+const CATEGORIAS_EXP = [
+  {key:'contrato',   label:'Contrato'},
+  {key:'anexo',      label:'Anexos'},
+  {key:'odi',        label:'ODI'},
+  {key:'reglamento', label:'Reglamento Interno'},
+  {key:'epp',        label:'EPP'},
+  {key:'finiquito',  label:'Finiquitos'},
+  {key:'otros',      label:'Otros'},
+];
+const CATS_CONOCIDAS = ['contrato','anexo','odi','reglamento','epp','finiquito'];
+
+function TabExpediente({trabajador, data, update}){
+  const { user, perfil } = useAuth();
+  const quien = perfil?.nombre || user?.email || 'sistema';
+  const R=expedienteResumen(trabajador,data);
+  const lj=lugaresYJornada(trabajador,data);
+  const desvin = trabajador.estado==='DESVINCULADO' || !trabajador.activo;
+  const ultLiq=[...R.liqs][0];
+
+  // Reimpresión de documentos generados por el ERP (no crea fila)
+  const reimprimir=(d)=>{
+    switch(d.tipo_documento){
+      case 'contrato':   imprimirContratoTrabajo(trabajador,data); break;
+      case 'odi':        imprimirODI(trabajador,data); break;
+      case 'reglamento': imprimirActaReglamento(trabajador,data); break;
+      case 'epp':        imprimirActaEPP(trabajador,R.epp); break;
+      default: alert("Este tipo de documento no se regenera desde el ERP."); break;
+    }
+  };
+  const verArchivo=async(d)=>{
+    if(!d.archivo_url) return;
+    try{
+      const {data:s,error}=await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(d.archivo_url,300);
+      if(error||!s){ alert("No se pudo abrir el archivo."); return; }
+      window.open(s.signedUrl,"_blank");
+    }catch(e){ alert("Error: "+e.message); }
+  };
+
+  // Checklist de obligatorios y completitud
+  const obligatorios=[
+    {tipo:'contrato',  label:'Contrato de trabajo'},
+    {tipo:'odi',       label:'ODI — Derecho a Saber'},
+    {tipo:'reglamento',label:'Acta Reglamento Interno'},
+    {tipo:'epp',       label:'Acta de entrega EPP'},
+  ];
+  if(desvin) obligatorios.push({tipo:'finiquito', label:'Finiquito'});
+  const estadoCategoria=(tipo)=>{
+    const rows=R.docs.filter(d=>d.tipo_documento===tipo && d.estado!=='anulado');
+    if(!rows.length) return 'falta';
+    return rows.some(d=>d.estado==='firmado'||d.estado==='archivado') ? 'completo' : 'proceso';
+  };
+  const checklist=obligatorios.map(o=>({...o, st:estadoCategoria(o.tipo)}));
+  const completados=checklist.filter(c=>c.st==='completo').length;
+  const totalObl=checklist.length;
+  const pct=Math.round(completados/totalObl*100);
+  const completo=completados===totalObl;
+
+  const card={background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:14};
+  const linea=(k,v)=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"4px 0",fontSize:13}}><span style={{color:C.textMuted}}>{k}</span><span style={{fontWeight:500,color:C.text,textAlign:"right"}}>{v}</span></div>);
+  const CHK_ICON={completo:"✅",proceso:"⏳",falta:"❌"};
+  const CHK_COL={completo:C.green,proceso:C.yellow,falta:C.red};
+
+  const docsDeCategoria=(key)=> key==='otros'
+    ? R.docs.filter(d=>!CATS_CONOCIDAS.includes(d.tipo_documento))
+    : R.docs.filter(d=>d.tipo_documento===key);
+
+  const DocRow=({d})=>{
+    const s=ESTADO_DOC[d.estado]||ESTADO_DOC.pendiente;
+    const esErp=d.origen==='generado_erp';
+    const esReimprimible=esErp&&['contrato','odi','reglamento','epp'].includes(d.tipo_documento);
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderTop:`1px solid ${C.borderLight}`,flexWrap:"wrap"}}>
+        <span style={{fontWeight:500,fontSize:13,color:C.text,flex:1,minWidth:160}}>{TIPO_DOC_LABEL[d.tipo_documento]||d.tipo_documento}{esErp&&d.version?` v${d.version}`:''}</span>
+        <Tag text={ORIGEN_LABEL[d.origen]||d.origen} scheme={d.origen==='externo'?{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}:{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>
+        <Tag text={s.label} scheme={s}/>
+        <span style={{fontSize:12,color:C.textMuted,minWidth:80}}>{dateOnly(d.fecha_documento)||"—"}</span>
+        {d.archivo_url&&<button onClick={()=>verArchivo(d)} style={{color:C.accent,background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer"}}>📄 Ver firmado</button>}
+        {esReimprimible&&<button onClick={()=>reimprimir(d)} style={{color:C.accent,background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer"}}>🖨️ Reimprimir original</button>}
+        {esErp&&update&&<button onClick={()=>pickAndUploadFirmado(d,trabajador,update,quien)} style={{color:C.green,background:"none",border:`1px solid ${C.greenBorder}`,borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:500}}>⬆️ {d.archivo_url?"Reemplazar firmado":"Subir firmado"}</button>}
+        {d.hash_documento&&<span title={`Firmado por: ${d.firmado_por||"—"}\nMétodo: ${d.metodo_firma||"—"}\nFecha: ${dateOnly(d.fecha_firma)||"—"}\nSHA-256: ${d.hash_documento}`} style={{fontSize:11,color:C.textDim,cursor:"help"}}>🔒 evidencia</span>}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+        <div style={{background:C.accentBg,border:`1px solid #bfdbfe`,borderRadius:8,padding:"10px 14px",fontSize:12,color:C.accentText,flex:1,minWidth:240}}>
+          🗂️ <b>Expediente Digital (Fase 8D.5).</b> Vista consolidada: identidad, documentos por categoría, checklist de obligatorios, anexos, EPP, liquidaciones y desvinculación.
+        </div>
+        <PrimaryBtn onClick={()=>imprimirExpediente(trabajador,data)}>🖨️ Imprimir expediente</PrimaryBtn>
+      </div>
+
+      {/* Completitud + checklist */}
+      <div style={{...card,marginBottom:14,borderColor:completo?C.greenBorder:C.border,background:completo?C.greenBg:C.surface}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:6}}>
+          <p style={{fontWeight:700,fontSize:14,color:completo?C.green:C.text,margin:0}}>{completo?"✅ Expediente completo":`Expediente ${completados} de ${totalObl} obligatorios`}</p>
+          <span style={{fontSize:12,color:C.textMuted}}>{pct}%</span>
+        </div>
+        <div style={{height:8,background:C.borderLight,borderRadius:4,overflow:"hidden",marginBottom:12}}>
+          <div style={{width:`${pct}%`,height:"100%",background:completo?C.green:C.accent}}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:6}}>
+          {checklist.map(c=>(
+            <div key={c.tipo} style={{display:"flex",alignItems:"center",gap:8,fontSize:13}}>
+              <span>{CHK_ICON[c.st]}</span>
+              <span style={{color:C.text}}>{c.label}</span>
+              <span style={{fontSize:11,color:CHK_COL[c.st],marginLeft:"auto"}}>{c.st==='completo'?'Firmado/Archivado':c.st==='proceso'?'En proceso':'Falta'}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Identidad */}
+      <div style={{...card,marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <p style={{fontWeight:700,fontSize:15,color:C.text,margin:0}}>{trabajador.nombre||"—"}</p>
+          <Tag text={desvin?"DESVINCULADO":"ACTIVO"} scheme={desvin?{bg:C.redBg,text:C.red,border:C.redBorder}:{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>
+        </div>
+        {linea("RUT",trabajador.rut||"—")}
+        {linea("Cargo",trabajador.cargo||"—")}
+        {linea("Tipo de contrato",trabajador.tipo_contrato||"—")}
+        {linea("Fecha de ingreso",dateOnly(trabajador.fecha_inicio)||"— (sin definir)")}
+        {linea("Sueldo base",clp(trabajador.sueldo_base||0))}
+        {linea("Previsión",`${trabajador.afp||"—"} · ${trabajador.salud||"—"}`)}
+        {linea("Centro remuneracional",R.remun.length?lj.lugares:"— sin asignación")}
+        {linea("Centros operacionales",`${R.oper.length} (no afectan remuneración)`)}
+      </div>
+
+      {/* Documentos agrupados por categoría */}
+      <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"0 0 8px"}}>Documentos por categoría</p>
+      {CATEGORIAS_EXP.map(cat=>{
+        const rows=docsDeCategoria(cat.key).sort((a,b)=>new Date(b.fecha_documento||b.fecha_carga||0)-new Date(a.fecha_documento||a.fecha_carga||0));
+        if(!rows.length) return null;
+        return (
+          <div key={cat.key} style={{...card,marginBottom:10}}>
+            <p style={{fontWeight:600,fontSize:13,color:C.text,margin:0}}>{cat.label} <span style={{color:C.textMuted,fontWeight:400}}>({rows.length})</span></p>
+            {rows.map(d=><DocRow key={d.id} d={d}/>)}
+          </div>
+        );
+      })}
+      {!R.docs.length&&(
+        <div style={{...card,marginBottom:10,textAlign:"center",color:C.textMuted,fontSize:13}}>Sin documentos en la carpeta. Genera o sube documentos en la pestaña Documentos.</div>
+      )}
+
+      {/* Resumen operativo: Anexos */}
+      <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"20px 0 8px"}}>Resumen operativo — Anexos ({R.anexos.length})</p>
+      <Panel noPad>
+        <DataTable
+          cols={[
+            {key:"tipo",label:"Tipo",render:r=><span style={{fontWeight:500}}>{tipoAnexoLabel(r.tipo_anexo)}</span>},
+            {key:"estado",label:"Estado",render:r=><span style={{textTransform:"capitalize"}}>{r.estado||"—"}</span>},
+            {key:"vig",label:"Vigencia",render:r=><span style={{color:C.textMuted}}>{dateOnly(r.fecha_vigencia)||"—"}</span>},
+          ]}
+          rows={R.anexos}
+          empty="Sin anexos en anexos_contrato."
+        />
+      </Panel>
+
+      {/* Resumen operativo: EPP */}
+      <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"20px 0 8px"}}>Resumen operativo — Artículos EPP ({R.epp.length})</p>
+      <Panel noPad>
+        <DataTable
+          cols={[
+            {key:"fecha",label:"Fecha",render:r=><span style={{color:C.textMuted}}>{dateOnly(r.fecha_entrega)||"—"}</span>},
+            {key:"art",label:"Artículo",render:r=><span style={{fontWeight:500}}>{r.articulo}</span>},
+            {key:"cant",label:"Cant.",render:r=>r.cantidad||1},
+            {key:"estado",label:"Estado",render:r=><Tag text={r.estado==='devuelto'?"Devuelto":"Entregado"} scheme={r.estado==='devuelto'?{bg:C.yellowBg,text:C.yellow,border:C.yellowBorder}:{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>},
+          ]}
+          rows={[...R.epp].sort((a,b)=>new Date(b.fecha_entrega||0)-new Date(a.fecha_entrega||0))}
+          empty="Sin entregas en entregas_epp."
+        />
+      </Panel>
+
+      {/* Liquidaciones */}
+      <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"20px 0 8px"}}>Liquidaciones ({R.liqs.length})</p>
+      <div style={{...card,marginBottom:4}}>
+        {ultLiq
+          ? linea(`Última (${ultLiq.periodo})`,`${clp(ultLiq.liquido||0)} · ${ultLiq.firmado_at?"firmada":"pendiente"}`)
+          : <p style={{fontSize:13,color:C.textMuted,margin:0}}>Sin liquidaciones registradas.</p>}
+      </div>
+
+      {desvin&&(
+        <div style={{...card,marginTop:14,background:C.redBg,border:`1px solid ${C.redBorder}`}}>
+          <p style={{fontWeight:600,fontSize:13,color:C.red,margin:"0 0 8px"}}>Desvinculación</p>
+          {linea("Motivo",trabajador.motivo_termino||"—")}
+          {linea("Fecha de separación",dateOnly(trabajador.fecha_separacion)||"—")}
+          {linea("Estado finiquito",trabajador.finiquito_estado||"pendiente")}
+        </div>
+      )}
     </div>
   );
 }
@@ -1801,7 +2145,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       {form&&(
         <div style={{background:C.surface,border:`1px solid ${C.accent}`,borderRadius:8,padding:20,marginBottom:16,boxShadow:`0 0 0 3px ${C.accent}14`}}>
           <div style={{display:"flex",gap:8,marginBottom:16,borderBottom:`1px solid ${C.borderLight}`,paddingBottom:12}}>
-            {["datos","remuneracion","asignaciones","anexos","documentos"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.textMuted,border:`1px solid ${tab===t?C.accent:C.border}`,borderRadius:6,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:tab===t?600:400}}>{t==="datos"?"Datos personales":t==="remuneracion"?"Remuneración":t==="asignaciones"?"Asignaciones":t==="anexos"?"Anexos":"Documentos"}</button>)}
+            {["datos","remuneracion","asignaciones","anexos","documentos","expediente"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.textMuted,border:`1px solid ${tab===t?C.accent:C.border}`,borderRadius:6,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:tab===t?600:400}}>{t==="datos"?"Datos personales":t==="remuneracion"?"Remuneración":t==="asignaciones"?"Asignaciones":t==="anexos"?"Anexos":t==="documentos"?"Documentos":"Expediente"}</button>)}
           </div>
           {tab==="datos"&&(
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
@@ -2002,6 +2346,12 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           )}
           {tab==="documentos"&&isNew&&(
             <AlertBanner type="warning" message="Primero crea el trabajador. Luego podrás generar contrato, ODI, reglamento y registrar EPP."/>
+          )}
+          {tab==="expediente"&&form&&!isNew&&(
+            <TabExpediente trabajador={form} data={data} update={update}/>
+          )}
+          {tab==="expediente"&&isNew&&(
+            <AlertBanner type="warning" message="Primero crea el trabajador. El expediente consolida sus documentos una vez creado."/>
           )}
           {(tab==="datos"||tab==="remuneracion")&&(
           <div style={{display:"flex",gap:8,paddingTop:8,borderTop:`1px solid ${C.borderLight}`}}>
