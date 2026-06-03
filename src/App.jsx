@@ -1859,6 +1859,28 @@ function expedienteResumen(trabajador, data){
   return {docs,anexos,epp,liqs,asigs,remun,oper};
 }
 
+// Fuente única de la regla de obligatorios y completitud (usada por Expediente y por 8D.6).
+// Completo = existe en estado firmado/archivado. Solo pendiente = en proceso. Anulado no cuenta.
+function checklistObligatorios(trabajador, data){
+  const desvin = trabajador.estado==='DESVINCULADO' || !trabajador.activo;
+  const obl=[
+    {tipo:'contrato',label:'Contrato'},
+    {tipo:'odi',label:'ODI'},
+    {tipo:'reglamento',label:'Reglamento'},
+    {tipo:'epp',label:'EPP'},
+  ];
+  if(desvin) obl.push({tipo:'finiquito',label:'Finiquito'});
+  const docs=(data.documentos_trabajador||[]).filter(d=>d.trabajador_id===trabajador.id);
+  const st=(tipo)=>{
+    const rows=docs.filter(d=>d.tipo_documento===tipo && d.estado!=='anulado');
+    if(!rows.length) return 'falta';
+    return rows.some(d=>d.estado==='firmado'||d.estado==='archivado') ? 'completo' : 'proceso';
+  };
+  const items=obl.map(o=>({...o, st:st(o.tipo)}));
+  const completados=items.filter(i=>i.st==='completo').length;
+  return {items, completados, total:items.length, completo:completados===items.length, desvin};
+}
+
 function imprimirExpediente(trabajador, data){
   const R=expedienteResumen(trabajador,data);
   const lj=lugaresYJornada(trabajador,data);
@@ -1933,24 +1955,13 @@ function TabExpediente({trabajador, data, update}){
     }catch(e){ alert("Error: "+e.message); }
   };
 
-  // Checklist de obligatorios y completitud
-  const obligatorios=[
-    {tipo:'contrato',  label:'Contrato de trabajo'},
-    {tipo:'odi',       label:'ODI — Derecho a Saber'},
-    {tipo:'reglamento',label:'Acta Reglamento Interno'},
-    {tipo:'epp',       label:'Acta de entrega EPP'},
-  ];
-  if(desvin) obligatorios.push({tipo:'finiquito', label:'Finiquito'});
-  const estadoCategoria=(tipo)=>{
-    const rows=R.docs.filter(d=>d.tipo_documento===tipo && d.estado!=='anulado');
-    if(!rows.length) return 'falta';
-    return rows.some(d=>d.estado==='firmado'||d.estado==='archivado') ? 'completo' : 'proceso';
-  };
-  const checklist=obligatorios.map(o=>({...o, st:estadoCategoria(o.tipo)}));
-  const completados=checklist.filter(c=>c.st==='completo').length;
-  const totalObl=checklist.length;
+  // Checklist de obligatorios y completitud (fuente única compartida con 8D.6)
+  const chk=checklistObligatorios(trabajador,data);
+  const checklist=chk.items;
+  const completados=chk.completados;
+  const totalObl=chk.total;
   const pct=Math.round(completados/totalObl*100);
-  const completo=completados===totalObl;
+  const completo=chk.completo;
 
   const card={background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:14};
   const linea=(k,v)=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"4px 0",fontSize:13}}><span style={{color:C.textMuted}}>{k}</span><span style={{fontWeight:500,color:C.text,textAlign:"right"}}>{v}</span></div>);
@@ -4704,12 +4715,78 @@ function Remuneraciones({ data, saveRem, insert, update }) {
 
 /* ─── Informes IA ───────────────────────────────────────────── */
 /* ─── Cumplimiento Mensual ───────────────────────────────────── */
+/* ── Fase 8D.6 — Panel transversal de documentos del personal (dentro de Cumplimiento) ── */
+function PanelDocumentosPendientes({data, update}){
+  const { user, perfil } = useAuth();
+  const quien = perfil?.nombre || user?.email || 'sistema';
+  const trabs=(data.trabajadores||[]);
+  const allDocs=(data.documentos_trabajador||[]);
+  const cnt=(st)=>allDocs.filter(d=>d.estado===st).length;
+  const filas=trabs.map(t=>({t,chk:checklistObligatorios(t,data)}));
+  const incompletos=filas.filter(f=>!f.chk.completo).sort((a,b)=>a.chk.completados-b.chk.completados);
+  const pendientesFirma=allDocs.filter(d=>d.estado==='pendiente')
+    .map(d=>({d,t:trabs.find(w=>w.id===d.trabajador_id)}))
+    .sort((a,b)=>new Date(a.d.fecha_documento||0)-new Date(b.d.fecha_documento||0));
+  const CHK_ICON={completo:"✅",proceso:"⏳",falta:"❌"};
+  const CHK_COL={completo:C.green,proceso:C.yellow,falta:C.red};
+  const card={background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:14};
+
+  return (
+    <div>
+      <div style={{background:C.accentBg,border:`1px solid #bfdbfe`,borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.accentText}}>
+        📋 <b>Documentos del personal (Fase 8D.6).</b> Vista transversal: estado documental de todos los trabajadores y bandeja de pendientes de firma. Solo lectura; las acciones se hacen en la ficha de cada trabajador.
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:16}}>
+        <KPICard label="Pendientes de firma" value={cnt('pendiente')} color={cnt('pendiente')?C.yellow:C.green}/>
+        <KPICard label="Firmados" value={cnt('firmado')} color={C.green}/>
+        <KPICard label="Archivados" value={cnt('archivado')} color={C.accent}/>
+        <KPICard label="Expedientes incompletos" value={`${incompletos.length} de ${trabs.length}`} color={incompletos.length?C.red:C.green}/>
+      </div>
+
+      <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"0 0 8px"}}>Expedientes incompletos</p>
+      {incompletos.length?(
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+          {incompletos.map(({t,chk})=>(
+            <div key={t.id} style={{...card,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+              <span style={{fontWeight:600,fontSize:13,color:C.text,flex:1,minWidth:160}}>{t.nombre}{(t.estado==='DESVINCULADO'||!t.activo)&&<span style={{fontSize:11,color:C.red,fontWeight:400}}> · desvinculado</span>}</span>
+              <span style={{fontSize:11,color:C.textMuted}}>{chk.completados}/{chk.total}</span>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {chk.items.filter(i=>i.st!=='completo').map(i=>(
+                  <span key={i.tipo} style={{fontSize:11,padding:"2px 8px",borderRadius:12,border:`1px solid ${CHK_COL[i.st]}`,color:CHK_COL[i.st]}}>{CHK_ICON[i.st]} {i.label}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ):(
+        <div style={{...card,textAlign:"center",color:C.green,fontSize:13,marginBottom:20}}>✅ Todos los expedientes están completos.</div>
+      )}
+
+      <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"0 0 8px"}}>Bandeja de pendientes de firma ({pendientesFirma.length})</p>
+      <Panel noPad>
+        <DataTable
+          cols={[
+            {key:"trab",label:"Trabajador",render:r=><span style={{fontWeight:500}}>{r.t?.nombre||r.d.trabajador_id}</span>},
+            {key:"doc",label:"Documento",render:r=>`${TIPO_DOC_LABEL[r.d.tipo_documento]||r.d.tipo_documento}${r.d.version?` v${r.d.version}`:''}`},
+            {key:"fecha",label:"Emitido",render:r=><span style={{color:C.textMuted}}>{dateOnly(r.d.fecha_documento)||"—"}</span>},
+            {key:"acc",label:"",render:r=>r.t&&update?<button onClick={()=>pickAndUploadFirmado(r.d,r.t,update,quien)} style={{color:C.green,background:"none",border:`1px solid ${C.greenBorder}`,borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:500}}>⬆️ Subir firmado</button>:null},
+          ]}
+          rows={pendientesFirma}
+          empty="No hay documentos pendientes de firma. 🎉"
+        />
+      </Panel>
+    </div>
+  );
+}
+
 function Cumplimiento({data,insert,update}){
   const hoy=new Date();
   const todayStr=hoy.toISOString().slice(0,10);
   const periodoActual=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
   const [periodoVer,setPeriodoVer]=useState(periodoActual);
   const [saving,setSaving]=useState(false);
+  const [vista,setVista]=useState('obligaciones');  // obligaciones mensuales | documentos del personal (8D.6)
 
   // Auto-generar obligaciones del período si no existen
   useEffect(()=>{
@@ -4760,7 +4837,14 @@ function Cumplimiento({data,insert,update}){
 
   return(
     <div>
-      <PageHeader title="Cumplimiento Mensual" subtitle="Obligaciones previsionales, tributarias y laborales"/>
+      <PageHeader title="Cumplimiento" subtitle="Obligaciones mensuales y documentación del personal"/>
+      <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+        {[['obligaciones','Obligaciones mensuales'],['documentos','Documentos del personal']].map(([k,l])=>(
+          <button key={k} onClick={()=>setVista(k)} style={{background:vista===k?C.accent:'transparent',color:vista===k?'#fff':C.textMuted,border:`1px solid ${vista===k?C.accent:C.border}`,borderRadius:6,padding:'5px 14px',fontSize:12,cursor:'pointer',fontWeight:vista===k?600:400}}>{l}</button>
+        ))}
+      </div>
+      {vista==='documentos'&&<PanelDocumentosPendientes data={data} update={update}/>}
+      {vista==='obligaciones'&&(<>
       <div style={{display:'flex',gap:12,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
         <FL label="Período"><input type="month" style={{...INP,width:160}} value={periodoVer} onChange={e=>setPeriodoVer(e.target.value)}/></FL>
         <div style={{display:'flex',gap:6,marginTop:18,flexWrap:'wrap'}}>
@@ -4856,6 +4940,7 @@ function Cumplimiento({data,insert,update}){
           </div>
         )}
       </div>
+      </>)}
     </div>
   );
 }
