@@ -1482,6 +1482,7 @@ function TabDocumentos({trabajador, data, insert, update}){
   const [eppForm,setEppForm]=useState(null);
   const [subForm,setSubForm]=useState(null);      // formulario subir documento externo
   const [subiendo,setSubiendo]=useState(false);
+  const [dupModal,setDupModal]=useState(null);    // modal de duplicado ERP
   const { user, perfil } = useAuth();
   const quien = perfil?.nombre || user?.email || 'sistema';
 
@@ -1490,22 +1491,39 @@ function TabDocumentos({trabajador, data, insert, update}){
   const docs=(data.documentos_trabajador||[]).filter(d=>d.trabajador_id===trabajador.id)
     .sort((a,b)=>new Date(b.fecha_documento||b.fecha_carga||b.created_at||0)-new Date(a.fecha_documento||a.fecha_carga||a.created_at||0));
 
-  // ── Camino 2: generar documento desde el ERP (trabajadores nuevos) ──
-  const registrarGenerado=async(tipo)=>{
+  // ── Camino 2: generar documento desde el ERP, con control de duplicados ──
+  // Solo se controlan los documentos ERP clave; los externos pueden repetirse.
+  const ERP_CONTROLADOS = ['contrato','odi','reglamento','epp'];
+  const proximaVersion=(tipo)=>{
+    const vs=docs.filter(d=>d.tipo_documento===tipo&&d.origen==='generado_erp').map(d=>Number(d.version||1));
+    return vs.length?Math.max(...vs)+1:1;
+  };
+  const insertarGenerado=async(tipo,version)=>{
     await insert('documentos_trabajador',{
       id:genDocTrabId(trabajador.id,tipo),
       trabajador_id:trabajador.id,
       tipo_documento:tipo,
       origen:'generado_erp',
       estado:'pendiente',
+      version,
       fecha_documento:new Date().toISOString(),
       fecha_carga:new Date().toISOString(),
       archivo_url:null,
       nombre_archivo:null,
-      observaciones:`Emitido por ${quien}`,
+      observaciones:`Emitido por ${quien} (v${version})`,
     });
   };
-  const emitir=(tipo,fn)=>{ fn(); registrarGenerado(tipo); };
+  // Al pulsar un botón generador: si ya existe ese tipo (ERP, no anulado), abre modal.
+  const emitir=(tipo,fn)=>{
+    if(ERP_CONTROLADOS.includes(tipo)){
+      const existentes=docs.filter(d=>d.tipo_documento===tipo&&d.origen==='generado_erp'&&d.estado!=='anulado');
+      if(existentes.length){ setDupModal({tipo,fn,existentes}); return; }
+    }
+    fn(); insertarGenerado(tipo,1);
+  };
+  // Acciones del modal de duplicado
+  const dupVerExistente=()=>{ dupModal?.fn?.(); setDupModal(null); };               // reimprime, sin nueva fila
+  const dupNuevaVersion=async()=>{ const m=dupModal; setDupModal(null); m?.fn?.(); await insertarGenerado(m.tipo, proximaVersion(m.tipo)); };
 
   // ── Camino 1: subir documento existente escaneado (empresa en marcha) ──
   const openSubir=()=>setSubForm({
@@ -1611,7 +1629,7 @@ function TabDocumentos({trabajador, data, insert, update}){
       <Panel noPad>
         <DataTable
           cols={[
-            {key:"tipo",label:"Tipo",render:r=><span style={{fontWeight:500}}>{TIPO_DOC_LABEL[r.tipo_documento]||r.tipo_documento}</span>},
+            {key:"tipo",label:"Tipo",render:r=><span style={{fontWeight:500}}>{TIPO_DOC_LABEL[r.tipo_documento]||r.tipo_documento}{r.origen==='generado_erp'&&r.version?` v${r.version}`:''}</span>},
             {key:"origen",label:"Origen",render:r=><Tag text={ORIGEN_LABEL[r.origen]||r.origen} scheme={r.origen==='externo'?{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}:{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
             {key:"estado",label:"Estado",render:r=>{const s=ESTADO_DOC[r.estado]||ESTADO_DOC.pendiente;return <Tag text={s.label} scheme={s}/>;}},
             {key:"fecha",label:"Fecha doc.",render:r=><span style={{color:C.textMuted}}>{dateOnly(r.fecha_documento)||"—"}</span>},
@@ -1698,6 +1716,31 @@ function TabDocumentos({trabajador, data, insert, update}){
           empty="Sin entregas de EPP registradas. Usa «Registrar entrega» para iniciar el historial."
         />
       </Panel>
+
+      {dupModal&&(()=>{
+        const lbl=TIPO_DOC_LABEL[dupModal.tipo]||dupModal.tipo;
+        const ult=[...dupModal.existentes].sort((a,b)=>Number(b.version||1)-Number(a.version||1))[0];
+        const sEst=ESTADO_DOC[ult?.estado]||ESTADO_DOC.pendiente;
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>e.target===e.currentTarget&&setDupModal(null)}>
+            <div style={{background:'#fff',borderRadius:12,padding:24,maxWidth:460,width:'100%',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
+              <p style={{fontWeight:700,fontSize:15,color:C.text,margin:"0 0 6px"}}>⚠️ Documento ya existente</p>
+              <p style={{fontSize:13,color:C.textMuted,margin:"0 0 14px"}}>Ya existe un <b>{lbl}</b> generado por el ERP para <b>{trabajador.nombre}</b>. ¿Qué deseas hacer?</p>
+              <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",marginBottom:16,fontSize:12,color:C.textMuted,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span style={{fontWeight:600,color:C.text}}>{lbl} v{ult?.version||1}</span>
+                <Tag text={sEst.label} scheme={sEst}/>
+                <span>· {dateOnly(ult?.fecha_documento)||"—"}</span>
+                {dupModal.existentes.length>1&&<span>· {dupModal.existentes.length} versiones vigentes</span>}
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <button onClick={dupVerExistente} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:500,color:C.text}}>👁 Ver / reimprimir existente <span style={{display:"block",fontSize:11,fontWeight:400,color:C.textMuted}}>Abre el documento actual sin crear otra fila.</span></button>
+                <button onClick={dupNuevaVersion} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.accent}`,background:C.accentBg,cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:500,color:C.accentText}}>🔄 Generar nueva versión (v{proximaVersion(dupModal.tipo)}) <span style={{display:"block",fontSize:11,fontWeight:400,color:C.accentText}}>Imprime y agrega una fila nueva, conservando la anterior.</span></button>
+                <button onClick={()=>setDupModal(null)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,color:C.textMuted}}>✕ Cancelar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
