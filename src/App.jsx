@@ -193,7 +193,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp","documentos_trabajador"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -1453,11 +1453,102 @@ function genEppId(trabajadorId){
   return `EPP-${(trabajadorId||'TR').slice(-4)}-${ts}`;
 }
 
+// Documental unificada: documentos generados por el ERP + escaneados externos (Fase 8D / base 8D.5)
+const TIPO_DOC_LABEL = {
+  contrato:"Contrato de trabajo",
+  odi:"ODI — Derecho a Saber",
+  reglamento:"Acta Reglamento Interno",
+  epp:"Acta de entrega EPP",
+  anexo:"Anexo de contrato",
+  finiquito:"Finiquito",
+  certificado:"Certificado",
+  otro:"Otro documento",
+};
+const ORIGEN_LABEL = { externo:"Externo", generado_erp:"ERP" };
+const ESTADO_DOC = {
+  pendiente:{label:"Pendiente firma", bg:C.yellowBg, text:C.yellow, border:C.yellowBorder},
+  firmado:  {label:"Firmado",         bg:C.greenBg,  text:C.green,  border:C.greenBorder},
+  archivado:{label:"Archivado",       bg:C.accentBg, text:C.accentText, border:"#bfdbfe"},
+  vencido:  {label:"Vencido",         bg:C.redBg,    text:C.red,    border:C.redBorder},
+  anulado:  {label:"Anulado",         bg:C.borderLight, text:C.textMuted, border:C.border},
+};
+const STORAGE_BUCKET = "documentos-trabajadores";
+function genDocTrabId(trabajadorId, tipo){
+  const ts=Date.now().toString(36).toUpperCase();
+  return `DOC-${(tipo||'doc').slice(0,3).toUpperCase()}-${(trabajadorId||'TR').slice(-4)}-${ts}`;
+}
+
 function TabDocumentos({trabajador, data, insert, update}){
   const [eppForm,setEppForm]=useState(null);
+  const [subForm,setSubForm]=useState(null);      // formulario subir documento externo
+  const [subiendo,setSubiendo]=useState(false);
+  const { user, perfil } = useAuth();
+  const quien = perfil?.nombre || user?.email || 'sistema';
+
   const entregas=(data.entregas_epp||[]).filter(e=>e.trabajador_id===trabajador.id)
     .sort((a,b)=>new Date(b.created_at||b.fecha_entrega||0)-new Date(a.created_at||a.fecha_entrega||0));
+  const docs=(data.documentos_trabajador||[]).filter(d=>d.trabajador_id===trabajador.id)
+    .sort((a,b)=>new Date(b.fecha_documento||b.fecha_carga||b.created_at||0)-new Date(a.fecha_documento||a.fecha_carga||a.created_at||0));
 
+  // ── Camino 2: generar documento desde el ERP (trabajadores nuevos) ──
+  const registrarGenerado=async(tipo)=>{
+    await insert('documentos_trabajador',{
+      id:genDocTrabId(trabajador.id,tipo),
+      trabajador_id:trabajador.id,
+      tipo_documento:tipo,
+      origen:'generado_erp',
+      estado:'pendiente',
+      fecha_documento:new Date().toISOString(),
+      fecha_carga:new Date().toISOString(),
+      archivo_url:null,
+      nombre_archivo:null,
+      observaciones:`Emitido por ${quien}`,
+    });
+  };
+  const emitir=(tipo,fn)=>{ fn(); registrarGenerado(tipo); };
+
+  // ── Camino 1: subir documento existente escaneado (empresa en marcha) ──
+  const openSubir=()=>setSubForm({
+    tipo_documento:'contrato', fecha_documento:new Date().toISOString().slice(0,10),
+    estado:'firmado', observaciones:'', _file:null,
+  });
+  const subirDocumento=async()=>{
+    if(!subForm._file){ alert("Selecciona el archivo escaneado (PDF o imagen)."); return; }
+    if(!isConfigured){ alert("El almacenamiento de archivos no está disponible en modo demo."); return; }
+    setSubiendo(true);
+    try{
+      const f=subForm._file;
+      const safe=f.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+      const path=`${trabajador.id}/${Date.now()}_${safe}`;
+      const {error:upErr}=await supabase.storage.from(STORAGE_BUCKET).upload(path,f,{upsert:false,contentType:f.type||undefined});
+      if(upErr){ alert("Error al subir el archivo: "+upErr.message+"\n\n¿Existe el bucket «"+STORAGE_BUCKET+"» en Supabase Storage?"); setSubiendo(false); return; }
+      const ok=await insert('documentos_trabajador',{
+        id:genDocTrabId(trabajador.id,subForm.tipo_documento),
+        trabajador_id:trabajador.id,
+        tipo_documento:subForm.tipo_documento,
+        origen:'externo',
+        estado:subForm.estado,
+        fecha_documento:subForm.fecha_documento?dateNoon(subForm.fecha_documento):null,
+        fecha_carga:new Date().toISOString(),
+        archivo_url:path,
+        nombre_archivo:f.name,
+        observaciones:subForm.observaciones?`${subForm.observaciones} · cargado por ${quien}`:`Cargado por ${quien}`,
+      });
+      if(ok) setSubForm(null);
+    }catch(e){ alert("Error: "+e.message); }
+    setSubiendo(false);
+  };
+  const verArchivo=async(d)=>{
+    if(!d.archivo_url) return;
+    try{
+      const {data:s,error}=await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(d.archivo_url,300);
+      if(error||!s){ alert("No se pudo abrir el archivo."); return; }
+      window.open(s.signedUrl,"_blank");
+    }catch(e){ alert("Error: "+e.message); }
+  };
+  const cambiarEstadoDoc=async(d,estado)=>{ await update('documentos_trabajador',{...d,estado}); };
+
+  // ── EPP ──
   const openEpp=()=>setEppForm({
     id:genEppId(trabajador.id), trabajador_id:trabajador.id,
     articulo:CATALOGO_EPP[0], cantidad:1, talla:"", estado:"entregado",
@@ -1480,35 +1571,91 @@ function TabDocumentos({trabajador, data, insert, update}){
   return (
     <div>
       <div style={{background:C.accentBg,border:`1px solid #bfdbfe`,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:C.accentText}}>
-        📁 <b>Documentación laboral (Fase 8D).</b> Genera los documentos de ingreso pre-llenados con los datos del trabajador y sus asignaciones. Cada uno abre listo para imprimir o guardar como PDF.
+        📁 <b>Documentación laboral (Fase 8D) — dos caminos.</b> Para trabajadores nuevos, <b>genera</b> los documentos desde el ERP. Para una empresa ya en marcha, <b>sube</b> los documentos firmados fuera del sistema para tenerlos en la carpeta digital del trabajador.
       </div>
 
-      <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"0 0 8px"}}>Documentos de ingreso</p>
+      {/* ── Carpeta documental unificada ── */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:8}}>
+        <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:0}}>Carpeta documental del trabajador</p>
+        {!subForm&&<PrimaryBtn onClick={openSubir} small color={C.purple}>+ Subir documento existente</PrimaryBtn>}
+      </div>
+
+      {subForm&&(
+        <div style={{background:C.purpleBg,border:`1px solid ${C.purpleBorder}`,borderRadius:8,padding:14,marginBottom:14}}>
+          <p style={{fontSize:12,fontWeight:600,color:C.purple,margin:"0 0 10px"}}>📎 Subir documento firmado externo (origen: Externo)</p>
+          <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr 1fr",gap:10,marginBottom:10}}>
+            <FL label="Tipo de documento">
+              <select style={INP} value={subForm.tipo_documento} onChange={e=>setSubForm({...subForm,tipo_documento:e.target.value})}>
+                {Object.entries(TIPO_DOC_LABEL).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+              </select>
+            </FL>
+            <FL label="Fecha del documento"><input type="date" style={INP} value={subForm.fecha_documento||""} onChange={e=>setSubForm({...subForm,fecha_documento:e.target.value})}/></FL>
+            <FL label="Estado">
+              <select style={INP} value={subForm.estado} onChange={e=>setSubForm({...subForm,estado:e.target.value})}>
+                {Object.entries(ESTADO_DOC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </FL>
+            <FL label="Archivo escaneado (PDF o imagen)" span>
+              <input type="file" accept=".pdf,image/*" style={{...INP,padding:"6px 8px"}} onChange={e=>setSubForm({...subForm,_file:e.target.files?.[0]||null})}/>
+            </FL>
+            <FL label="Observaciones" span><input style={INP} value={subForm.observaciones} onChange={e=>setSubForm({...subForm,observaciones:e.target.value})} placeholder="Ej: contrato original 2025, copia en carpeta física"/></FL>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <PrimaryBtn onClick={subirDocumento} color={C.purple} disabled={subiendo}>{subiendo?"Subiendo…":"Guardar en carpeta"}</PrimaryBtn>
+            <SecondaryBtn onClick={()=>setSubForm(null)}>Cancelar</SecondaryBtn>
+            {subForm._file&&<span style={{fontSize:11,color:C.textMuted}}>{subForm._file.name}</span>}
+          </div>
+        </div>
+      )}
+
+      <Panel noPad>
+        <DataTable
+          cols={[
+            {key:"tipo",label:"Tipo",render:r=><span style={{fontWeight:500}}>{TIPO_DOC_LABEL[r.tipo_documento]||r.tipo_documento}</span>},
+            {key:"origen",label:"Origen",render:r=><Tag text={ORIGEN_LABEL[r.origen]||r.origen} scheme={r.origen==='externo'?{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}:{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
+            {key:"estado",label:"Estado",render:r=>{const s=ESTADO_DOC[r.estado]||ESTADO_DOC.pendiente;return <Tag text={s.label} scheme={s}/>;}},
+            {key:"fecha",label:"Fecha doc.",render:r=><span style={{color:C.textMuted}}>{dateOnly(r.fecha_documento)||"—"}</span>},
+            {key:"archivo",label:"Archivo",render:r=>r.archivo_url?<button onClick={()=>verArchivo(r)} style={{color:C.accent,background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer"}}>📄 Ver</button>:<span style={{fontSize:11,color:C.textDim}}>—</span>},
+            {key:"acc",label:"",render:r=>(
+              <select value={r.estado} onChange={e=>cambiarEstadoDoc(r,e.target.value)} style={{fontSize:11,border:`1px solid ${C.border}`,borderRadius:5,padding:"2px 6px",color:C.textMuted,cursor:"pointer",background:C.surface}}>
+                {Object.entries(ESTADO_DOC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+              </select>
+            )},
+          ]}
+          rows={docs}
+          empty="Carpeta vacía. Sube los documentos firmados existentes o genera los nuevos desde el ERP."
+        />
+      </Panel>
+
+      {/* ── Camino 2: generar documento nuevo desde el ERP ── */}
+      <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"24px 0 8px"}}>Generar documento nuevo desde el ERP</p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10,marginBottom:24}}>
-        <button style={docBtn} onClick={()=>imprimirContratoTrabajo(trabajador,data)}>
+        <button style={docBtn} onClick={()=>emitir('contrato',()=>imprimirContratoTrabajo(trabajador,data))}>
           <span style={{fontSize:20}}>📄</span>
           <span style={{fontWeight:600,color:C.text,fontSize:13}}>Contrato de trabajo</span>
           <span style={{fontSize:11,color:C.textMuted}}>Art. 10 C. del Trabajo · jornada y lugar desde asignaciones</span>
         </button>
-        <button style={docBtn} onClick={()=>imprimirODI(trabajador,data)}>
+        <button style={docBtn} onClick={()=>emitir('odi',()=>imprimirODI(trabajador,data))}>
           <span style={{fontSize:20}}>⚠️</span>
           <span style={{fontWeight:600,color:C.text,fontSize:13}}>ODI — Derecho a Saber</span>
           <span style={{fontSize:11,color:C.textMuted}}>D.S. N°40 · matriz de riesgos del rubro aseo</span>
         </button>
-        <button style={docBtn} onClick={()=>imprimirActaReglamento(trabajador,data)}>
+        <button style={docBtn} onClick={()=>emitir('reglamento',()=>imprimirActaReglamento(trabajador,data))}>
           <span style={{fontSize:20}}>📕</span>
           <span style={{fontWeight:600,color:C.text,fontSize:13}}>Acta Reglamento Interno</span>
           <span style={{fontSize:11,color:C.textMuted}}>Art. 156 · recepción firmada (incl. Ley Karin)</span>
         </button>
-        <button style={docBtn} onClick={()=>imprimirActaEPP(trabajador,entregas)}>
+        <button style={docBtn} onClick={()=>emitir('epp',()=>imprimirActaEPP(trabajador,entregas))}>
           <span style={{fontSize:20}}>🧤</span>
           <span style={{fontWeight:600,color:C.text,fontSize:13}}>Acta de entrega EPP</span>
           <span style={{fontSize:11,color:C.textMuted}}>Art. 53 D.S. N°594 · consolida el historial</span>
         </button>
       </div>
+      <p style={{fontSize:11,color:C.textDim,margin:"-16px 0 24px"}}>Cada documento generado queda en la carpeta de arriba con origen «ERP» y estado «Pendiente firma». Imprímelo o guárdalo como PDF; al firmarlo, cambia su estado a «Firmado».</p>
 
+      {/* ── Entrega de EPP — historial de artículos ── */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-        <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:0}}>Entrega de EPP — historial</p>
+        <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:0}}>Entrega de EPP — historial de artículos</p>
         {!eppForm&&<PrimaryBtn onClick={openEpp} small>+ Registrar entrega</PrimaryBtn>}
       </div>
 
