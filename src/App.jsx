@@ -1432,6 +1432,55 @@ function imprimirActaEPP(trabajador, entregas){
   htmlDocImprimir(`Acta EPP ${trabajador.nombre||""}`, cuerpo);
 }
 
+// Mapea la etiqueta de motivo_termino guardada (8B) al código de causal para el cálculo.
+function motivoCodeFromLabel(label){
+  const l=(label||'').toLowerCase();
+  if(l.includes('160')) return 'art160';
+  if(l.includes('161')) return 'art161';
+  if(l.includes('159')) return 'art159';
+  if(l.includes('renuncia')) return 'renuncia';
+  if(l.includes('mutuo')) return 'mutuo';
+  return 'otro';
+}
+
+// Finiquito (8B.documento): solo para trabajadores desvinculados. Cálculo referencial reutiliza calcularFiniquitoPreview.
+function imprimirFiniquito(trabajador, data, opts={}){
+  const fechaSep = opts.fechaSep || dateOnly(trabajador.fecha_separacion);
+  const motivoCode = opts.motivoCode || motivoCodeFromLabel(trabajador.motivo_termino);
+  const cartaAviso = !!opts.cartaAviso;
+  if(!fechaSep){ alert("El trabajador no tiene fecha de separación registrada."); return; }
+  const calc = calcularFiniquitoPreview(trabajador, data.asignaciones||[], fechaSep, motivoCode, cartaAviso, data.feriados_chile||[]);
+  if(!calc){ alert("Falta la fecha de ingreso del trabajador para calcular el finiquito."); return; }
+  const fila=(concepto,monto,nota)=>`<tr><td>${concepto}</td><td style="text-align:right">${clp(monto)}</td><td style="font-size:10px;color:#666">${nota||""}</td></tr>`;
+  const filas=[
+    fila("Feriado proporcional", calc.vacacionesProp, `${calc.diasVacProp} días`),
+    calc.avisoPrevio?fila("Indemnización sustitutiva del aviso previo", calc.avisoPrevio, "Art. 161, sin aviso de 30 días"):"",
+    calc.indemnizacion?fila("Indemnización por años de servicio", calc.indemnizacion, `${Math.floor(calc.mesesServicio/12)} año(s) × sueldo base`):"",
+  ].filter(Boolean).join("");
+  const cuerpo = `
+    <h1>Finiquito de Contrato de Trabajo</h1>
+    <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut} · ${EMPRESA.domicilio}</div>
+    <p>En Arica, a ${fechaLargaCL()}, comparecen: por una parte <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada por doña <b>${EMPRESA.repNombre}</b>, cédula N° ${EMPRESA.repRut}, en adelante "el empleador"; y por la otra don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}, en adelante "el trabajador", quienes acuerdan el siguiente finiquito:</p>
+
+    <div class="clausula"><b>PRIMERO: Término de la relación laboral.</b> Las partes dejan constancia de que la relación laboral, iniciada el ${fechaLargaCL(trabajador.fecha_inicio)}, terminó con fecha <b>${fechaLargaCL(fechaSep)}</b>, por la causal: <b>${trabajador.motivo_termino||"—"}</b>. Antigüedad: ${calc.mesesServicio} meses (${calc.diasTotales} días).</div>
+
+    <div class="clausula"><b>SEGUNDO: Haberes adeudados (cálculo referencial).</b> El empleador pagará al trabajador los siguientes conceptos:
+      <table><thead><tr><th>Concepto</th><th style="text-align:right;width:28%">Monto</th><th style="width:30%">Detalle</th></tr></thead>
+      <tbody>${filas}<tr><td><b>TOTAL REFERENCIAL</b></td><td style="text-align:right"><b>${clp(calc.totalBruto)}</b></td><td></td></tr></tbody></table>
+      Sueldo base de referencia: ${clp(calc.sueldoBase)}.</div>
+
+    <div class="clausula"><b>TERCERO: Pago y reserva.</b> El trabajador declara recibir conforme las sumas indicadas y, salvo lo expresamente reservado por escrito en este acto, no tener cargo ni reclamo pendiente en contra del empleador por concepto alguno derivado de la relación laboral ni de su término.</div>
+
+    <div class="clausula"><b>CUARTO: Ratificación.</b> El presente finiquito se firmará y ratificará ante ministro de fe (notario, Inspección del Trabajo o quien la ley faculte), conforme al Art. 177 del Código del Trabajo, oportunidad en que se entregarán los comprobantes de pago de cotizaciones previsionales al día.</div>
+
+    <div class="firmas">
+      <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Trabajador</b></div>
+      <div class="firma">${EMPRESA.repNombre}<br/>RUT ${EMPRESA.repRut}<br/><b>p.p. ${EMPRESA.razon}</b></div>
+    </div>
+    <p class="nota" style="margin-top:18px">⚠ Cálculo REFERENCIAL generado por el sistema. El finiquito definitivo debe ser revisado y ratificado con asesoría legal antes de su firma. No incluye eventuales bonos, comisiones, horas extra ni descuentos que correspondan.</p>`;
+  htmlDocImprimir(`Finiquito ${trabajador.nombre||""}`, cuerpo);
+}
+
 // Conversión simple de monto a palabras (para el contrato). Suficiente para sueldos.
 function numeroAPalabras(n){
   n=Math.round(n||0);
@@ -1536,6 +1585,7 @@ function TabDocumentos({trabajador, data, insert, update}){
   const [subiendo,setSubiendo]=useState(false);
   const [dupModal,setDupModal]=useState(null);    // modal de duplicado ERP
   const [contratoModal,setContratoModal]=useState(null);  // pre-emisión del contrato (8D.5)
+  const [finiquitoModal,setFiniquitoModal]=useState(null);  // pre-emisión del finiquito (solo desvinculados)
   const { user, perfil } = useAuth();
   const quien = perfil?.nombre || user?.email || 'sistema';
 
@@ -1588,6 +1638,19 @@ function TabDocumentos({trabajador, data, insert, update}){
     imprimirContratoTrabajo(trabajador, data, ov);
     if(crearFila) await insertarGenerado('contrato', proximaVersion('contrato'));
     setContratoModal(null);
+  };
+
+  // ── Finiquito (solo trabajadores desvinculados) ──
+  const desvin = trabajador.estado==='DESVINCULADO' || !trabajador.activo;
+  const openFiniquito=()=>setFiniquitoModal({
+    fechaSep: dateOnly(trabajador.fecha_separacion)||'',
+    motivoCode: motivoCodeFromLabel(trabajador.motivo_termino),
+    cartaAviso: false,
+  });
+  const generarFiniquito=async(crearFila)=>{
+    imprimirFiniquito(trabajador, data, finiquitoModal);
+    if(crearFila) await insertarGenerado('finiquito', proximaVersion('finiquito'));
+    setFiniquitoModal(null);
   };
 
   // ── Camino 1: subir documento existente escaneado (empresa en marcha) ──
@@ -1741,6 +1804,20 @@ function TabDocumentos({trabajador, data, insert, update}){
       </div>
       <p style={{fontSize:11,color:C.textDim,margin:"-16px 0 24px"}}>Ciclo completo: el documento generado queda «Pendiente firma». Imprímelo, fírmalo, escanéalo o fotografíalo, y usa <b>⬆️ Subir firmado</b> en su fila de la carpeta. El archivo firmado se adjunta a la <b>misma fila</b> (no se duplica) y el estado pasa a «Firmado».</p>
 
+      {/* ── Egreso: Finiquito (solo trabajadores desvinculados) ── */}
+      {desvin&&(
+        <>
+          <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"0 0 8px"}}>Egreso del trabajador</p>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10,marginBottom:24}}>
+            <button style={docBtn} onClick={openFiniquito}>
+              <span style={{fontSize:20}}>📑</span>
+              <span style={{fontWeight:600,color:C.text,fontSize:13}}>Generar Finiquito</span>
+              <span style={{fontSize:11,color:C.textMuted}}>Art. 177 C. del Trabajo · cálculo referencial desde la desvinculación</span>
+            </button>
+          </div>
+        </>
+      )}
+
       {/* ── Entrega de EPP — historial de artículos ── */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
         <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:0}}>Entrega de EPP — historial de artículos</p>
@@ -1837,6 +1914,60 @@ function TabDocumentos({trabajador, data, insert, update}){
                 <button onClick={()=>generarContrato(true)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.accent}`,background:C.accent,color:"#fff",cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:600}}>{yaHay?`🔄 Generar nueva versión (v${proximaVersion('contrato')})`:"📄 Generar contrato (v1)"} <span style={{display:"block",fontSize:11,fontWeight:400,opacity:.9}}>Imprime y agrega la fila a la carpeta documental.</span></button>
                 {yaHay&&<button onClick={()=>generarContrato(false)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:500,color:C.text}}>👁 Solo reimprimir <span style={{display:"block",fontSize:11,fontWeight:400,color:C.textMuted}}>Abre el PDF sin crear otra fila.</span></button>}
                 <button onClick={()=>setContratoModal(null)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,color:C.textMuted}}>✕ Cancelar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {finiquitoModal&&(()=>{
+        const calc=calcularFiniquitoPreview(trabajador, data.asignaciones||[], finiquitoModal.fechaSep, finiquitoModal.motivoCode, finiquitoModal.cartaAviso, data.feriados_chile||[]);
+        const existentes=docs.filter(d=>d.tipo_documento==='finiquito'&&d.origen==='generado_erp'&&d.estado!=='anulado');
+        const yaHay=existentes.length>0;
+        const fila=(k,v)=>(<div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:C.textMuted}}>{k}</span><span style={{fontWeight:600,color:C.text}}>{v}</span></div>);
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>e.target===e.currentTarget&&setFiniquitoModal(null)}>
+            <div style={{background:'#fff',borderRadius:12,padding:24,maxWidth:520,width:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
+              <p style={{fontWeight:700,fontSize:15,color:C.text,margin:"0 0 4px"}}>📑 Generar finiquito</p>
+              <p style={{fontSize:12,color:C.textMuted,margin:"0 0 14px"}}>{trabajador.nombre} · {trabajador.motivo_termino||"—"}. Verifica los datos; el cálculo es referencial.</p>
+              {yaHay&&(
+                <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:C.yellow}}>
+                  Ya existe un finiquito (v{Math.max(...existentes.map(d=>Number(d.version||1)))}). Al generar se creará la <b>v{proximaVersion('finiquito')}</b>, conservando el anterior.
+                </div>
+              )}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                <FL label="Fecha de separación"><input type="date" style={INP} value={finiquitoModal.fechaSep||""} onChange={e=>setFiniquitoModal({...finiquitoModal,fechaSep:e.target.value})}/></FL>
+                <FL label="Causal">
+                  <select style={INP} value={finiquitoModal.motivoCode} onChange={e=>setFiniquitoModal({...finiquitoModal,motivoCode:e.target.value})}>
+                    <option value="art161">Art. 161 — Necesidades de la empresa</option>
+                    <option value="art160">Art. 160 — Falta grave (sin indemnización)</option>
+                    <option value="art159">Art. 159 — Plazo/mutuo/renuncia</option>
+                    <option value="renuncia">Renuncia voluntaria</option>
+                    <option value="mutuo">Mutuo acuerdo</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </FL>
+              </div>
+              <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.text,marginBottom:14,cursor:"pointer"}}>
+                <input type="checkbox" checked={finiquitoModal.cartaAviso} onChange={e=>setFiniquitoModal({...finiquitoModal,cartaAviso:e.target.checked})}/>
+                Se entregó carta de aviso con 30 días de anticipación (Art. 161 → no se paga mes sustitutivo)
+              </label>
+              {calc?(
+                <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",marginBottom:16}}>
+                  {fila("Antigüedad",`${calc.mesesServicio} meses (${calc.diasTotales} días)`)}
+                  {fila("Feriado proporcional",`${clp(calc.vacacionesProp)} (${calc.diasVacProp} días)`)}
+                  {calc.avisoPrevio>0&&fila("Aviso previo sustitutivo",clp(calc.avisoPrevio))}
+                  {calc.indemnizacion>0&&fila("Indemnización años de servicio",clp(calc.indemnizacion))}
+                  <div style={{borderTop:`1px solid ${C.border}`,marginTop:6,paddingTop:6}}>{fila("TOTAL REFERENCIAL",clp(calc.totalBruto))}</div>
+                </div>
+              ):(
+                <div style={{background:C.redBg,border:`1px solid ${C.redBorder}`,borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:12,color:C.red}}>Falta la fecha de ingreso o de separación para calcular. Revisa la ficha del trabajador.</div>
+              )}
+              <p style={{fontSize:11,color:C.textDim,margin:"0 0 14px"}}>⚠ Cálculo referencial. El finiquito definitivo debe revisarse y ratificarse con asesoría legal ante ministro de fe.</p>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <button onClick={()=>generarFiniquito(true)} disabled={!calc} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.accent}`,background:calc?C.accent:C.border,color:"#fff",cursor:calc?"pointer":"not-allowed",textAlign:"left",fontSize:13,fontWeight:600}}>{yaHay?`🔄 Generar nueva versión (v${proximaVersion('finiquito')})`:"📑 Generar finiquito (v1)"} <span style={{display:"block",fontSize:11,fontWeight:400,opacity:.9}}>Imprime y agrega la fila a la carpeta documental.</span></button>
+                {yaHay&&<button onClick={()=>generarFiniquito(false)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:500,color:C.text}}>👁 Solo reimprimir</button>}
+                <button onClick={()=>setFiniquitoModal(null)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,color:C.textMuted}}>✕ Cancelar</button>
               </div>
             </div>
           </div>
@@ -1943,6 +2074,7 @@ function TabExpediente({trabajador, data, update}){
       case 'odi':        imprimirODI(trabajador,data); break;
       case 'reglamento': imprimirActaReglamento(trabajador,data); break;
       case 'epp':        imprimirActaEPP(trabajador,R.epp); break;
+      case 'finiquito':  imprimirFiniquito(trabajador,data,{}); break;
       default: alert("Este tipo de documento no se regenera desde el ERP."); break;
     }
   };
@@ -1975,7 +2107,7 @@ function TabExpediente({trabajador, data, update}){
   const DocRow=({d})=>{
     const s=ESTADO_DOC[d.estado]||ESTADO_DOC.pendiente;
     const esErp=d.origen==='generado_erp';
-    const esReimprimible=esErp&&['contrato','odi','reglamento','epp'].includes(d.tipo_documento);
+    const esReimprimible=esErp&&['contrato','odi','reglamento','epp','finiquito'].includes(d.tipo_documento);
     return (
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderTop:`1px solid ${C.borderLight}`,flexWrap:"wrap"}}>
         <span style={{fontWeight:500,fontSize:13,color:C.text,flex:1,minWidth:160}}>{TIPO_DOC_LABEL[d.tipo_documento]||d.tipo_documento}{esErp&&d.version?` v${d.version}`:''}</span>
@@ -4734,7 +4866,7 @@ function PanelDocumentosPendientes({data, update}){
   return (
     <div>
       <div style={{background:C.accentBg,border:`1px solid #bfdbfe`,borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.accentText}}>
-        📋 <b>Documentos del personal (Fase 8D.6).</b> Vista transversal: estado documental de todos los trabajadores y bandeja de pendientes de firma. Solo lectura; las acciones se hacen en la ficha de cada trabajador.
+        📋 <b>Documentos del personal (Fase 8D.5.1).</b> Vista transversal: estado documental de todos los trabajadores y bandeja de pendientes de firma. Solo lectura; las acciones se hacen en la ficha de cada trabajador.
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:16}}>
