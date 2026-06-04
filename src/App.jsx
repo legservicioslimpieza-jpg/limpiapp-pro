@@ -1218,6 +1218,8 @@ const EMPRESA = {
   rut:"78.086.977-1",
   giro:"Servicios de aseo y limpieza",
   domicilio:"Arica, Región de Arica y Parinacota",
+  domicilioCompleto:"Calle Baquedano N°731, oficina 707, comuna de Arica",
+  ciudad:"Arica",
   repNombre:"Ana María Guzmán Loyola",
   repRut:"12.083.247-6",
   repCargo:"Representante Legal",
@@ -1443,7 +1445,7 @@ function motivoCodeFromLabel(label){
   return 'otro';
 }
 
-// Finiquito (8B.documento): solo para trabajadores desvinculados. Cálculo referencial reutiliza calcularFiniquitoPreview.
+// Finiquito formal y completo (modelo LEG). Montos referenciales editables; resto formal listo para firma/ratificación.
 function imprimirFiniquito(trabajador, data, opts={}){
   const fechaSep = opts.fechaSep || dateOnly(trabajador.fecha_separacion);
   const motivoCode = opts.motivoCode || motivoCodeFromLabel(trabajador.motivo_termino);
@@ -1451,33 +1453,58 @@ function imprimirFiniquito(trabajador, data, opts={}){
   if(!fechaSep){ alert("El trabajador no tiene fecha de separación registrada."); return; }
   const calc = calcularFiniquitoPreview(trabajador, data.asignaciones||[], fechaSep, motivoCode, cartaAviso, data.feriados_chile||[]);
   if(!calc){ alert("Falta la fecha de ingreso del trabajador para calcular el finiquito."); return; }
-  const fila=(concepto,monto,nota)=>`<tr><td>${concepto}</td><td style="text-align:right">${clp(monto)}</td><td style="font-size:10px;color:#666">${nota||""}</td></tr>`;
+
+  const otrosMonto = Math.round(Number(opts.otrosMonto||0));
+  const otrosConcepto = (opts.otrosConcepto||"").trim() || "Otros haberes";
+  const descMonto = Math.round(Number(opts.descuentoMonto||0));
+  const descConcepto = (opts.descuentoConcepto||"").trim() || "Descuentos";
+  const totalFinal = calc.vacacionesProp + calc.avisoPrevio + calc.indemnizacion + otrosMonto - descMonto;
+
+  // Lugar/centro donde prestó servicios (de cualquier asignación remuneracional, activa o histórica)
+  let lugar="";
+  for(const a of (data.asignaciones||[]).filter(a=>a.trabajador_id===trabajador.id && a.afecta_remuneracion!==false)){
+    const ct=(data.contratos||[]).find(c=>c.id===a.contrato_id);
+    if(ct){ lugar=[ct.cliente,ct.instalacion].filter(Boolean).join(", "); break; }
+  }
+  if(!lugar) lugar="las dependencias asignadas por el empleador";
+
+  const fila=(concepto,monto,signo="")=>`<tr><td>${concepto}</td><td style="text-align:right">${signo}${clp(Math.abs(monto))}</td></tr>`;
   const filas=[
-    fila("Feriado proporcional", calc.vacacionesProp, `${calc.diasVacProp} días`),
-    calc.avisoPrevio?fila("Indemnización sustitutiva del aviso previo", calc.avisoPrevio, "Art. 161, sin aviso de 30 días"):"",
-    calc.indemnizacion?fila("Indemnización por años de servicio", calc.indemnizacion, `${Math.floor(calc.mesesServicio/12)} año(s) × sueldo base`):"",
+    calc.vacacionesProp?fila(`Feriado proporcional (${calc.diasVacProp} días)`, calc.vacacionesProp):"",
+    calc.avisoPrevio?fila("Indemnización sustitutiva del aviso previo", calc.avisoPrevio):"",
+    calc.indemnizacion?fila(`Indemnización por años de servicio (${Math.floor(calc.mesesServicio/12)} año(s))`, calc.indemnizacion):"",
+    otrosMonto?fila(otrosConcepto, otrosMonto):"",
+    descMonto?fila(descConcepto, descMonto, "− "):"",
   ].filter(Boolean).join("");
+
   const cuerpo = `
     <h1>Finiquito de Contrato de Trabajo</h1>
-    <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut} · ${EMPRESA.domicilio}</div>
-    <p>En Arica, a ${fechaLargaCL()}, comparecen: por una parte <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada por doña <b>${EMPRESA.repNombre}</b>, cédula N° ${EMPRESA.repRut}, en adelante "el empleador"; y por la otra don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}, en adelante "el trabajador", quienes acuerdan el siguiente finiquito:</p>
+    <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
+    <p>En ${EMPRESA.ciudad}, a ${fechaLargaCL()}, entre <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, cédula de identidad N° ${EMPRESA.repRut}, ambos domiciliados en ${EMPRESA.domicilioCompleto}, en adelante "el empleador"; y por la otra parte don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}, en adelante "el trabajador", se acuerda el siguiente finiquito:</p>
 
-    <div class="clausula"><b>PRIMERO: Término de la relación laboral.</b> Las partes dejan constancia de que la relación laboral, iniciada el ${fechaLargaCL(trabajador.fecha_inicio)}, terminó con fecha <b>${fechaLargaCL(fechaSep)}</b>, por la causal: <b>${trabajador.motivo_termino||"—"}</b>. Antigüedad: ${calc.mesesServicio} meses (${calc.diasTotales} días).</div>
+    <div class="clausula"><b>PRIMERO: Término de la relación laboral.</b> El trabajador declara haber prestado servicios de <b>${trabajador.cargo||"Auxiliar de Aseo"}</b> en ${lugar}, desde el <b>${fechaLargaCL(trabajador.fecha_inicio)}</b> hasta el <b>${fechaLargaCL(fechaSep)}</b>, ambas fechas inclusive, terminando el contrato de trabajo por la causal: <b>${trabajador.motivo_termino||"—"}</b>. Antigüedad: ${calc.mesesServicio} meses (${calc.diasTotales} días).</div>
 
-    <div class="clausula"><b>SEGUNDO: Haberes adeudados (cálculo referencial).</b> El empleador pagará al trabajador los siguientes conceptos:
-      <table><thead><tr><th>Concepto</th><th style="text-align:right;width:28%">Monto</th><th style="width:30%">Detalle</th></tr></thead>
-      <tbody>${filas}<tr><td><b>TOTAL REFERENCIAL</b></td><td style="text-align:right"><b>${clp(calc.totalBruto)}</b></td><td></td></tr></tbody></table>
-      Sueldo base de referencia: ${clp(calc.sueldoBase)}.</div>
+    <div class="clausula"><b>SEGUNDO: Haberes.</b> El empleador pagará al trabajador la suma que se desglosa como sigue:
+      <table><thead><tr><th>Concepto</th><th style="text-align:right;width:30%">Monto</th></tr></thead>
+      <tbody>${filas}<tr><td><b>TOTAL</b></td><td style="text-align:right"><b>${clp(totalFinal)}</b></td></tr></tbody></table>
+      Son: <b>${numeroAPalabras(totalFinal)} pesos</b>. Sueldo base de referencia: ${clp(calc.sueldoBase)}.</div>
 
-    <div class="clausula"><b>TERCERO: Pago y reserva.</b> El trabajador declara recibir conforme las sumas indicadas y, salvo lo expresamente reservado por escrito en este acto, no tener cargo ni reclamo pendiente en contra del empleador por concepto alguno derivado de la relación laboral ni de su término.</div>
+    <div class="clausula"><b>TERCERO: Cotizaciones previsionales.</b> El trabajador deja expresa constancia de que se le ha informado del estado de pago de sus cotizaciones previsionales devengadas y que se le han entregado los comprobantes que justifican el pago de éstas, por el período trabajado.</div>
 
-    <div class="clausula"><b>CUARTO: Ratificación.</b> El presente finiquito se firmará y ratificará ante ministro de fe (notario, Inspección del Trabajo o quien la ley faculte), conforme al Art. 177 del Código del Trabajo, oportunidad en que se entregarán los comprobantes de pago de cotizaciones previsionales al día.</div>
+    <div class="clausula"><b>CUARTO: Recepción conforme y finiquito amplio.</b> El trabajador declara que durante el período en que prestó servicios al empleador recibió correcta y oportunamente el total de las remuneraciones convenidas conforme a su contrato, clase de trabajo ejecutado, reajustes legales, horas extraordinarias en su caso, feriado legal, gratificaciones y participaciones que correspondan, y que nada se le adeuda por estos conceptos ni por ningún otro, sea de origen legal o contractual derivado de la prestación de sus servicios o de su término. En consecuencia, salvo lo expresamente reservado por escrito en este acto, otorga al empleador el más amplio y total finiquito, renunciando a toda acción que pudiere corresponderle.</div>
+
+    <div class="clausula"><b>QUINTO: Ley N° 21.389 (Registro Nacional de Deudores de Pensiones de Alimentos).</b> El empleador declara que no ha retenido monto alguno del presente finiquito, por cuanto no ha sido decretada judicialmente obligación de retención de alimentos respecto del trabajador. Por su parte, el trabajador declara bajo juramento que no mantiene deudas por concepto de pensión de alimentos, por lo que el empleador no deberá realizar descuentos, asumiendo toda la responsabilidad legal sobre la veracidad de esta información, conforme a la Ley N° 21.389 y la Ley N° 14.908.</div>
+
+    <div class="clausula"><b>SEXTO: Ejemplares.</b> Para constancia firman los comparecientes el presente finiquito en tres ejemplares de idéntico tenor, fecha y valor, quedando dos en poder del empleador y uno en poder del trabajador.</div>
 
     <div class="firmas">
       <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Trabajador</b></div>
       <div class="firma">${EMPRESA.repNombre}<br/>RUT ${EMPRESA.repRut}<br/><b>p.p. ${EMPRESA.razon}</b></div>
     </div>
-    <p class="nota" style="margin-top:18px">⚠ Cálculo REFERENCIAL generado por el sistema. El finiquito definitivo debe ser revisado y ratificado con asesoría legal antes de su firma. No incluye eventuales bonos, comisiones, horas extra ni descuentos que correspondan.</p>`;
+    <div class="firmas" style="margin-top:40px">
+      <div class="firma" style="max-width:60%;margin:0 auto"><b>Ministro de fe</b><br/>Ratificación conforme al Art. 177 del Código del Trabajo</div>
+    </div>
+    <p class="nota" style="margin-top:18px">Montos calculados por el ERP. Revisar antes de firma y ratificación.</p>`;
   htmlDocImprimir(`Finiquito ${trabajador.nombre||""}`, cuerpo);
 }
 
@@ -1646,6 +1673,8 @@ function TabDocumentos({trabajador, data, insert, update}){
     fechaSep: dateOnly(trabajador.fecha_separacion)||'',
     motivoCode: motivoCodeFromLabel(trabajador.motivo_termino),
     cartaAviso: false,
+    otrosConcepto:'', otrosMonto:'',
+    descuentoConcepto:'', descuentoMonto:'',
   });
   const generarFiniquito=async(crearFila)=>{
     imprimirFiniquito(trabajador, data, finiquitoModal);
@@ -1958,12 +1987,19 @@ function TabDocumentos({trabajador, data, insert, update}){
                   {fila("Feriado proporcional",`${clp(calc.vacacionesProp)} (${calc.diasVacProp} días)`)}
                   {calc.avisoPrevio>0&&fila("Aviso previo sustitutivo",clp(calc.avisoPrevio))}
                   {calc.indemnizacion>0&&fila("Indemnización años de servicio",clp(calc.indemnizacion))}
-                  <div style={{borderTop:`1px solid ${C.border}`,marginTop:6,paddingTop:6}}>{fila("TOTAL REFERENCIAL",clp(calc.totalBruto))}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1.5fr 1fr",gap:8,marginTop:8}}>
+                    <input style={{...INP,fontSize:12}} placeholder="Otro haber (concepto)" value={finiquitoModal.otrosConcepto} onChange={e=>setFiniquitoModal({...finiquitoModal,otrosConcepto:e.target.value})}/>
+                    <input type="number" style={{...INP,fontSize:12}} placeholder="Monto +" value={finiquitoModal.otrosMonto} onChange={e=>setFiniquitoModal({...finiquitoModal,otrosMonto:e.target.value})}/>
+                    <input style={{...INP,fontSize:12}} placeholder="Descuento (concepto)" value={finiquitoModal.descuentoConcepto} onChange={e=>setFiniquitoModal({...finiquitoModal,descuentoConcepto:e.target.value})}/>
+                    <input type="number" style={{...INP,fontSize:12}} placeholder="Monto −" value={finiquitoModal.descuentoMonto} onChange={e=>setFiniquitoModal({...finiquitoModal,descuentoMonto:e.target.value})}/>
+                  </div>
+                  {(() => { const tot=calc.vacacionesProp+calc.avisoPrevio+calc.indemnizacion+Math.round(Number(finiquitoModal.otrosMonto||0))-Math.round(Number(finiquitoModal.descuentoMonto||0));
+                    return <div style={{borderTop:`1px solid ${C.border}`,marginTop:8,paddingTop:6}}>{fila("TOTAL A PAGAR",clp(tot))}</div>; })()}
                 </div>
               ):(
                 <div style={{background:C.redBg,border:`1px solid ${C.redBorder}`,borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:12,color:C.red}}>Falta la fecha de ingreso o de separación para calcular. Revisa la ficha del trabajador.</div>
               )}
-              <p style={{fontSize:11,color:C.textDim,margin:"0 0 14px"}}>⚠ Cálculo referencial. El finiquito definitivo debe revisarse y ratificarse con asesoría legal ante ministro de fe.</p>
+              <p style={{fontSize:11,color:C.textDim,margin:"0 0 14px"}}>Los montos calculados son referenciales; revísalos antes de emitir. Puedes agregar otros haberes o descuentos.</p>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 <button onClick={()=>generarFiniquito(true)} disabled={!calc} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.accent}`,background:calc?C.accent:C.border,color:"#fff",cursor:calc?"pointer":"not-allowed",textAlign:"left",fontSize:13,fontWeight:600}}>{yaHay?`🔄 Generar nueva versión (v${proximaVersion('finiquito')})`:"📑 Generar finiquito (v1)"} <span style={{display:"block",fontSize:11,fontWeight:400,opacity:.9}}>Imprime y agrega la fila a la carpeta documental.</span></button>
                 {yaHay&&<button onClick={()=>generarFiniquito(false)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:500,color:C.text}}>👁 Solo reimprimir</button>}
