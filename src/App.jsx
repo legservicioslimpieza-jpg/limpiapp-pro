@@ -1214,7 +1214,7 @@ function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onCl
    ═══════════════════════════════════════════════════════════════ */
 
 const EMPRESA = {
-  razon:"LEG Servicios de Limpieza EIRL",
+  razon:"LEG Servicios de Limpieza y Mantención Ana Guzmán E.I.R.L",
   rut:"78.086.977-1",
   giro:"Servicios de aseo y limpieza",
   domicilio:"Arica, Región de Arica y Parinacota",
