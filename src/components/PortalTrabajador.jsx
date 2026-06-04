@@ -1,5 +1,5 @@
 // src/components/PortalTrabajador.jsx
-// LimpiApp Pro — Fase 7: Portal Trabajador
+// LimpiApp Pro — Fase 7: Portal Trabajador + Fase 8E: Documentos
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -344,11 +344,179 @@ function TabHorario({ trabajadorId }) {
 }
 
 // ═══════════════════════════════════════════════
+// TAB DOCUMENTOS  (Fase 8E)
+// El trabajador CONSULTA y DESCARGA sus documentos (carpeta documental
+// unificada `documentos_trabajador`). La firma sigue siendo física y la
+// gestiona admin; aquí el trabajador solo ve estado y descarga el archivo.
+// ═══════════════════════════════════════════════
+const STORAGE_BUCKET_DOCS = 'documentos-trabajadores'
+
+const TIPO_DOC_LABEL = {
+  contrato:'Contrato de trabajo',
+  odi:'ODI — Derecho a Saber',
+  reglamento:'Acta Reglamento Interno',
+  epp:'Acta de entrega EPP',
+  anexo:'Anexo de contrato',
+  finiquito:'Finiquito',
+  certificado:'Certificado',
+  otro:'Otro documento',
+}
+const TIPO_DOC_ICON = {
+  contrato:'📄', odi:'⚠️', reglamento:'📘', epp:'🦺',
+  anexo:'📎', finiquito:'🧾', certificado:'🏅', otro:'🗂',
+}
+const ESTADO_DOC_TAG = {
+  pendiente:{ label:'Pendiente de firma', bg:'#fef9c3', color:'#a16207' },
+  firmado:  { label:'Firmado',            bg:'#dcfce7', color:'#15803d' },
+  archivado:{ label:'Archivado',          bg:'#dbeafe', color:'#1d4ed8' },
+  vencido:  { label:'Vencido',            bg:'#fee2e2', color:'#dc2626' },
+  anulado:  { label:'Anulado',            bg:'#f1f5f9', color:'#64748b' },
+}
+
+function TabDocumentos({ trabajadorId }) {
+  const [docs, setDocs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [abriendo, setAbriendo] = useState(null)   // id del doc cuya URL se está generando
+
+  useEffect(() => {
+    async function cargar() {
+      setLoading(true)
+      const { data } = await supabase
+        .from('documentos_trabajador')
+        .select('*')
+        .eq('trabajador_id', trabajadorId)
+        .neq('estado', 'anulado')
+        .order('fecha_documento', { ascending: false })
+      // Orden secundario por fecha_carga cuando fecha_documento viene null
+      const ordenados = (data ?? []).sort((a,b)=>
+        new Date(b.fecha_documento||b.fecha_carga||b.created_at||0) -
+        new Date(a.fecha_documento||a.fecha_carga||a.created_at||0)
+      )
+      setDocs(ordenados)
+      setLoading(false)
+    }
+    if (trabajadorId) cargar()
+  }, [trabajadorId])
+
+  async function abrir(doc) {
+    if (!doc.archivo_url) return
+    setAbriendo(doc.id)
+    try {
+      const { data, error } = await supabase.storage
+        .from(STORAGE_BUCKET_DOCS)
+        .createSignedUrl(doc.archivo_url, 300)   // 5 min
+      if (error || !data?.signedUrl) {
+        alert('No se pudo abrir el archivo. Inténtalo más tarde o contacta a la empresa.')
+      } else {
+        window.open(data.signedUrl, '_blank')
+      }
+    } catch (e) {
+      alert('No se pudo abrir el archivo: ' + e.message)
+    }
+    setAbriendo(null)
+  }
+
+  if (loading) return <div style={{padding:'2rem',textAlign:'center',color:'#94a3b8'}}>Cargando documentos…</div>
+
+  if (docs.length === 0) return (
+    <div style={{padding:'2rem',textAlign:'center'}}>
+      <div style={{fontSize:'2rem',marginBottom:'0.5rem'}}>🗂</div>
+      <p style={{color:'#94a3b8',fontSize:'0.85rem'}}>Aún no hay documentos en tu carpeta.</p>
+      <p style={{color:'#cbd5e1',fontSize:'0.78rem',marginTop:'0.25rem'}}>La empresa irá cargando aquí tu contrato, anexos, ODI, reglamento y EPP.</p>
+    </div>
+  )
+
+  const pendientes = docs.filter(d => d.estado === 'pendiente')
+  const firmados   = docs.filter(d => d.estado !== 'pendiente')
+
+  const renderCard = (d) => {
+    const tag = ESTADO_DOC_TAG[d.estado] ?? { label:d.estado, bg:'#f1f5f9', color:'#64748b' }
+    const tieneArchivo = !!d.archivo_url
+    return (
+      <div key={d.id} style={T.card}>
+        <div style={{...T.row, alignItems:'flex-start'}}>
+          <div style={{display:'flex',gap:'0.6rem',alignItems:'flex-start',minWidth:0}}>
+            <span style={{fontSize:'1.3rem',lineHeight:1.1}}>{TIPO_DOC_ICON[d.tipo_documento] ?? '🗂'}</span>
+            <div style={{minWidth:0}}>
+              <div style={{fontWeight:700,fontSize:'0.9rem',color:'#0f172a'}}>
+                {TIPO_DOC_LABEL[d.tipo_documento] ?? d.tipo_documento}
+                {d.version > 1 && <span style={{fontSize:'0.72rem',color:'#94a3b8',fontWeight:600}}> · v{d.version}</span>}
+              </div>
+              <div style={{fontSize:'0.74rem',color:'#94a3b8',marginTop:'0.15rem'}}>
+                {fmtFecha(d.fecha_documento || d.fecha_carga)}
+                {d.origen === 'externo' ? ' · Documento escaneado' : ''}
+              </div>
+            </div>
+          </div>
+          <span style={{...T.tag(tag.bg, tag.color), flexShrink:0, marginLeft:'0.5rem'}}>{tag.label}</span>
+        </div>
+
+        {/* Evidencia de firma cuando aplica */}
+        {d.estado === 'firmado' && d.fecha_firma && (
+          <div style={{marginTop:'0.6rem',fontSize:'0.74rem',color:'#15803d'}}>
+            ✅ Firmado el {fmtFecha(d.fecha_firma)}{d.firmado_por ? ` por ${d.firmado_por}` : ''}
+          </div>
+        )}
+
+        {/* Acción: ver / descargar */}
+        {tieneArchivo ? (
+          <button
+            onClick={() => abrir(d)}
+            disabled={abriendo === d.id}
+            style={{
+              marginTop:'0.7rem', width:'100%', padding:'0.6rem',
+              background: abriendo === d.id ? '#e2e8f0' : '#0f4c81',
+              color:'#fff', border:'none', borderRadius:'0.6rem',
+              fontWeight:700, fontSize:'0.85rem', cursor:'pointer',
+            }}>
+            {abriendo === d.id ? 'Abriendo…' : '📄 Ver / Descargar'}
+          </button>
+        ) : (
+          <div style={{marginTop:'0.7rem',fontSize:'0.74rem',color:'#94a3b8',fontStyle:'italic'}}>
+            {d.estado === 'pendiente'
+              ? 'Documento en proceso — la empresa lo entregará para firma.'
+              : 'Sin archivo disponible para descarga.'}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{padding:'1rem'}}>
+      {/* Aviso de pendientes de firma */}
+      {pendientes.length > 0 && (
+        <>
+          <div style={{
+            background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'0.75rem',
+            padding:'0.7rem 0.85rem', marginBottom:'0.75rem', fontSize:'0.8rem', color:'#92400e'
+          }}>
+            ⏳ Tienes <strong>{pendientes.length}</strong> documento{pendientes.length>1?'s':''} pendiente{pendientes.length>1?'s':''} de firma.
+            La empresa te lo{pendientes.length>1?'s':''} entregará impreso{pendientes.length>1?'s':''} para firmar.
+          </div>
+          <p style={{...T.label, marginBottom:'0.5rem'}}>Pendientes de firma</p>
+          {pendientes.map(renderCard)}
+          <div style={{height:'0.5rem'}} />
+        </>
+      )}
+
+      <p style={{...T.label, marginBottom:'0.5rem'}}>
+        {pendientes.length > 0 ? 'Otros documentos' : 'Mis documentos'}
+      </p>
+      {firmados.length === 0
+        ? <div style={{...T.card,textAlign:'center',color:'#94a3b8',fontSize:'0.82rem'}}>No hay otros documentos por ahora.</div>
+        : firmados.map(renderCard)}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════
 // PORTAL PRINCIPAL
 // ═══════════════════════════════════════════════
 const TABS = [
   {id:'inicio',        icon:'🏠', label:'Inicio'},
   {id:'liquidaciones', icon:'💰', label:'Mis Pagos'},
+  {id:'documentos',    icon:'🗂', label:'Documentos'},
   {id:'asistencia',    icon:'📅', label:'Asistencia'},
   {id:'horario',       icon:'🕐', label:'Horario'},
 ]
@@ -399,6 +567,7 @@ export default function PortalTrabajador() {
       <main>
         {tab==='inicio'        && <TabInicio trabajador={trabajador} contratos={contratos} perfil={perfil}/>}
         {tab==='liquidaciones' && <TabLiquidaciones trabajadorId={perfil.trabajador_id} nombreTrabajador={trabajador?.nombre??perfil.nombre}/>}
+        {tab==='documentos'    && <TabDocumentos trabajadorId={perfil.trabajador_id}/>}
         {tab==='asistencia'    && <TabAsistencia trabajadorId={perfil.trabajador_id}/>}
         {tab==='horario'       && <TabHorario trabajadorId={perfil.trabajador_id}/>}
       </main>
