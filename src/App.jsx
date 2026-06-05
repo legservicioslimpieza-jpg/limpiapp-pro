@@ -2256,14 +2256,21 @@ function TabExpediente({trabajador, data, update}){
           : <p style={{fontSize:13,color:C.textMuted,margin:0}}>Sin liquidaciones registradas.</p>}
       </div>
 
-      {desvin&&(
+      {desvin&&(()=>{
+        // Estado del finiquito derivado del DOCUMENTO (fuente única), no del campo deprecado finiquito_estado.
+        const fq=R.docs.filter(d=>d.tipo_documento==='finiquito'&&d.estado!=='anulado');
+        const estadoFiniquito = fq.some(d=>d.estado==='firmado'||d.estado==='archivado') ? 'Firmado'
+          : fq.some(d=>d.estado==='pendiente') ? 'Pendiente de firma'
+          : 'Sin generar';
+        return (
         <div style={{...card,marginTop:14,background:C.redBg,border:`1px solid ${C.redBorder}`}}>
           <p style={{fontWeight:600,fontSize:13,color:C.red,margin:"0 0 8px"}}>Desvinculación</p>
           {linea("Motivo",trabajador.motivo_termino||"—")}
           {linea("Fecha de separación",dateOnly(trabajador.fecha_separacion)||"—")}
-          {linea("Estado finiquito",trabajador.finiquito_estado||"pendiente")}
+          {linea("Estado finiquito",estadoFiniquito)}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
