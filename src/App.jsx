@@ -1101,7 +1101,7 @@ function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onCl
               <input type="date" style={INP} value={fechaSep} onChange={e=>setFechaSep(e.target.value)}
                 max={new Date().toISOString().slice(0,10)}/>
             </FL>
-            {(motivo==='art161'||motivo==='art159n4')&&(
+            {motivo==='art161'&&(
               <div onClick={()=>setCartaAviso(v=>!v)}
                 style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderRadius:8,border:`1px solid ${cartaAviso?C.green:C.border}`,background:cartaAviso?C.greenBg:'transparent',cursor:'pointer',marginTop:8}}>
                 <input type="checkbox" checked={cartaAviso} onChange={()=>{}} style={{accentColor:C.green,width:16,height:16}}/>
@@ -1987,10 +1987,12 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
                   </select>
                 </FL>
               </div>
+              {finiquitoModal.motivoCode==='art161'&&(
               <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.text,marginBottom:14,cursor:"pointer"}}>
                 <input type="checkbox" checked={finiquitoModal.cartaAviso} onChange={e=>setFiniquitoModal({...finiquitoModal,cartaAviso:e.target.checked})}/>
                 Se entregó carta de aviso con 30 días de anticipación (Art. 161 → no se paga mes sustitutivo)
               </label>
+              )}
               {calc?(
                 <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",marginBottom:16}}>
                   {fila("Antigüedad",`${calc.mesesServicio} meses (${calc.diasTotales} días)`)}
@@ -3627,6 +3629,20 @@ function diasActivosEnPeriodo(fechaInicio, fechaTermino, periodo, diasMes) {
   return Math.round((fin - inicio) / (1000*60*60*24)) + 1;
 }
 
+// Valida que la fila de parámetros legales tenga todos los campos requeridos.
+// Devuelve la lista de faltantes (vacía = completa). null/undefined → [] (la ausencia de fila se maneja aparte).
+function paramsFaltantes(p){
+  if(!p) return [];
+  const f=[];
+  // Indicadores que NO pueden ser 0
+  [['uf','UF'],['utm','UTM'],['imm','IMM'],['tope_imponible_uf','Tope imponible AFP/Salud'],['tope_cesantia_uf','Tope cesantía'],['salud_trabajador','Cotización salud'],['horas_mensuales','Horas mensuales']]
+    .forEach(([k,l])=>{ if(!(Number(p[k])>0)) f.push(l); });
+  // Tasas que deben estar presentes (pueden ser 0, ej: cesantía trabajador plazo fijo)
+  [['ces_trab_indefinido','Cesantía trab. indefinido'],['ces_trab_plazo_fijo','Cesantía trab. plazo fijo'],['ces_emp_indefinido','Cesantía emp. indefinido'],['ces_emp_plazo_fijo','Cesantía emp. plazo fijo'],['mutualidad','Mutualidad'],['aporte_patronal','Aporte patronal']]
+    .forEach(([k,l])=>{ if(p[k]==null) f.push(l); });
+  return f;
+}
+
 function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
   const {
     dias_trabajados=30, horas_extra=0, otros_haberes=0, otros_descuentos=0,
@@ -3735,7 +3751,14 @@ function SlipRow({ label, value, bold, color, indent, divider }) {
 
 /* ─── Panel de Parámetros Legales editables ─────────────────── */
 function ParametrosPanel({ data, update, insert }) {
-  const params = (data.parametros_legales||[])[0];
+  const { perfil } = useAuth();
+  const todos  = (data.parametros_legales||[]);
+  const periodos = [...new Set(todos.map(p=>p.periodo).filter(Boolean))].sort().reverse();
+  const hoyP = new Date();
+  const periodoActual = `${hoyP.getFullYear()}-${String(hoyP.getMonth()+1).padStart(2,'0')}`;
+  const [selPeriodo, setSelPeriodo] = useState(periodos.includes(periodoActual)?periodoActual:(periodos[0]||periodoActual));
+  const params = todos.find(p=>p.periodo===selPeriodo) || null;
+  const faltP  = paramsFaltantes(params);
   const tasas  = data.tasas_afp||[];
   const iusc   = (data.tabla_iusc||[]).sort((a,b)=>a.tramo-b.tramo);
   const [editP, setEditP] = useState(null);
@@ -3743,9 +3766,25 @@ function ParametrosPanel({ data, update, insert }) {
 
   const saveParams = async () => {
     if (!editP) return;
-    if (params) await update("parametros_legales", {...params,...editP});
-    else await insert("parametros_legales", {...editP});
+    const per = (editP.periodo||selPeriodo||'').trim();
+    if(!/^\d{4}-\d{2}$/.test(per)){ alert('Período inválido. Use formato YYYY-MM (ej: 2026-06).'); return; }
+    const rec = {...editP, periodo: per, fecha_actualizacion: new Date().toISOString().slice(0,10), actualizado_por: perfil?.nombre || 'Sistema'};
+    const existe = todos.find(p=>p.periodo===per);
+    if (existe && existe.id) await update("parametros_legales", {...existe,...rec});
+    else await insert("parametros_legales", rec);
+    setSelPeriodo(per);
     setEditP(null);
+  };
+  const nuevoPeriodo = () => {
+    const prop = window.prompt('Nuevo período (YYYY-MM):', periodoActual);
+    if(!prop) return;
+    if(!/^\d{4}-\d{2}$/.test(prop)){ alert('Formato inválido. Use YYYY-MM, ej: 2026-06'); return; }
+    if(todos.find(p=>p.periodo===prop)){ setSelPeriodo(prop); setEditP(null); alert('Ese período ya existe. Lo seleccioné para que lo edites.'); return; }
+    const base = todos.find(p=>p.periodo===selPeriodo) || todos[0] || {};
+    const clon = {...base, periodo: prop, fuente:''};
+    delete clon.id; delete clon.fecha_actualizacion; delete clon.actualizado_por;
+    setSelPeriodo(prop);
+    setEditP(clon);
   };
   const saveAfp = async () => {
     if (!editA) return;
@@ -3776,32 +3815,60 @@ function ParametrosPanel({ data, update, insert }) {
         <p style={{color:C.textMuted,fontSize:12,margin:0}}>Todos los valores se leen desde aquí al calcular — sin código. Actualiza cuando el gobierno publique nuevos valores.</p>
       </div>
 
+      {/* Selector de período + estado */}
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12,flexWrap:'wrap'}}>
+        <span style={{fontSize:12,color:C.textMuted}}>Período:</span>
+        <select style={{...INP,width:130}} value={selPeriodo} onChange={e=>{setSelPeriodo(e.target.value);setEditP(null);}}>
+          {(periodos.includes(selPeriodo)?periodos:[selPeriodo,...periodos]).map(p=><option key={p} value={p}>{p}</option>)}
+        </select>
+        <SecondaryBtn onClick={nuevoPeriodo} small>➕ Nuevo período</SecondaryBtn>
+        {params
+          ? (faltP.length
+              ? <Tag text={`⚠ Incompleto (${faltP.length})`} scheme={{bg:'#fef2f2',text:'#991b1b',border:'#fca5a5'}}/>
+              : <Tag text="✓ Completo" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>)
+          : <Tag text="✗ Sin fila para este período" scheme={{bg:'#fef2f2',text:'#991b1b',border:'#fca5a5'}}/>}
+        {params?.fecha_actualizacion && <span style={{fontSize:11,color:C.textMuted}}>🕒 Actualizado: {dateOnly(params.fecha_actualizacion)}</span>}
+        {params?.actualizado_por && <span style={{fontSize:11,color:C.textMuted}}>👤 Por: {params.actualizado_por}</span>}
+        {params?.fuente && <span style={{fontSize:11,color:C.textMuted}}>📚 Fuente: {params.fuente}</span>}
+      </div>
+
       {/* Parámetros del período */}
-      <Panel title={`Parámetros del período ${params?.periodo||'—'}`}
-        action={!editP?<PrimaryBtn onClick={()=>setEditP({...params})} small>✏️ Editar</PrimaryBtn>:
+      <Panel title={`Parámetros del período ${selPeriodo}`}
+        action={!editP?<PrimaryBtn onClick={()=>setEditP({...(params||{}),periodo:selPeriodo})} small>{params?'✏️ Editar':'➕ Cargar valores'}</PrimaryBtn>:
           <div style={{display:"flex",gap:6}}><PrimaryBtn onClick={saveParams} color={C.green} small>Guardar</PrimaryBtn><SecondaryBtn onClick={()=>setEditP(null)} small>Cancelar</SecondaryBtn></div>}>
         {editP ? (
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            {labelP.map(f=>(
-              <FL key={f.k} label={f.label}>
-                <input type="number" style={INP} step={f.mult?"0.01":"1"}
-                  value={f.mult ? ((editP[f.k]||0)*f.mult).toFixed(f.mult===100?2:3) : (editP[f.k]||0)}
-                  onChange={e=>setEditP({...editP,[f.k]:f.mult?Number(e.target.value)/f.mult:Number(e.target.value)})}/>
+          <div>
+            {paramsFaltantes(editP).length>0 && <div style={{background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:6,padding:'8px 12px',fontSize:11,color:'#92400e',marginBottom:12}}>Faltan por completar: {paramsFaltantes(editP).join(' · ')}</div>}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <FL label="Período (YYYY-MM)">
+                <input type="text" style={INP} value={editP.periodo||selPeriodo} onChange={e=>setEditP({...editP,periodo:e.target.value})}/>
               </FL>
-            ))}
+              <FL label="Fuente (SII / Previred / DT, fecha)">
+                <input type="text" style={INP} value={editP.fuente||''} onChange={e=>setEditP({...editP,fuente:e.target.value})}/>
+              </FL>
+              {labelP.map(f=>(
+                <FL key={f.k} label={f.label}>
+                  <input type="number" style={INP} step={f.mult?"0.01":"1"}
+                    value={f.mult ? ((editP[f.k]||0)*f.mult).toFixed(f.mult===100?2:3) : (editP[f.k]||0)}
+                    onChange={e=>setEditP({...editP,[f.k]:f.mult?Number(e.target.value)/f.mult:Number(e.target.value)})}/>
+                </FL>
+              ))}
+            </div>
+            <p style={{fontSize:11,color:C.textMuted,marginTop:8}}>Al guardar se registra automáticamente la fecha de actualización de hoy.</p>
           </div>
         ) : params ? (
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             {labelP.map(f=>{
               const v = params[f.k]||0;
               const disp = f.fmt==="$" ? clp(v) : f.mult ? `${(v*f.mult).toFixed(2)}%` : v;
+              const falta = params[f.k]==null;
               return <div key={f.k} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
                 <span style={{color:C.textMuted,fontSize:12}}>{f.label}</span>
-                <span style={{color:C.text,fontWeight:500,fontSize:13}}>{disp}</span>
+                <span style={{color:falta?'#991b1b':C.text,fontWeight:500,fontSize:13}}>{falta?'⚠ falta':disp}</span>
               </div>;
             })}
           </div>
-        ) : <AlertBanner type="warning" message="No hay parámetros cargados. Ejecuta el SQL remuneraciones_v2.sql en Supabase."/>}
+        ) : <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'12px',fontSize:12,color:'#991b1b'}}>No existe fila de parámetros para el período <b>{selPeriodo}</b>. Usa <b>➕ Nuevo período</b> (clona el último) o <b>➕ Cargar valores</b> para crearla. Mientras no exista, las liquidaciones de este período quedan bloqueadas.</div>}
       </Panel>
 
       {/* Tasas AFP */}
@@ -3855,8 +3922,7 @@ function ExportadorLRE({ data }) {
 
   // ── Datos del período ──────────────────────────────
   const liqPeriodo = (data.liquidaciones||[]).filter(l => l.periodo === periodo);
-  const params     = (data.parametros_legales||[]).find(p=>p.periodo===periodo)
-                  || (data.parametros_legales||[])[0] || {};
+  const params     = (data.parametros_legales||[]).find(p=>p.periodo===periodo) || null;
 
   // ── Tablas de validación DT ────────────────────────
   const AFP_COD = {
@@ -3882,6 +3948,11 @@ function ExportadorLRE({ data }) {
   const generarCSV = () => {
     setErrores([]);
     const warn = [];
+    const fp = paramsFaltantes(params);
+    if(!params || fp.length){
+      setErrores([`No se puede generar el LRE: parámetros legales incompletos para el período ${periodo}${params?` (faltan: ${fp.join(', ')})`:' — no existe fila para el período'}. Revise ⚙️ Parámetros Legales.`]);
+      return;
+    }
     const [anio, mes] = periodo.split('-');
 
     const HEADERS = [
@@ -4206,7 +4277,7 @@ function LibroRemuneraciones({ data }) {
   const libroRef = useRef();
 
   const liqPeriodo = (data.liquidaciones||[]).filter(l=>l.periodo===periodo);
-  const params = (data.parametros_legales||[])[0];
+  const params = (data.parametros_legales||[]).find(p=>p.periodo===periodo) || null;
 
   const tot = liqPeriodo.reduce((a,l)=>({
     dias:        a.dias        + (l.dias_trabajados||0),
@@ -4464,11 +4535,24 @@ function Remuneraciones({ data, saveRem, insert, update }) {
   const [saved, setSaved] = useState(false);
   const slipRef = useRef();
 
-  const params = (data.parametros_legales || [])[0];
+  const params = (data.parametros_legales || []).find(p => p.periodo === periodo) || null;
   const tasas = data.tasas_afp || [];
   const iuscTabla = data.tabla_iusc || [];
   const liqList = data.liquidaciones || [];
   const trabajador = data.trabajadores.find(t => t.id === tId);
+
+  // ── Validación de parámetros legales del período (sin fallback silencioso) ──
+  const faltantesParam = paramsFaltantes(params);
+  const afpFalta  = !!trabajador && !trabajador.pensionado && !tasas.find(a => a.nombre === trabajador.afp);
+  const iuscFalta = (iuscTabla || []).length === 0;
+  const paramsOk  = !!params && faltantesParam.length === 0 && !afpFalta && !iuscFalta;
+  const avisosParam = !params
+    ? [`No existe fila de parámetros legales para el período ${periodo}`]
+    : [
+        ...faltantesParam,
+        ...(afpFalta  ? [`Tasa de AFP "${trabajador?.afp}" no está en tasas_afp`] : []),
+        ...(iuscFalta ? ['Tabla IUSC vacía'] : []),
+      ];
 
   // Auto-cargar asignaciones cuando cambia trabajador, período o días del mes
   useEffect(() => {
@@ -4524,8 +4608,8 @@ function Remuneraciones({ data, saveRem, insert, update }) {
   }, [tId, periodo, diasMes]);
 
   const calcular = () => {
-    if (!trabajador || !params) { alert("Selecciona un trabajador y verifica parámetros."); return; }
-    setRes(calcularLiquidacion(trabajador, params, tasas, iuscTabla, {
+    if (!trabajador) { alert("Selecciona un trabajador."); return; }
+    setRes(calcularLiquidacion(trabajador, params || {}, tasas, iuscTabla, {
       sueldo_override:       montosAuto ? montosAuto.sueldo : null,
       bonos_override:        montosAuto ? {
         bono_asistencia:     montosAuto.bono_asistencia,
@@ -4549,6 +4633,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
 
   const guardar = async () => {
     if (!res) return;
+    if (!paramsOk) { alert("🔒 No se puede guardar: parámetros legales incompletos para el período. Revise ⚙️ Parámetros Legales."); return; }
     const existente = liqList.find(l => l.trabajador_id === tId && l.periodo === periodo);
     if (existente) {
       setDupAlerta({existente, res});
@@ -4768,10 +4853,16 @@ function Remuneraciones({ data, saveRem, insert, update }) {
                 </div>
               );
             })()}
-            {params && (
+            {paramsOk ? (
               <div style={{ background: C.accentBg, border: "1px solid #bfdbfe", borderRadius: 6, padding: "8px 12px", fontSize: 11 }}>
                 <p style={{ color: C.accentText }}><b>UF:</b> {clp(params.uf)} · <b>UTM:</b> {clp(params.utm)} · <b>IMM:</b> {clp(params.imm)}</p>
-                <p style={{ color: C.accentText }}><b>Tope AFP:</b> {params.tope_imponible_uf} UF · <b>Mutualidad:</b> {((params.mutualidad||0.0093)*100).toFixed(2)}% · <b>Aporte Patronal:</b> {((params.aporte_patronal||0.01)*100).toFixed(1)}%</p>
+                <p style={{ color: C.accentText }}><b>Tope AFP:</b> {params.tope_imponible_uf} UF · <b>Mutualidad:</b> {(params.mutualidad*100).toFixed(2)}% · <b>Aporte Patronal:</b> {(params.aporte_patronal*100).toFixed(1)}%</p>
+              </div>
+            ) : (
+              <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 6, padding: '10px 12px', fontSize: 11 }}>
+                <p style={{ color: '#991b1b', fontWeight: 700, margin: '0 0 4px' }}>⚠️ Parámetro legal incompleto para el período {periodo}</p>
+                <p style={{ color: '#991b1b', margin: '0 0 4px' }}>Faltan: {avisosParam.join(' · ')}.</p>
+                <p style={{ color: '#991b1b', margin: 0 }}>Puedes calcular en modo PRELIMINAR, pero no se podrá guardar ni imprimir hasta completar en ⚙️ Parámetros Legales.</p>
               </div>
             )}
             <PrimaryBtn onClick={calcular} color={C.accent} disabled={!tId}>⚡ Calcular liquidación</PrimaryBtn>
@@ -4781,13 +4872,19 @@ function Remuneraciones({ data, saveRem, insert, update }) {
         {/* ── Liquidación ── */}
         <div>
           {res ? (
-            <Panel title={`Liquidación · ${periodo} · ${trabajador?.nombre}`}
+            <Panel title={`Liquidación · ${periodo} · ${trabajador?.nombre}${paramsOk ? '' : ' · ⚠ PRELIMINAR'}`}
               action={
-                <div style={{ display: "flex", gap: 8 }}>
-                  <SecondaryBtn onClick={imprimir} small>🖨 Imprimir</SecondaryBtn>
-                  {!saved
-                    ? <PrimaryBtn onClick={guardar} disabled={saving} color={C.green} small>{saving ? "Guardando…" : "💾 Guardar"}</PrimaryBtn>
-                    : <Tag text="✓ Guardada" scheme={{ bg: C.greenBg, text: C.green, border: C.greenBorder }} />}
+                <div style={{ display: "flex", gap: 8, alignItems: 'center' }}>
+                  {paramsOk ? (
+                    <>
+                      <SecondaryBtn onClick={imprimir} small>🖨 Imprimir</SecondaryBtn>
+                      {!saved
+                        ? <PrimaryBtn onClick={guardar} disabled={saving} color={C.green} small>{saving ? "Guardando…" : "💾 Guardar"}</PrimaryBtn>
+                        : <Tag text="✓ Guardada" scheme={{ bg: C.greenBg, text: C.green, border: C.greenBorder }} />}
+                    </>
+                  ) : (
+                    <Tag text="🔒 Bloqueado — parámetros incompletos" scheme={{ bg: '#fef2f2', text: '#991b1b', border: '#fca5a5' }} />
+                  )}
                 </div>
               }
             >
