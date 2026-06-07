@@ -2296,7 +2296,13 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const isNew=form&&!data.trabajadores.find(t=>t.id===form.id);
   const asignadosIds=contratoId?(data.asignaciones||[]).filter(a=>a.contrato_id===contratoId&&a.activo).map(a=>a.trabajador_id):null;
   const trabajadoresFiltrados=asignadosIds?data.trabajadores.filter(t=>asignadosIds.includes(t.id)):data.trabajadores;
-  const openNew=()=>{setTab("datos");setAsigForm(null);setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:500000,tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:""});};
+  const openNew=()=>{
+    const hoyN=new Date();
+    const perN=`${hoyN.getFullYear()}-${String(hoyN.getMonth()+1).padStart(2,'0')}`;
+    const immN=(data.parametros_legales||[]).find(p=>p.periodo===perN)?.imm;
+    setTab("datos");setAsigForm(null);
+    setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:""});
+  };
   const save=async()=>{if(!form.nombre.trim())return;const payload={...form,fecha_actualizacion_datos:new Date().toISOString().slice(0,10)};const ok=isNew?await insert("trabajadores",payload):await update("trabajadores",payload);if(ok){setForm(null);setAsigForm(null);}};
 
   const asignacionesTrab=form?(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id):[];
@@ -4014,7 +4020,8 @@ function ExportadorLRE({ data }) {
           ? (params.ces_emp_plazo_fijo||0.03)
           : (params.ces_emp_indefinido||0.024)));
       const aporteMut = Math.round(remImp * (params.mutualidad||0.0093)); // 4152
-      const aporteSIS = t.pensionado ? 0 : Math.round(remImp * 0.0149);  // 4155 SIS ~1.49%
+      const sisRate   = (data.tasas_afp||[]).find(a=>a.nombre===t.afp)?.sis;
+      const aporteSIS = t.pensionado ? 0 : Math.round(remImp * (sisRate||0));  // 4155 SIS desde tasas_afp
       const totAportes = aporteAFC + aporteMut + aporteSIS;
 
       // Fecha inicio contrato
