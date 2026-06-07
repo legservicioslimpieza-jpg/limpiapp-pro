@@ -4995,14 +4995,16 @@ function PanelEgresos({data,insert,update}){
   const textoNotif=t=>`Estimado/a ${t.nombre}:\n\nSe informa que su finiquito de término de contrato y el pago correspondiente se encuentran a su disposición para revisión y firma/ratificación, dentro del plazo establecido en el artículo 177 del Código del Trabajo.\n\nFavor coordinar fecha y lugar para la firma/ratificación.\n\nAtentamente,\n${EMPRESA.razon}`;
 
   // Plazos legales (días hábiles = lun-sáb, excluye domingo+feriados, ya verificado)
-  const plazoFiniquito=t=>t.fecha_separacion?sumarDiasHabiles(t.fecha_separacion,10,feriadosSet):null;  // Art.177
+  const sepNoon=t=>t.fecha_separacion?new Date(t.fecha_separacion.split('T')[0]+'T12:00:00'):null; // evita corrimiento UTC de fechas date-only
+  const plazoFiniquito=t=>{const s=sepNoon(t); return s?sumarDiasHabiles(s,10,feriadosSet):null;};  // Art.177
   function plazoDT(t){
     const l=(t.motivo_termino||'').toLowerCase();
     if(l.includes('renuncia')||l.includes('mutuo')) return {aplica:false,motivo:'Renuncia / mutuo acuerdo: sin aviso a la Inspección.'};
     if(l.includes('161')) return {aplica:true,tipo:'aviso30',texto:'Aviso 30 días previo o pago del mes sustitutivo.'};
     const n6=l.includes('n°6')||l.includes('n6')||l.includes('caso fortuito')||l.includes('fuerza mayor');
     const dias=n6?6:3;
-    return {aplica:true,tipo:'dias',dias,limite:t.fecha_separacion?sumarDiasHabiles(t.fecha_separacion,dias,feriadosSet):null};
+    const s=sepNoon(t);
+    return {aplica:true,tipo:'dias',dias,limite:s?sumarDiasHabiles(s,dias,feriadosSet):null};
   }
   function plazoPrevired(t){
     if(!t.fecha_separacion) return null;
@@ -5067,7 +5069,7 @@ function PanelEgresos({data,insert,update}){
   return (
     <div>
       <div style={{background:'#eff6ff',border:`1px solid #bfdbfe`,borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:12,color:'#1e40af'}}>
-        📂 <b>Cierre Institucional de Egreso.</b> Por cada desvinculado: finiquito <b>y su pago</b> a disposición (10 días hábiles, Art. 177), pago efectuado, copia a la DT (Art. 162), planilla Previred/AFC (día 13 mes siguiente) y cotizaciones al día (Ley Bustos, causales del empleador). El ERP <b>prepara y controla</b>; el trámite se hace en cada portal y se marca aquí. EGRESO CERRADO = finiquito firmado + finiquito y pago a disposición + pago efectuado + DT informado + Previred informado + cotizaciones acreditadas (si aplica).
+        📂 <b>Cierre Institucional de Egreso.</b> Por cada desvinculado: finiquito <b>y su pago</b> a disposición (10 días hábiles, Art. 177), pago efectuado, copia a la DT (Art. 162), planilla Previred/AFC (día 13 mes siguiente) y cotizaciones acreditadas (causales del empleador). El ERP <b>prepara y controla</b>; el trámite se hace en cada portal y se marca aquí. EGRESO CERRADO = finiquito firmado + finiquito y pago a disposición + pago efectuado + DT informado + Previred informado + cotizaciones acreditadas (si aplica).
       </div>
       {desvinculados.map(t=>{
         const fqFirm=finiquitoFirmado(t.id);
@@ -5149,10 +5151,10 @@ function PanelEgresos({data,insert,update}){
               </>}
             />
 
-            {/* Tarea: Cotizaciones al día (Ley Bustos) — solo causales del empleador */}
+            {/* Tarea: Cotizaciones acreditadas — solo causales del empleador */}
             {cotApl&&<TareaRow
-              titulo="Cotizaciones al día (Ley Bustos)"
-              sub="Certificado de cotizaciones previsionales al día · respaldo para causales del Art. 162 (sube el certificado al expediente)"
+              titulo="Cotizaciones acreditadas"
+              sub="Certificado de cotizaciones previsionales al día · respaldo documental para causales del Art. 162 (sube el certificado al expediente)"
               estadoActual={cotEstado}
               completa={cotEstado==='acreditado'}
               acciones={<>
