@@ -193,7 +193,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp","documentos_trabajador"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp","documentos_trabajador","cumplimiento_egreso"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -2283,8 +2283,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const isNew=form&&!data.trabajadores.find(t=>t.id===form.id);
   const asignadosIds=contratoId?(data.asignaciones||[]).filter(a=>a.contrato_id===contratoId&&a.activo).map(a=>a.trabajador_id):null;
   const trabajadoresFiltrados=asignadosIds?data.trabajadores.filter(t=>asignadosIds.includes(t.id)):data.trabajadores;
-  const openNew=()=>{setTab("datos");setAsigForm(null);setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:500000,tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:""});};
-  const save=async()=>{if(!form.nombre.trim())return;const ok=isNew?await insert("trabajadores",form):await update("trabajadores",form);if(ok){setForm(null);setAsigForm(null);}};
+  const openNew=()=>{setTab("datos");setAsigForm(null);setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:500000,tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:""});};
+  const save=async()=>{if(!form.nombre.trim())return;const payload={...form,fecha_actualizacion_datos:new Date().toISOString().slice(0,10)};const ok=isNew?await insert("trabajadores",payload):await update("trabajadores",payload);if(ok){setForm(null);setAsigForm(null);}};
 
   const asignacionesTrab=form?(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id):[];
   const asignacionesActivas=asignacionesTrab.filter(isAsignacionVigenteHoy);
@@ -2341,6 +2341,12 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               <FL label="Tipo contrato"><select style={INP} value={form.tipo_contrato||"PLAZO FIJO"} onChange={e=>setForm({...form,tipo_contrato:e.target.value})}><option>PLAZO FIJO</option><option>INDEFINIDO</option><option>HONORARIOS</option></select></FL>
               <FL label="Teléfono"><input style={INP} value={form.telefono} onChange={e=>setForm({...form,telefono:e.target.value})} placeholder="+569XXXXXXXX"/></FL>
               <FL label="Email"><input style={INP} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="correo@empresa.cl"/></FL>
+              <FL label="Correo para notificaciones laborales"><input style={INP} value={form.correo_notificaciones||""} onChange={e=>setForm({...form,correo_notificaciones:e.target.value})} placeholder="correo donde recibe avisos laborales"/></FL>
+              <FL label="Autoriza comunicaciones electrónicas">
+                <select style={INP} value={form.autoriza_com_electronica?"si":"no"} onChange={e=>setForm({...form,autoriza_com_electronica:e.target.value==="si"})}>
+                  <option value="no">No</option><option value="si">Sí</option>
+                </select>
+              </FL>
               <FL label="Fecha ingreso a la empresa"><input type="date" style={INP} value={form.fecha_inicio||""} onChange={e=>setForm({...form,fecha_inicio:e.target.value})}/></FL>
               {/* Desvinculación — solo lectura mientras activo=true */}
               {form.fecha_separacion&&(
@@ -4955,6 +4961,244 @@ function PanelDocumentosPendientes({data, update}){
   );
 }
 
+// ── Cierre Institucional de Egreso ────────────────────────────────
+// Bandeja de Egresos: por cada DESVINCULADO rastrea 3 tareas de
+// cumplimiento (finiquito a disposicion, DT, Previred/AFC) con sus
+// plazos legales. EGRESO CERRADO se deriva, no se guarda.
+const EST_EGRESO={
+  pendiente:    {label:'Pendiente',     bg:'#fef9c3', color:'#a16207'},
+  preparado:    {label:'Preparado',     bg:'#dbeafe', color:'#1d4ed8'},
+  informado:    {label:'Informado',     bg:'#dcfce7', color:'#15803d'},
+  notificado:   {label:'Notificado',    bg:'#dbeafe', color:'#1d4ed8'},
+  a_disposicion:{label:'Finiq. + pago a disp.', bg:'#dcfce7', color:'#15803d'},
+  pagado:       {label:'Pago efectuado', bg:'#dcfce7', color:'#15803d'},
+  acreditado:   {label:'Acreditado',    bg:'#dcfce7', color:'#15803d'},
+};
+function PanelEgresos({data,insert,update}){
+  const { perfil } = useAuth();
+  const [saving,setSaving]=useState(false);
+  const [notifTgt,setNotifTgt]=useState(null); const [notifForm,setNotifForm]=useState({});
+  const [pagoTgt,setPagoTgt]=useState(null);   const [pagoForm,setPagoForm]=useState({});
+  const feriadosSet=buildFeriadosSet(data.feriados_chile||[]);
+  const card={background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:14};
+  const docs=data.documentos_trabajador||[];
+  const rows=data.cumplimiento_egreso||[];
+  const fmtD=d=>d?new Date(typeof d==='string'?d.split('T')[0]+'T12:00:00':d).toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'numeric'}):'—';
+
+  const desvinculados=(data.trabajadores||[])
+    .filter(t=>t.estado==='DESVINCULADO'||!t.activo)
+    .sort((a,b)=>String(b.fecha_separacion||'').localeCompare(String(a.fecha_separacion||'')));
+
+  const getTarea=(tid,tarea)=>rows.find(r=>r.trabajador_id===tid&&r.tarea===tarea);
+  const finiquitoFirmado=tid=>docs.filter(d=>d.trabajador_id===tid&&d.tipo_documento==='finiquito'&&d.estado!=='anulado')
+                                   .some(d=>d.estado==='firmado'||d.estado==='archivado');
+  const textoNotif=t=>`Estimado/a ${t.nombre}:\n\nSe informa que su finiquito de término de contrato y el pago correspondiente se encuentran a su disposición para revisión y firma/ratificación, dentro del plazo establecido en el artículo 177 del Código del Trabajo.\n\nFavor coordinar fecha y lugar para la firma/ratificación.\n\nAtentamente,\n${EMPRESA.razon}`;
+
+  // Plazos legales (días hábiles = lun-sáb, excluye domingo+feriados, ya verificado)
+  const plazoFiniquito=t=>t.fecha_separacion?sumarDiasHabiles(t.fecha_separacion,10,feriadosSet):null;  // Art.177
+  function plazoDT(t){
+    const l=(t.motivo_termino||'').toLowerCase();
+    if(l.includes('renuncia')||l.includes('mutuo')) return {aplica:false,motivo:'Renuncia / mutuo acuerdo: sin aviso a la Inspección.'};
+    if(l.includes('161')) return {aplica:true,tipo:'aviso30',texto:'Aviso 30 días previo o pago del mes sustitutivo.'};
+    const n6=l.includes('n°6')||l.includes('n6')||l.includes('caso fortuito')||l.includes('fuerza mayor');
+    const dias=n6?6:3;
+    return {aplica:true,tipo:'dias',dias,limite:t.fecha_separacion?sumarDiasHabiles(t.fecha_separacion,dias,feriadosSet):null};
+  }
+  function plazoPrevired(t){
+    if(!t.fecha_separacion) return null;
+    const d=new Date(t.fecha_separacion.split('T')[0]+'T12:00:00');
+    const nm=d.getMonth()===11?0:d.getMonth()+1, ny=d.getMonth()===11?d.getFullYear()+1:d.getFullYear();
+    return new Date(ny,nm,13,12,0,0);
+  }
+  function alerta(limite,completa){
+    if(completa) return {txt:'✓ Cumplido',color:'#15803d'};
+    if(!limite) return {txt:'sin fecha',color:C.textMuted};
+    const hoy=new Date(); hoy.setHours(12,0,0,0);
+    const dl=new Date(limite); dl.setHours(12,0,0,0);
+    const diff=Math.round((dl-hoy)/86400000);
+    if(diff<0)  return {txt:`Vencido hace ${-diff} día(s)`,color:'#dc2626'};
+    if(diff===0)return {txt:'Vence hoy',color:'#dc2626'};
+    if(diff<=2) return {txt:`Vence en ${diff} día(s)`,color:'#a16207'};
+    return {txt:`Vence en ${diff} día(s)`,color:C.textMuted};
+  }
+
+  async function setEstado(t,tarea,estado,extra={}){
+    setSaving(true);
+    const ex=getTarea(t.id,tarea);
+    const rec={trabajador_id:t.id,tarea,estado,...extra,updated_at:new Date().toISOString()};
+    if(estado==='informado'||estado==='a_disposicion') rec.fecha_informado=new Date().toISOString();
+    if(ex) await update('cumplimiento_egreso',{...ex,...rec});
+    else   await insert('cumplimiento_egreso',rec);
+    setSaving(false);
+  }
+  const cotizAplica=t=>{const l=(t.motivo_termino||'').toLowerCase(); return !(l.includes('renuncia')||l.includes('mutuo'));};
+  const abrirNotif=t=>{setNotifForm({medio:'correo',correo:t.correo_notificaciones||t.email||'',asunto:'Finiquito y pago a su disposición',texto:textoNotif(t)});setNotifTgt(t);};
+  const guardarNotif=async()=>{const t=notifTgt;setNotifTgt(null);await setEstado(t,'finiquito','notificado',{medio:notifForm.medio,notif_fecha:new Date().toISOString(),notif_correo:notifForm.correo,notif_asunto:notifForm.asunto,notif_texto:notifForm.texto});};
+  const abrirPago=t=>{setPagoForm({fecha:new Date().toISOString().slice(0,10),medio:'transferencia',monto:''});setPagoTgt(t);};
+  const guardarPago=async()=>{const t=pagoTgt;setPagoTgt(null);await setEstado(t,'pago','pagado',{pago_fecha:pagoForm.fecha,pago_medio:pagoForm.medio,pago_monto:Number(pagoForm.monto)||null});};
+
+  const btn=(label,onClick,scheme='accent')=>(
+    <button disabled={saving} onClick={onClick} style={{
+      background:scheme==='accent'?C.accent:scheme==='green'?'#15803d':C.surface,
+      color:scheme==='ghost'?C.textMuted:'#fff',border:scheme==='ghost'?`1px solid ${C.border}`:'none',
+      borderRadius:6,padding:'5px 11px',fontSize:11.5,fontWeight:600,cursor:saving?'default':'pointer',opacity:saving?0.6:1}}>{label}</button>
+  );
+  const estTag=e=>{const s=EST_EGRESO[e]||{label:e,bg:'#f1f5f9',color:'#64748b'};return <span style={{fontSize:11,padding:'2px 9px',background:s.bg,color:s.color,borderRadius:12,fontWeight:700}}>{s.label}</span>;};
+
+  // fila de tarea genérica
+  const TareaRow=({titulo,sub,limite,estadoActual,completa,acciones})=>{
+    const a=alerta(limite,completa);
+    return (
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,padding:'9px 0',borderTop:`1px solid ${C.border}`,flexWrap:'wrap'}}>
+        <div style={{minWidth:200,flex:1}}>
+          <div style={{fontSize:12.5,fontWeight:600,color:C.text}}>{titulo} &nbsp;{estTag(estadoActual)}</div>
+          <div style={{fontSize:11,color:C.textMuted,marginTop:2}}>{sub}</div>
+          {limite!==undefined&&<div style={{fontSize:11,fontWeight:600,color:a.color,marginTop:2}}>{limite?`Plazo: ${fmtD(limite)} · ${a.txt}`:a.txt}</div>}
+        </div>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>{acciones}</div>
+      </div>
+    );
+  };
+
+  if(desvinculados.length===0) return (
+    <div style={{...card,textAlign:'center',color:C.textMuted,fontSize:13}}>No hay trabajadores desvinculados con egreso por gestionar.</div>
+  );
+
+  return (
+    <div>
+      <div style={{background:'#eff6ff',border:`1px solid #bfdbfe`,borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:12,color:'#1e40af'}}>
+        📂 <b>Cierre Institucional de Egreso.</b> Por cada desvinculado: finiquito <b>y su pago</b> a disposición (10 días hábiles, Art. 177), pago efectuado, copia a la DT (Art. 162), planilla Previred/AFC (día 13 mes siguiente) y cotizaciones al día (Ley Bustos, causales del empleador). El ERP <b>prepara y controla</b>; el trámite se hace en cada portal y se marca aquí. EGRESO CERRADO = finiquito firmado + finiquito y pago a disposición + pago efectuado + DT informado + Previred informado + cotizaciones acreditadas (si aplica).
+      </div>
+      {desvinculados.map(t=>{
+        const fqFirm=finiquitoFirmado(t.id);
+        const fq=getTarea(t.id,'finiquito'), pago=getTarea(t.id,'pago'), dt=getTarea(t.id,'dt'), pv=getTarea(t.id,'previred'), cot=getTarea(t.id,'cotizaciones');
+        const fqEstado=fq?.estado||'pendiente', pagoEstado=pago?.estado||'pendiente', dtEstado=dt?.estado||'pendiente', pvEstado=pv?.estado||'pendiente', cotEstado=cot?.estado||'pendiente';
+        const dtInfo=plazoDT(t);
+        const dtListo=!dtInfo.aplica||dtEstado==='informado';
+        const cotApl=cotizAplica(t), cotListo=!cotApl||cotEstado==='acreditado';
+        const cerrado = fqFirm && fqEstado==='a_disposicion' && pagoEstado==='pagado' && dtListo && pvEstado==='informado' && cotListo;
+        return (
+          <div key={t.id} style={{...card,marginBottom:12,borderLeft:`4px solid ${cerrado?'#15803d':C.accent}`}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:8}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:C.text}}>{t.nombre} <span style={{fontSize:12,color:C.textMuted,fontWeight:400}}>· {t.rut||'—'}</span></div>
+                <div style={{fontSize:11.5,color:C.textMuted,marginTop:2}}>Separación: <b>{fmtD(t.fecha_separacion)}</b> · {t.motivo_termino||'—'}</div>
+              </div>
+              {cerrado
+                ? <span style={{fontSize:12,fontWeight:700,padding:'4px 12px',background:'#dcfce7',color:'#15803d',borderRadius:14}}>✅ EGRESO CERRADO</span>
+                : <span style={{fontSize:11.5,fontWeight:600,padding:'4px 12px',background:'#fef9c3',color:'#a16207',borderRadius:14}}>En proceso</span>}
+            </div>
+
+            {/* Capa 1: finiquito firmado (documento) */}
+            <div style={{fontSize:11.5,marginTop:10,color:fqFirm?'#15803d':'#a16207'}}>
+              {fqFirm?'✓ Finiquito firmado (documento en expediente)':'⏳ Finiquito aún no firmado en el expediente'}
+            </div>
+
+            {/* Tarea: Finiquito y pago a disposición (Art. 177) */}
+            <TareaRow
+              titulo="Finiquito y pago a disposición"
+              sub={`Art. 177 · finiquito + su pago a disposición · 10 días hábiles${fq?.medio?` · notificado por ${fq.medio}${fq.notif_fecha?` el ${fmtD(fq.notif_fecha)}`:''}${fq.notif_correo?` (${fq.notif_correo})`:''}`:''}${fq?.responsable&&fqEstado==='a_disposicion'?` · responsable: ${fq.responsable}`:''}`}
+              limite={plazoFiniquito(t)}
+              estadoActual={fqEstado}
+              completa={fqEstado==='a_disposicion'}
+              acciones={<>
+                {fqEstado!=='a_disposicion'&&btn('📋 Texto correo',()=>{const txt=textoNotif(t); if(navigator.clipboard?.writeText){navigator.clipboard.writeText(txt).then(()=>alert('Texto copiado. Pégalo en tu correo al trabajador.'),()=>window.prompt('Copia este texto para el correo:',txt));}else window.prompt('Copia este texto para el correo:',txt);},'ghost')}
+                {fqEstado==='pendiente'&&btn('Registrar notificación',()=>abrirNotif(t))}
+                {fqEstado==='notificado'&&btn('Marcar finiquito + pago a disposición',()=>setEstado(t,'finiquito','a_disposicion',{responsable:perfil?.nombre||'—'}),'green')}
+                {fqEstado==='a_disposicion'&&btn('Reabrir',()=>setEstado(t,'finiquito','pendiente',{fecha_informado:null,responsable:null}),'ghost')}
+              </>}
+            />
+
+            {/* Tarea: Pago efectuado (cierre administrativo) */}
+            <TareaRow
+              titulo="Pago efectuado"
+              sub={pago?.pago_fecha?`Pagado el ${fmtD(pago.pago_fecha)}${pago.pago_medio?` · ${pago.pago_medio}`:''}${pago.pago_monto?` · ${clp(pago.pago_monto)}`:''}`:'Cierre administrativo (no exigido por Art. 177, pero recomendado)'}
+              estadoActual={pagoEstado==='pagado'?'pagado':'pendiente'}
+              completa={pagoEstado==='pagado'}
+              acciones={<>
+                {pagoEstado!=='pagado'&&btn('Registrar pago',()=>abrirPago(t),'green')}
+                {pagoEstado==='pagado'&&btn('Reabrir',()=>setEstado(t,'pago','pendiente',{pago_fecha:null,pago_medio:null,pago_monto:null}),'ghost')}
+              </>}
+            />
+
+            {/* Tarea 2: DT */}
+            <TareaRow
+              titulo="Dirección del Trabajo"
+              sub={dtInfo.aplica?(dtInfo.tipo==='aviso30'?dtInfo.texto:`Copia carta de aviso · ${dtInfo.dias} días hábiles (Art. 162)`):dtInfo.motivo}
+              limite={dtInfo.aplica&&dtInfo.tipo==='dias'?dtInfo.limite:undefined}
+              estadoActual={dtInfo.aplica?dtEstado:'informado'}
+              completa={dtListo}
+              acciones={dtInfo.aplica?<>
+                {dtEstado==='pendiente'&&btn('Marcar preparado',()=>setEstado(t,'dt','preparado'))}
+                {dtEstado==='preparado'&&btn('Marcar informado',()=>setEstado(t,'dt','informado'),'green')}
+                {dtEstado==='informado'&&btn('Reabrir',()=>setEstado(t,'dt','pendiente',{fecha_informado:null}),'ghost')}
+              </>:<span style={{fontSize:11,color:C.textMuted}}>No aplica</span>}
+            />
+
+            {/* Tarea 3: Previred/AFC */}
+            <TareaRow
+              titulo="Previred / AFC"
+              sub="Planilla mensual con movimiento de término (incluye cesantía) · día 13 mes siguiente"
+              limite={plazoPrevired(t)}
+              estadoActual={pvEstado}
+              completa={pvEstado==='informado'}
+              acciones={<>
+                {pvEstado==='pendiente'&&btn('Marcar preparado',()=>setEstado(t,'previred','preparado'))}
+                {pvEstado==='preparado'&&btn('Marcar informado',()=>setEstado(t,'previred','informado'),'green')}
+                {pvEstado==='informado'&&btn('Reabrir',()=>setEstado(t,'previred','pendiente',{fecha_informado:null}),'ghost')}
+              </>}
+            />
+
+            {/* Tarea: Cotizaciones al día (Ley Bustos) — solo causales del empleador */}
+            {cotApl&&<TareaRow
+              titulo="Cotizaciones al día (Ley Bustos)"
+              sub="Certificado de cotizaciones previsionales al día · respaldo para causales del Art. 162 (sube el certificado al expediente)"
+              estadoActual={cotEstado}
+              completa={cotEstado==='acreditado'}
+              acciones={<>
+                {cotEstado!=='acreditado'&&btn('Marcar acreditado',()=>setEstado(t,'cotizaciones','acreditado'),'green')}
+                {cotEstado==='acreditado'&&btn('Reabrir',()=>setEstado(t,'cotizaciones','pendiente'),'ghost')}
+              </>}
+            />}
+          </div>
+        );
+      })}
+
+      {notifTgt&&(
+        <div onClick={()=>setNotifTgt(null)} style={{position:'fixed',inset:0,background:'rgba(15,23,42,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{...card,maxWidth:520,width:'100%',maxHeight:'90vh',overflow:'auto'}}>
+            <p style={{fontWeight:700,fontSize:14,margin:'0 0 4px'}}>Registrar notificación · {notifTgt.nombre}</p>
+            <p style={{fontSize:11,color:C.textMuted,margin:'0 0 12px'}}>Acta de lo comunicado. Envía el correo desde tu cuenta y sube el comprobante al expediente del trabajador.</p>
+            <FL label="Medio"><select style={INP} value={notifForm.medio} onChange={e=>setNotifForm({...notifForm,medio:e.target.value})}><option value="correo">Correo</option><option value="whatsapp">WhatsApp</option><option value="carta">Carta certificada</option><option value="notaria">Citación notaría</option><option value="midt">Mi DT</option></select></FL>
+            <FL label="Correo / destinatario"><input style={INP} value={notifForm.correo} onChange={e=>setNotifForm({...notifForm,correo:e.target.value})}/></FL>
+            <FL label="Asunto"><input style={INP} value={notifForm.asunto} onChange={e=>setNotifForm({...notifForm,asunto:e.target.value})}/></FL>
+            <FL label="Texto comunicado"><textarea style={{...INP,minHeight:120,fontFamily:'inherit'}} value={notifForm.texto} onChange={e=>setNotifForm({...notifForm,texto:e.target.value})}/></FL>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
+              {btn('Cancelar',()=>setNotifTgt(null),'ghost')}
+              {btn('Guardar notificación',guardarNotif,'green')}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pagoTgt&&(
+        <div onClick={()=>setPagoTgt(null)} style={{position:'fixed',inset:0,background:'rgba(15,23,42,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{...card,maxWidth:420,width:'100%'}}>
+            <p style={{fontWeight:700,fontSize:14,margin:'0 0 12px'}}>Registrar pago efectuado · {pagoTgt.nombre}</p>
+            <FL label="Fecha de pago"><input type="date" style={INP} value={pagoForm.fecha} onChange={e=>setPagoForm({...pagoForm,fecha:e.target.value})}/></FL>
+            <FL label="Medio de pago"><select style={INP} value={pagoForm.medio} onChange={e=>setPagoForm({...pagoForm,medio:e.target.value})}><option value="transferencia">Transferencia</option><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="vale_vista">Vale vista</option></select></FL>
+            <FL label="Monto ($)"><input type="number" style={INP} value={pagoForm.monto} onChange={e=>setPagoForm({...pagoForm,monto:e.target.value})}/></FL>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
+              {btn('Cancelar',()=>setPagoTgt(null),'ghost')}
+              {btn('Guardar pago',guardarPago,'green')}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Cumplimiento({data,insert,update}){
   const hoy=new Date();
   const todayStr=hoy.toISOString().slice(0,10);
@@ -5014,11 +5258,12 @@ function Cumplimiento({data,insert,update}){
     <div>
       <PageHeader title="Cumplimiento" subtitle="Obligaciones mensuales y documentación del personal"/>
       <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
-        {[['obligaciones','Obligaciones mensuales'],['documentos','Documentos del personal']].map(([k,l])=>(
+        {[['obligaciones','Obligaciones mensuales'],['documentos','Documentos del personal'],['egresos','Egresos']].map(([k,l])=>(
           <button key={k} onClick={()=>setVista(k)} style={{background:vista===k?C.accent:'transparent',color:vista===k?'#fff':C.textMuted,border:`1px solid ${vista===k?C.accent:C.border}`,borderRadius:6,padding:'5px 14px',fontSize:12,cursor:'pointer',fontWeight:vista===k?600:400}}>{l}</button>
         ))}
       </div>
       {vista==='documentos'&&<PanelDocumentosPendientes data={data} update={update}/>}
+      {vista==='egresos'&&<PanelEgresos data={data} insert={insert} update={update}/>}
       {vista==='obligaciones'&&(<>
       <div style={{display:'flex',gap:12,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
         <FL label="Período"><input type="month" style={{...INP,width:160}} value={periodoVer} onChange={e=>setPeriodoVer(e.target.value)}/></FL>
