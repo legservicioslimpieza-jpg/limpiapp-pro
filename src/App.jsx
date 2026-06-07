@@ -1041,7 +1041,7 @@ function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onCl
       await terminarAsignacion(a, fechaSep);
     }
     setSaving(false);
-    onClose(true); // true = refresh needed
+    onClose(true, { activo:false, estado:'DESVINCULADO', fecha_separacion: dateNoon(fechaSep), motivo_termino: motivoLabel }); // true = refresh; payload para abrir finiquito
   };
 
   const OVL = {position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16};
@@ -1606,7 +1606,7 @@ function pickAndUploadFirmado(doc, trabajador, update, quien){
   inp.click();
 }
 
-function TabDocumentos({trabajador, data, insert, update}){
+function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
   const [eppForm,setEppForm]=useState(null);
   const [subForm,setSubForm]=useState(null);      // formulario subir documento externo
   const [subiendo,setSubiendo]=useState(false);
@@ -1676,9 +1676,16 @@ function TabDocumentos({trabajador, data, insert, update}){
     otrosConcepto:'', otrosMonto:'',
     descuentoConcepto:'', descuentoMonto:'',
   });
+  // Tras la desvinculación guiada, abre automáticamente el generador de finiquito (con revisión, no emite solo)
+  useEffect(()=>{ if(autoFiniquito) openFiniquito(); },[autoFiniquito]);  // eslint-disable-line react-hooks/exhaustive-deps
   const generarFiniquito=async(crearFila)=>{
     imprimirFiniquito(trabajador, data, finiquitoModal);
-    if(crearFila) await insertarGenerado('finiquito', proximaVersion('finiquito'));
+    if(crearFila){
+      // Regla de version unica: anular los finiquitos previos PENDIENTES (los firmados se conservan como historial).
+      const pendientesPrevios=docs.filter(d=>d.tipo_documento==='finiquito'&&d.estado==='pendiente');
+      for(const p of pendientesPrevios){ await update('documentos_trabajador',{...p,estado:'anulado',observaciones:`${p.observaciones||''} · anulado al generar nueva version`.trim()}); }
+      await insertarGenerado('finiquito', proximaVersion('finiquito'));
+    }
     setFiniquitoModal(null);
   };
 
@@ -1953,6 +1960,7 @@ function TabDocumentos({trabajador, data, insert, update}){
         const calc=calcularFiniquitoPreview(trabajador, data.asignaciones||[], finiquitoModal.fechaSep, finiquitoModal.motivoCode, finiquitoModal.cartaAviso, data.feriados_chile||[]);
         const existentes=docs.filter(d=>d.tipo_documento==='finiquito'&&d.origen==='generado_erp'&&d.estado!=='anulado');
         const yaHay=existentes.length>0;
+        const hayFirmado=existentes.some(d=>d.estado==='firmado'||d.estado==='archivado');
         const fila=(k,v)=>(<div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:C.textMuted}}>{k}</span><span style={{fontWeight:600,color:C.text}}>{v}</span></div>);
         return (
           <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>e.target===e.currentTarget&&setFiniquitoModal(null)}>
@@ -1961,7 +1969,9 @@ function TabDocumentos({trabajador, data, insert, update}){
               <p style={{fontSize:12,color:C.textMuted,margin:"0 0 14px"}}>{trabajador.nombre} · {trabajador.motivo_termino||"—"}. Verifica los datos; el cálculo es referencial.</p>
               {yaHay&&(
                 <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:C.yellow}}>
-                  Ya existe un finiquito (v{Math.max(...existentes.map(d=>Number(d.version||1)))}). Al generar se creará la <b>v{proximaVersion('finiquito')}</b>, conservando el anterior.
+                  {hayFirmado
+                    ? <>⚠️ Ya existe un finiquito <b>FIRMADO</b> (v{Math.max(...existentes.map(d=>Number(d.version||1)))}). Al generar la <b>v{proximaVersion('finiquito')}</b>, el firmado se <b>conserva como historial</b> — verifica que realmente corresponda emitir uno nuevo.</>
+                    : <>Ya existe un finiquito pendiente (v{Math.max(...existentes.map(d=>Number(d.version||1)))}). Al generar la <b>v{proximaVersion('finiquito')}</b>, la versión pendiente anterior se <b>anulará automáticamente</b> (queda una sola activa).</>}
                 </div>
               )}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
@@ -2280,6 +2290,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const [tab,setTab]=useState("datos");
   const [asigForm,setAsigForm]=useState(null);
   const [showDesvincular,setShowDesvincular]=useState(false);
+  const [autoFiniquito,setAutoFiniquito]=useState(0);   // señal para abrir el generador de finiquito tras desvincular
   const isNew=form&&!data.trabajadores.find(t=>t.id===form.id);
   const asignadosIds=contratoId?(data.asignaciones||[]).filter(a=>a.contrato_id===contratoId&&a.activo).map(a=>a.trabajador_id):null;
   const trabajadoresFiltrados=asignadosIds?data.trabajadores.filter(t=>asignadosIds.includes(t.id)):data.trabajadores;
@@ -2321,9 +2332,13 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           data={data}
           update={update}
           terminarAsignacion={terminarAsignacion}
-          onClose={(refresh)=>{
+          onClose={(refresh, desv)=>{
             setShowDesvincular(false);
-            if(refresh) setForm(null);
+            if(refresh){
+              if(desv) setForm(f=>f?{...f,...desv}:f);   // refleja la desvinculación en la ficha sin cerrarla
+              setTab("documentos");                       // lleva al generador de finiquito
+              setAutoFiniquito(Date.now());               // señal para abrir el modal de finiquito
+            }
           }}
         />
       )}
@@ -2370,14 +2385,28 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     <option value="Art. 160 Falta grave">Art. 160 Falta grave</option>
                   </select>
                 </FL>
-                <FL label="Estado finiquito">
-                  <select style={INP} value={form.finiquito_estado||"pendiente"} onChange={e=>setForm({...form,finiquito_estado:e.target.value})}>
-                    <option value="pendiente">⏳ Pendiente</option>
-                    <option value="preparado">📄 Preparado</option>
-                    <option value="disponible">✅ Disponible trabajador</option>
-                    <option value="firmado">✍️ Firmado</option>
-                    <option value="pagado">💰 Pagado</option>
-                  </select>
+                <FL label="Estado del proceso de finiquito">
+                  {(()=>{
+                    const fqs=(data.documentos_trabajador||[]).filter(d=>d.trabajador_id===form.id&&d.tipo_documento==='finiquito'&&d.estado!=='anulado');
+                    const act=fqs.length?[...fqs].sort((a,b)=>Number(b.version||1)-Number(a.version||1))[0]:null;
+                    const eg=(data.cumplimiento_egreso||[]).filter(r=>r.trabajador_id===form.id);
+                    const docFirmado=act&&(act.estado==='firmado'||act.estado==='archivado');
+                    const aDispo=eg.find(r=>r.tarea==='finiquito')?.estado==='a_disposicion';
+                    const pagado=eg.find(r=>r.tarea==='pago')?.estado==='pagado';
+                    let etapa,color;
+                    if(pagado){etapa='💰 Pagado';color='#15803d';}
+                    else if(docFirmado){etapa='✍️ Firmado';color='#15803d';}
+                    else if(aDispo){etapa='✅ Disponible al trabajador';color='#1d4ed8';}
+                    else if(act){etapa='📄 Preparado';color='#a16207';}
+                    else {etapa='⏳ Pendiente';color='#a16207';}
+                    return (
+                      <div style={{...INP,background:'#f8fafc',cursor:'default',height:'auto',lineHeight:1.45}}>
+                        <div style={{fontWeight:600,color}}>{etapa}</div>
+                        <div style={{fontSize:11,color:C.textMuted}}>{act?`Finiquito v${act.version||1}`:'Sin finiquito generado'}{docFirmado&&act.fecha_firma?` · firma ${dateOnly(act.fecha_firma)}`:''}</div>
+                        <div style={{fontSize:10,color:C.textMuted}}>🔒 Derivado del expediente y de Egresos</div>
+                      </div>
+                    );
+                  })()}
                 </FL>
               </>}
               {/* Botón Desvincular — solo para trabajadores activos */}
@@ -2534,6 +2563,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               data={data}
               insert={insert}
               update={update}
+              autoFiniquito={autoFiniquito}
             />
           )}
           {tab==="documentos"&&isNew&&(
