@@ -4719,7 +4719,17 @@ function Remuneraciones({ data, saveRem, insert, update }) {
       {vistaRem==="parametros" && <ParametrosPanel data={data} update={update} insert={insert}/>}
       {vistaRem==="calculadora" && <>
 
-      {!params && <AlertBanner type="warning" message="No se encontraron parámetros legales (UF, UTM, IMM). Ejecuta el SQL de remuneraciones en Supabase." />}
+      {!params && (()=>{
+        const ult=(data.parametros_legales||[]).filter(p=>p.periodo).sort((a,b)=>String(b.periodo).localeCompare(String(a.periodo)))[0];
+        const ufF=u=>`$${Number(u||0).toLocaleString("es-CL",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+        return (
+          <div style={{background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:8,padding:'12px 14px',marginBottom:12,fontSize:12}}>
+            <p style={{color:'#92400e',fontWeight:700,margin:'0 0 4px'}}>⚠ No existe una fila de parámetros legales para el período {periodo}.</p>
+            <p style={{color:'#92400e',margin:'0 0 6px'}}>Créalo en ⚙️ Parámetros antes de generar liquidaciones definitivas.</p>
+            {ult && <p style={{color:'#92400e',margin:0,fontSize:11}}>Referencia — último período disponible {ult.periodo}: IMM {clp(ult.imm)} · UF {ufF(ult.uf)} · UTM {clp(ult.utm)} <span style={{opacity:0.75}}>(solo visual, no se usa para calcular)</span></p>}
+          </div>
+        );
+      })()}
 
       <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 16, alignItems: "start" }}>
 
