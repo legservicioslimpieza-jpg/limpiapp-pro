@@ -2297,9 +2297,11 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const asignadosIds=contratoId?(data.asignaciones||[]).filter(a=>a.contrato_id===contratoId&&a.activo).map(a=>a.trabajador_id):null;
   const trabajadoresFiltrados=asignadosIds?data.trabajadores.filter(t=>asignadosIds.includes(t.id)):data.trabajadores;
   const openNew=()=>{
-    const hoyN=new Date();
-    const perN=`${hoyN.getFullYear()}-${String(hoyN.getMonth()+1).padStart(2,'0')}`;
-    const immN=(data.parametros_legales||[]).find(p=>p.periodo===perN)?.imm;
+    // IMM del período más reciente disponible — SOLO para el sueldo por defecto al crear trabajador.
+    // Los cálculos (liquidación, finiquito, LRE, impuestos) siguen exigiendo período EXACTO, sin fallback.
+    const immN=(data.parametros_legales||[])
+      .filter(p=>p.periodo)
+      .sort((a,b)=>String(b.periodo).localeCompare(String(a.periodo)))[0]?.imm;
     setTab("datos");setAsigForm(null);
     setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:""});
   };
