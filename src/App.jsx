@@ -2438,7 +2438,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               <FL label="Sueldo base ($)"><input type="number" style={INP} value={form.sueldo_base||0} onChange={e=>setForm({...form,sueldo_base:Number(e.target.value)})}/></FL>
               <FL label="Método gratificación">
                 <select style={INP} value={form.metodo_gratificacion||"25% MENSUAL"} onChange={e=>setForm({...form,metodo_gratificacion:e.target.value})}>
-                  <option value="25% MENSUAL">25% mensual (tope legal UTM)</option>
+                  <option value="25% MENSUAL">25% mensual (tope legal IMM)</option>
                   <option value="ANTICIPO PORCENTAJE">Anticipo porcentaje (%)</option>
                   <option value="ANTICIPO MONTO FIJO">Anticipo monto fijo ($)</option>
                   <option value="SIN GRATIFICACIÓN">Sin gratificación (pago anual)</option>
@@ -3679,7 +3679,7 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
 
   // ── Haberes ────────────────────────────────────────────────
   const sueldo_prop   = Math.round(sueldoBase * diasPagados / 30);
-  const tope_grat     = Math.round(4.75 * utm / 12);
+  const tope_grat     = Math.round(4.75 * (params.imm || 0) / 12);  // Art. 50: tope = 4,75 IMM anual / 12
   let gratificacion   = 0;
   if (gratificacion_override !== null && gratificacion_override !== undefined) {
     gratificacion = Math.round(gratificacion_override * diasPagados / 30);
