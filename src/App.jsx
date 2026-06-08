@@ -1508,6 +1508,63 @@ function imprimirFiniquito(trabajador, data, opts={}){
   htmlDocImprimir(`Finiquito ${trabajador.nombre||""}`, cuerpo);
 }
 
+// Clasifica la causal para la Carta de Aviso (Art. 162): nombre legal, plazo, si requiere estado de cotizaciones y si aplica carta de despido.
+function causalCarta(label){
+  const l=(label||'').toLowerCase();
+  if(l.includes('163 bis')) return {nombre:'artículo 163 bis del Código del Trabajo (liquidación o reorganización judicial del empleador)', plazoTxt:'dentro de los 6 días hábiles siguientes a la fecha de separación', requiereCotiz:false, aplica:true, art161:false};
+  if(l.includes('161')||l.includes('desahucio')||l.includes('necesidades')) return {nombre:'artículo 161 del Código del Trabajo (necesidades de la empresa)', plazoTxt:'con a lo menos 30 días de anticipación, salvo que se pague la indemnización sustitutiva del aviso previo', requiereCotiz:true, aplica:true, art161:true};
+  if(l.includes('160')) return {nombre:'artículo 160 del Código del Trabajo', plazoTxt:'dentro de los 3 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false};
+  if(l.includes('159')&&(l.includes('n°6')||l.includes('n6')||l.includes('caso fortuito')||l.includes('fuerza mayor'))) return {nombre:'artículo 159 N°6 del Código del Trabajo (caso fortuito o fuerza mayor)', plazoTxt:'dentro de los 6 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false};
+  if(l.includes('159')&&(l.includes('n°5')||l.includes('n5')||l.includes('conclusión')||l.includes('conclusion'))) return {nombre:'artículo 159 N°5 del Código del Trabajo (conclusión del trabajo o servicio que dio origen al contrato)', plazoTxt:'dentro de los 3 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false};
+  if(l.includes('159')&&(l.includes('n°4')||l.includes('n4')||l.includes('vencimiento'))) return {nombre:'artículo 159 N°4 del Código del Trabajo (vencimiento del plazo convenido)', plazoTxt:'dentro de los 3 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false};
+  if(l.includes('mutuo')||(l.includes('159')&&l.includes('n°1'))) return {nombre:'artículo 159 N°1 del Código del Trabajo (mutuo acuerdo de las partes)', plazoTxt:'', requiereCotiz:false, aplica:false, art161:false};
+  if(l.includes('renuncia')||(l.includes('159')&&l.includes('n°2'))) return {nombre:'artículo 159 N°2 del Código del Trabajo (renuncia del trabajador)', plazoTxt:'', requiereCotiz:false, aplica:false, art161:false};
+  return {nombre: label||'(causal no especificada)', plazoTxt:'dentro de los plazos legales que correspondan', requiereCotiz:true, aplica:true, art161:false};
+}
+
+// Carta de Aviso de Término de Contrato (Art. 162). Causal-aware. opts: {fechaSep, hechos, modalidad, indemnizaciones, sustitutiva}
+function imprimirCartaAviso(trabajador, data, opts={}){
+  const fechaSep = opts.fechaSep || dateOnly(trabajador.fecha_separacion);
+  if(!fechaSep){ alert("El trabajador no tiene fecha de separación registrada."); return; }
+  const cz = causalCarta(trabajador.motivo_termino);
+  const hechos = (opts.hechos||'').trim();
+  const modalidad = opts.modalidad==='presencial' ? 'presencial ante un ministro de fe' : 'electrónica';
+  const domTrab = trabajador.domicilio || trabajador.direccion || '(domicilio señalado en el contrato de trabajo)';
+  const mesAnt = (()=>{ const d=new Date(fechaSep+'T12:00:00'); d.setDate(0); return fechaLargaCL(d.toISOString().slice(0,10)); })();
+
+  const clausFiniquito = `Se hace presente que el finiquito le será otorgado en forma <b>${modalidad}</b>. Se deja constancia expresa de que es <b>voluntario</b> para usted aceptar, firmar y recibir el pago en forma electrónica; que siempre podrá optar por concurrir personalmente ante un <b>ministro de fe</b> para su ratificación; y que, si lo estima necesario, podrá formular <b>reserva de derechos</b>.`;
+  const clausCotiz = cz.requiereCotiz
+    ? `<div class="clausula"><b>Estado de cotizaciones previsionales.</b> Se informa que sus cotizaciones previsionales se encuentran pagadas hasta el último día del mes anterior al término (${mesAnt}), adjuntándose a esta comunicación los comprobantes que acreditan dicho pago respecto de todo el período trabajado, conforme al artículo 162 del Código del Trabajo.</div>`
+    : '';
+  const clausAviso161 = cz.art161
+    ? `<div class="clausula"><b>Aviso previo.</b> La presente comunicación se efectúa ${cz.plazoTxt}.${opts.sustitutiva?' En consecuencia, se pagará a usted la indemnización sustitutiva del aviso previo, equivalente a la última remuneración mensual devengada.':''}</div>`
+    : '';
+  const indem = (opts.indemnizaciones||'').trim();
+
+  const cuerpo = `
+    <h1>Carta de Aviso de Término de Contrato de Trabajo</h1>
+    <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
+    <p style="text-align:right;margin-top:6px">${EMPRESA.ciudad}, ${fechaLargaCL()}</p>
+    <p style="margin:0"><b>Señor(a):</b> ${trabajador.nombre||'—'}<br/>
+       <b>Cédula de identidad:</b> ${trabajador.rut||'—'}<br/>
+       <b>Domicilio:</b> ${domTrab}</p>
+    <p>De mi consideración:</p>
+    <p>Por medio de la presente, y en cumplimiento de lo dispuesto en el <b>artículo 162 del Código del Trabajo</b>, comunico a usted que <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, ha resuelto poner término a su contrato de trabajo a contar del <b>${fechaLargaCL(fechaSep)}</b>, invocando la causal contemplada en el <b>${cz.nombre}</b>.</p>
+    <div class="clausula"><b>Hechos en que se funda el término.</b> ${hechos || '(indicar los hechos concretos que fundamentan la causal invocada)'}.</div>
+    ${indem?`<div class="clausula"><b>Indemnizaciones.</b> ${indem}.</div>`:''}
+    ${clausAviso161}
+    ${clausCotiz}
+    <div class="clausula"><b>Modalidad del finiquito y derechos del trabajador.</b> ${clausFiniquito}</div>
+    <p>Se remitirá copia de la presente comunicación a la Inspección del Trabajo respectiva, conforme a la ley.</p>
+    <p>Sin otro particular, le saluda atentamente,</p>
+    <div class="firmas" style="margin-top:48px">
+      <div class="firma">${EMPRESA.repNombre}<br/>RUT ${EMPRESA.repRut}<br/><b>${EMPRESA.repCargo} · p.p. ${EMPRESA.razon}</b></div>
+      <div class="firma">Recibí conforme<br/>Nombre, RUT y fecha<br/><b>${trabajador.nombre||'—'}</b></div>
+    </div>
+    <p class="nota" style="margin-top:18px">Documento generado por el ERP. Notifíquese al trabajador <b>personalmente o por carta certificada</b> al domicilio del contrato, conservando el <b>comprobante de envío</b>. Plazo legal de comunicación: ${cz.plazoTxt||'según la causal invocada'}. ${cz.requiereCotiz?'Adjuntar los comprobantes de pago de cotizaciones previsionales.':''}</p>`;
+  htmlDocImprimir(`Carta de Aviso ${trabajador.nombre||''}`, cuerpo);
+}
+
 // Conversión simple de monto a palabras (para el contrato). Suficiente para sueldos.
 function numeroAPalabras(n){
   n=Math.round(n||0);
@@ -1548,6 +1605,7 @@ const TIPO_DOC_LABEL = {
   epp:"Acta de entrega EPP",
   anexo:"Anexo de contrato",
   finiquito:"Finiquito",
+  carta_aviso:"Carta de aviso de término",
   certificado:"Certificado",
   otro:"Otro documento",
 };
@@ -1613,6 +1671,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
   const [dupModal,setDupModal]=useState(null);    // modal de duplicado ERP
   const [contratoModal,setContratoModal]=useState(null);  // pre-emisión del contrato (8D.5)
   const [finiquitoModal,setFiniquitoModal]=useState(null);  // pre-emisión del finiquito (solo desvinculados)
+  const [cartaModal,setCartaModal]=useState(null);          // pre-emisión de la carta de aviso (Art. 162)
   const { user, perfil } = useAuth();
   const quien = perfil?.nombre || user?.email || 'sistema';
 
@@ -1687,6 +1746,17 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
       await insertarGenerado('finiquito', proximaVersion('finiquito'));
     }
     setFiniquitoModal(null);
+  };
+
+  // ── Carta de Aviso de Término (Art. 162) ──
+  const openCartaAviso=()=>setCartaModal({
+    fechaSep: dateOnly(trabajador.fecha_separacion)||'',
+    hechos:'', modalidad:'electronico', indemnizaciones:'', sustitutiva:false,
+  });
+  const generarCartaAviso=async(crearFila)=>{
+    imprimirCartaAviso(trabajador, data, cartaModal);
+    if(crearFila) await insertarGenerado('carta_aviso', proximaVersion('carta_aviso'));
+    setCartaModal(null);
   };
 
   // ── Camino 1: subir documento existente escaneado (empresa en marcha) ──
@@ -1849,6 +1919,11 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
               <span style={{fontSize:20}}>📑</span>
               <span style={{fontWeight:600,color:C.text,fontSize:13}}>Generar Finiquito</span>
               <span style={{fontSize:11,color:C.textMuted}}>Art. 177 C. del Trabajo · cálculo referencial desde la desvinculación</span>
+            </button>
+            <button style={docBtn} onClick={openCartaAviso}>
+              <span style={{fontSize:20}}>📨</span>
+              <span style={{fontWeight:600,color:C.text,fontSize:13}}>Generar Carta de Aviso</span>
+              <span style={{fontSize:11,color:C.textMuted}}>Art. 162 C. del Trabajo · comunicación de término según causal</span>
             </button>
           </div>
         </>
@@ -2021,6 +2096,58 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
           </div>
         );
       })()}
+      {cartaModal&&(()=>{
+        const cz=causalCarta(trabajador.motivo_termino);
+        const existentes=docs.filter(d=>d.tipo_documento==='carta_aviso'&&d.origen==='generado_erp'&&d.estado!=='anulado');
+        const yaHay=existentes.length>0;
+        const hechosOk=(cartaModal.hechos||'').trim().length>0;
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>e.target===e.currentTarget&&setCartaModal(null)}>
+            <div style={{background:'#fff',borderRadius:12,padding:24,maxWidth:560,width:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
+              <p style={{fontWeight:700,fontSize:15,color:C.text,margin:"0 0 4px"}}>📨 Generar Carta de Aviso de Término</p>
+              <p style={{fontSize:12,color:C.textMuted,margin:"0 0 14px"}}>{trabajador.nombre} · Art. 162 del Código del Trabajo</p>
+              <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:C.text}}>
+                <b>Causal:</b> {cz.nombre}<br/>
+                <span style={{color:C.textMuted}}>Plazo de comunicación: {cz.plazoTxt||'—'}.</span>
+              </div>
+              {!cz.aplica?(
+                <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:12,color:C.yellow}}>
+                  Para esta causal (mutuo acuerdo / renuncia) <b>no corresponde</b> una carta de aviso de despido del Art. 162. El término se documenta con el finiquito y, en su caso, la carta de renuncia del trabajador.
+                </div>
+              ):(<>
+                <FL label="Fecha de separación"><input type="date" style={INP} value={cartaModal.fechaSep||""} onChange={e=>setCartaModal({...cartaModal,fechaSep:e.target.value})}/></FL>
+                <div style={{height:10}}/>
+                <FL label="Hechos en que se funda el término (obligatorio)">
+                  <textarea style={{...INP,height:80,resize:'vertical',fontFamily:'inherit'}} value={cartaModal.hechos} onChange={e=>setCartaModal({...cartaModal,hechos:e.target.value})} placeholder="Describe los hechos concretos que fundamentan la causal invocada."/>
+                </FL>
+                <div style={{height:10}}/>
+                <FL label="Indemnizaciones (opcional)">
+                  <input style={INP} value={cartaModal.indemnizaciones} onChange={e=>setCartaModal({...cartaModal,indemnizaciones:e.target.value})} placeholder="Ej: indemnización por años de servicio según finiquito adjunto."/>
+                </FL>
+                <div style={{height:10}}/>
+                <FL label="Modalidad del finiquito">
+                  <select style={INP} value={cartaModal.modalidad} onChange={e=>setCartaModal({...cartaModal,modalidad:e.target.value})}>
+                    <option value="electronico">Electrónica (Mi DT)</option>
+                    <option value="presencial">Presencial ante ministro de fe</option>
+                  </select>
+                </FL>
+                {cz.art161&&(
+                  <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.text,margin:"12px 0 0",cursor:"pointer"}}>
+                    <input type="checkbox" checked={cartaModal.sustitutiva} onChange={e=>setCartaModal({...cartaModal,sustitutiva:e.target.checked})}/>
+                    Se paga indemnización sustitutiva del aviso previo (cuando no se dio el aviso con 30 días)
+                  </label>
+                )}
+                <p style={{fontSize:11,color:C.textDim,margin:"12px 0 14px"}}>El documento incluye automáticamente el plazo según la causal, el estado de cotizaciones (si aplica) y el texto obligatorio sobre finiquito electrónico/presencial, voluntariedad, ministro de fe y reserva de derechos.</p>
+              </>)}
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {cz.aplica&&<button onClick={()=>generarCartaAviso(true)} disabled={!hechosOk} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.accent}`,background:hechosOk?C.accent:C.border,color:"#fff",cursor:hechosOk?"pointer":"not-allowed",textAlign:"left",fontSize:13,fontWeight:600}}>{yaHay?`🔄 Generar nueva versión (v${proximaVersion('carta_aviso')})`:"📨 Generar carta de aviso (v1)"} <span style={{display:"block",fontSize:11,fontWeight:400,opacity:.9}}>Imprime y agrega la fila a la carpeta documental.</span></button>}
+                {cz.aplica&&yaHay&&<button onClick={()=>generarCartaAviso(false)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:500,color:C.text}}>👁 Solo reimprimir</button>}
+                <button onClick={()=>setCartaModal(null)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,color:C.textMuted}}>✕ Cancelar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -2103,9 +2230,10 @@ const CATEGORIAS_EXP = [
   {key:'reglamento', label:'Reglamento Interno'},
   {key:'epp',        label:'EPP'},
   {key:'finiquito',  label:'Finiquitos'},
+  {key:'carta_aviso',label:'Cartas de aviso'},
   {key:'otros',      label:'Otros'},
 ];
-const CATS_CONOCIDAS = ['contrato','anexo','odi','reglamento','epp','finiquito'];
+const CATS_CONOCIDAS = ['contrato','anexo','odi','reglamento','epp','finiquito','carta_aviso'];
 
 function TabExpediente({trabajador, data, update}){
   const { user, perfil } = useAuth();
