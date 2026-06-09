@@ -1,4 +1,4 @@
-iimport { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isConfigured } from "./supabase.js";
 import { useAuth } from "./contexts/AuthContext.jsx";
 import Login from "./components/Login.jsx";
