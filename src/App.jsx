@@ -381,9 +381,11 @@ function Dashboard({data,contratoId}){
 
         // PANEL 1: Vencimiento de licitaciones
         const alertasLic=(data.contratos||[]).filter(c=>c.fecha_termino_contrato&&c.activo).map(c=>{
-          const a=calcAlertaLicitacion(c.fecha_termino_contrato, c.dias_alerta||60, feriadosSet);
+          const u=umbralAlertaContrato(c);
+          if(!u.alertaTermino) return null;                       // privado permanente: sin alerta de termino
+          const a=calcAlertaLicitacion(c.fecha_termino_contrato, u.diasAlerta, feriadosSet);
           return{...c, alerta:a};
-        }).filter(c=>c.alerta&&c.alerta.nivel!=='normal').sort((a,b)=>a.alerta.diasCal-b.alerta.diasCal);
+        }).filter(c=>c&&c.alerta&&c.alerta.nivel!=='normal').sort((a,b)=>a.alerta.diasCal-b.alerta.diasCal);
 
         // PANEL 2: Finiquitos pendientes por trabajador (fecha_separacion individual)
         const alertasFin=(data.trabajadores||[]).filter(t=>
@@ -594,10 +596,26 @@ function Dashboard({data,contratoId}){
 /* ─── Centros de Costo (Contratos) ──────────────────────────── */
 const ESTADOS_CT=["Vigente","Postulación","Renovación","Inactivo"];
 const TIPO_CENTRO_TAG={
-  'LICITACION': {bg:'#eff6ff',text:'#1d4ed8',border:'#bfdbfe',label:'Licitación'},
+  'LICITACION_PUBLICA': {bg:'#eff6ff',text:'#1d4ed8',border:'#bfdbfe',label:'Licitación pública'},
+  'LICITACION_PRIVADA': {bg:'#ecfeff',text:'#0e7490',border:'#a5f3fc',label:'Licitación privada'},
+  'PRIVADO_PERMANENTE': {bg:'#f0fdf4',text:'#15803d',border:'#bbf7d0',label:'Contrato privado'},
+  'EVENTUAL':   {bg:'#fef9c3',text:'#b45309',border:'#fde68a',label:'Servicio eventual'},
   'CORPORATIVO':{bg:'#f5f3ff',text:'#7c3aed',border:'#ddd6fe',label:'Corporativo'},
-  'EVENTUAL':   {bg:'#fef9c3',text:'#b45309',border:'#fde68a',label:'Eventual'},
+  'LICITACION': {bg:'#eff6ff',text:'#1d4ed8',border:'#bfdbfe',label:'Licitación (legado)'},
 };
+// Umbral de alerta por tipo de contrato (Capa B). alertaTermino=false => no alerta de termino (solo revision).
+function umbralAlertaContrato(c){
+  const t=c?.tipo_centro_costo||'LICITACION';
+  const d=Number(c?.dias_alerta)||0;
+  switch(t){
+    case 'LICITACION_PUBLICA': case 'LICITACION': return {diasAlerta:d||33, alertaTermino:true};
+    case 'LICITACION_PRIVADA': return {diasAlerta:d||45, alertaTermino:true};
+    case 'EVENTUAL':           return {diasAlerta:d||15, alertaTermino:true};
+    case 'CORPORATIVO':        return {diasAlerta:d||60, alertaTermino:true};
+    case 'PRIVADO_PERMANENTE': return {diasAlerta:0,      alertaTermino:false};
+    default:                   return {diasAlerta:d||33, alertaTermino:true};
+  }
+}
 const FINANC_TAG={
   'financiado':         {bg:'#f0fdf4',text:'#15803d',border:'#86efac',icon:'🟢'},
   'parcial':            {bg:'#fef9c3',text:'#b45309',border:'#fde68a',icon:'🟡'},
@@ -608,9 +626,10 @@ const FINANC_TAG={
 function Contratos({data,insert,update}){
   const [form,setForm]=useState(null);
   const isNew=form&&!data.contratos.find(c=>c.id===form.id);
-  const openNew=()=>setForm({id:genId("CT"),cliente:"",instalacion:"",direccion:"",supervisor_id:data.trabajadores.find(t=>t.cargo==="Supervisor"||t.cargo==="Supervisora")?.id||"",estado:"Vigente",activo:true,tipo_centro_costo:"LICITACION",estado_financiero:"financiado"});
+  const openNew=()=>setForm({id:genId("CT"),cliente:"",instalacion:"",direccion:"",supervisor_id:data.trabajadores.find(t=>t.cargo==="Supervisor"||t.cargo==="Supervisora")?.id||"",estado:"Vigente",activo:true,tipo_centro_costo:"LICITACION_PUBLICA",estado_financiero:"financiado"});
   const save=async()=>{if(!form.cliente.trim())return;const ok=isNew?await insert("contratos",form):await update("contratos",form);if(ok)setForm(null);};
-  const nLic=data.contratos.filter(c=>!c.tipo_centro_costo||c.tipo_centro_costo==="LICITACION").length;
+  const esLic=c=>['LICITACION','LICITACION_PUBLICA','LICITACION_PRIVADA'].includes(c.tipo_centro_costo||'LICITACION');
+  const nLic=data.contratos.filter(esLic).length;
   const nCorp=data.contratos.filter(c=>c.tipo_centro_costo==="CORPORATIVO").length;
   const nEvt=data.contratos.filter(c=>c.tipo_centro_costo==="EVENTUAL").length;
   return(
@@ -621,7 +640,7 @@ function Contratos({data,insert,update}){
           <FL label="Cliente / Institución"><input style={INP} value={form.cliente} onChange={e=>setForm({...form,cliente:e.target.value})} placeholder="Ej: Seremi de Transportes"/></FL>
           <FL label="Instalación"><input style={INP} value={form.instalacion} onChange={e=>setForm({...form,instalacion:e.target.value})} placeholder="Ej: Sucursal Arica"/></FL>
           <FL label="Dirección"><input style={INP} value={form.direccion} onChange={e=>setForm({...form,direccion:e.target.value})} placeholder="Ej: Chacabuco Nº901"/></FL>
-          <FL label="Tipo de centro"><select style={INP} value={form.tipo_centro_costo||"LICITACION"} onChange={e=>setForm({...form,tipo_centro_costo:e.target.value})}><option value="LICITACION">Licitación</option><option value="CORPORATIVO">Corporativo</option><option value="EVENTUAL">Eventual</option></select></FL>
+          <FL label="Tipo de centro"><select style={INP} value={form.tipo_centro_costo||"LICITACION_PUBLICA"} onChange={e=>setForm({...form,tipo_centro_costo:e.target.value})}><option value="LICITACION_PUBLICA">Licitación pública (alerta 33 días)</option><option value="LICITACION_PRIVADA">Licitación privada (configurable)</option><option value="PRIVADO_PERMANENTE">Contrato privado permanente (sin alerta de término)</option><option value="EVENTUAL">Servicio eventual (alerta 15 días)</option><option value="CORPORATIVO">Corporativo (configurable)</option><option value="LICITACION">Licitación (legado)</option></select></FL>
           <FL label="Estado"><select style={INP} value={form.estado} onChange={e=>setForm({...form,estado:e.target.value,activo:["Vigente","Renovación"].includes(e.target.value)})}>{ESTADOS_CT.map(s=><option key={s}>{s}</option>)}</select></FL>
           <FL label="Financiamiento"><select style={INP} value={form.estado_financiero||"financiado"} onChange={e=>setForm({...form,estado_financiero:e.target.value})}><option value="financiado">🟢 Financiado</option><option value="parcial">🟡 Parcial</option><option value="sin_financiamiento">🔴 Sin financiamiento</option><option value="en_riesgo">🟠 En riesgo</option><option value="cerrado">⚫ Cerrado</option></select></FL>
           <FL label="Fecha inicio licitación"><input type="date" style={INP} value={form.fecha_inicio_contrato||""} onChange={e=>setForm({...form,fecha_inicio_contrato:e.target.value})}/></FL>
