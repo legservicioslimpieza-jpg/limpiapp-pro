@@ -193,7 +193,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp","documentos_trabajador","cumplimiento_egreso","desvinculaciones_programadas"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp","documentos_trabajador","cumplimiento_egreso","desvinculaciones_programadas","evaluaciones_vencimiento"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -357,7 +357,8 @@ function preavisoActivo(trabajadorId, data){
   return (data.desvinculaciones_programadas||[]).find(d=>d.trabajador_id===trabajadorId && d.estado==='programada')||null;
 }
 
-function Dashboard({data,contratoId}){
+function Dashboard({data,contratoId,insert,update,setTab}){
+  const [evalModal,setEvalModal]=useState(null);   // B2: {tipo, contrato, trabajadores, ...campos}
   const hoy=new Date().toISOString().slice(0,10);
   const chks=(contratoId?data.checklist.filter(c=>c.contrato_id===contratoId):data.checklist).filter(c=>c.activa);
   const diaria=chks.filter(c=>c.periodicidad==="DIARIA");
@@ -379,10 +380,12 @@ function Dashboard({data,contratoId}){
         const hoy=new Date(); hoy.setHours(12,0,0,0);
         const feriadosSet=buildFeriadosSet(data.feriados_chile||[]);
 
-        // PANEL 1: Vencimiento de licitaciones
+        // PANEL 1: Vencimiento de licitaciones / continuidad contractual
+        const evalResueltas=new Set((data.evaluaciones_vencimiento||[]).filter(e=>e.estado!=='pendiente').map(e=>`${e.contrato_id}|${(e.detalle&&e.detalle.termino_evaluado)||''}`));
         const alertasLic=(data.contratos||[]).filter(c=>c.fecha_termino_contrato&&c.activo).map(c=>{
           const u=umbralAlertaContrato(c);
           if(!u.alertaTermino) return null;                       // privado permanente: sin alerta de termino
+          if(evalResueltas.has(`${c.id}|${dateOnly(c.fecha_termino_contrato)}`)) return null;  // ya evaluado para esta fecha
           const a=calcAlertaLicitacion(c.fecha_termino_contrato, u.diasAlerta, feriadosSet);
           return{...c, alerta:a};
         }).filter(c=>c&&c.alerta&&c.alerta.nivel!=='normal').sort((a,b)=>a.alerta.diasCal-b.alerta.diasCal);
@@ -416,6 +419,7 @@ function Dashboard({data,contratoId}){
           amarillo:{bg:'#fefce8',text:'#92400e',icon:'🟡'},
           verde:   {bg:'#f0fdf4',text:'#166534',icon:'🟢'},
         };
+        const BTN_EVAL=(col)=>({background:'#fff',border:`1px solid ${col}`,color:col,borderRadius:5,padding:'4px 10px',fontSize:11,fontWeight:600,cursor:'pointer'});
         return(
           <div style={{marginBottom:20,display:'flex',flexDirection:'column',gap:12}}>
 
@@ -475,26 +479,35 @@ function Dashboard({data,contratoId}){
               </div>
             )}
 
-            {/* PANEL 1 — Vencimiento licitaciones */}
+            {/* PANEL 1 — Contratos / Asignaciones por vencer (B2) */}
             {alertasLic.length>0&&(
               <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:8,padding:'12px 16px'}}>
-                <p style={{fontWeight:700,color:'#92400e',fontSize:13,marginBottom:8}}>⚠️ VENCIMIENTO DE LICITACIONES</p>
+                <p style={{fontWeight:700,color:'#92400e',fontSize:13,marginBottom:8}}>📋 CONTRATOS / ASIGNACIONES POR VENCER — Evaluación de continuidad</p>
                 {alertasLic.map((c,i)=>{
                   const n=NIVEL[c.alerta.nivel]||NIVEL.amarilla;
-                  const trab=(data.asignaciones||[]).filter(a=>a.contrato_id===c.id&&a.afecta_remuneracion!==false&&a.estado_asig==='activa').length;
+                  const tipoTag=TIPO_CENTRO_TAG[c.tipo_centro_costo||'LICITACION']||TIPO_CENTRO_TAG.LICITACION;
+                  const trabAf=(data.asignaciones||[]).filter(a=>a.contrato_id===c.id&&a.afecta_remuneracion!==false&&a.estado_asig==='activa'&&a.activo!==false)
+                    .map(a=>{const t=(data.trabajadores||[]).find(x=>x.id===a.trabajador_id);return t?{id:t.id,nombre:t.nombre||t.id}:null;}).filter(Boolean);
                   return(
-                    <div key={i} style={{background:n.bg,borderRadius:6,padding:'8px 12px',marginBottom:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                      <div>
-                        <span style={{fontWeight:600,color:n.text}}>{n.icon} {c.id} — {c.cliente}</span>
-                        <span style={{fontSize:11,color:n.text,marginLeft:8}}>
-                          Vence {new Date(c.fecha_termino_contrato.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}
-                        </span>
-                        {trab>0&&<span style={{fontSize:11,color:n.text,marginLeft:8}}>· {trab} trabajador(es) activo(s)</span>}
-                        {c.probabilidad_renovacion&&<span style={{fontSize:11,color:n.text,marginLeft:8}}>· Renovación: {c.probabilidad_renovacion}</span>}
+                    <div key={i} style={{background:n.bg,borderRadius:6,padding:'10px 12px',marginBottom:8}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
+                        <div>
+                          <span style={{fontWeight:700,color:n.text}}>{n.icon} {c.id} — {c.cliente||'(sin cliente)'}</span>
+                          <span style={{display:'inline-block',marginLeft:8,background:tipoTag.bg,color:tipoTag.text,border:`1px solid ${tipoTag.border}`,borderRadius:4,fontSize:10,fontWeight:600,padding:'1px 6px'}}>{tipoTag.label}</span>
+                          <span style={{fontSize:11,color:n.text,marginLeft:8}}>Vence {new Date(c.fecha_termino_contrato.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}</span>
+                          {c.probabilidad_renovacion&&<span style={{fontSize:11,color:n.text,marginLeft:8}}>· Renovación: {c.probabilidad_renovacion}</span>}
+                        </div>
+                        <span style={{fontSize:12,fontWeight:700,color:n.text,whiteSpace:'nowrap'}}>{c.alerta.diasCal<=0?'VENCIDA':`${c.alerta.diasHab} d. háb.`}</span>
                       </div>
-                      <span style={{fontSize:12,fontWeight:700,color:n.text,whiteSpace:'nowrap'}}>
-                        {c.alerta.diasCal<=0?'VENCIDA':`${c.alerta.diasHab} d. háb.`}
-                      </span>
+                      <div style={{fontSize:11,color:n.text,marginTop:6}}>
+                        <b>Trabajadores afectados:</b> {trabAf.length?trabAf.map(t=>`${t.nombre} (${t.id})`).join('  ·  '):'sin asignación remuneracional activa'}
+                      </div>
+                      <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
+                        <button onClick={()=>setEvalModal({tipo:'renovar',contrato:c,trabajadores:trabAf,nueva:'',responsable:'',obs:''})} style={BTN_EVAL('#1d4ed8')}>Renovar</button>
+                        <button onClick={()=>setEvalModal({tipo:'reasignar',contrato:c,trabajadores:trabAf,responsable:'',obs:''})} style={BTN_EVAL('#0e7490')}>Reasignar</button>
+                        <button onClick={()=>setEvalModal({tipo:'art161',contrato:c,trabajadores:trabAf,sel:trabAf.map(t=>t.id),fecha:'',responsable:'',obs:''})} style={BTN_EVAL('#b45309')} disabled={!trabAf.length} title={trabAf.length?'':'No hay trabajadores afectados'}>Iniciar Art. 161 programado</button>
+                        <button onClick={()=>setEvalModal({tipo:'no_aplica',contrato:c,trabajadores:trabAf,motivo:'',responsable:''})} style={BTN_EVAL('#6b7280')}>No aplica</button>
+                      </div>
                     </div>
                   );
                 })}
@@ -589,6 +602,79 @@ function Dashboard({data,contratoId}){
           empty="No hay evidencias registradas hoy"
         />
       </Panel>
+      {evalModal&&(()=>{
+        const c=evalModal.contrato;
+        const cBase=(data.contratos||[]).find(x=>x.id===c.id)||c;
+        const terminoEval=dateOnly(c.fecha_termino_contrato);
+        const cerrar=()=>setEvalModal(null);
+        const guardarEval=async(extra)=>{
+          await insert('evaluaciones_vencimiento',{id:genId('EV'),contrato_id:c.id,fecha_alerta:hoy,trabajadores_afectados:evalModal.trabajadores.map(t=>t.id),responsable:evalModal.responsable||'',observaciones:evalModal.obs||'',fecha_resolucion:hoy,estado:'resuelta',created_at:new Date().toISOString(),...(extra.row||{}),detalle:{termino_evaluado:terminoEval,...(extra.detalle||{})}});
+        };
+        const doRenovar=async()=>{ if(!evalModal.nueva)return; await update('contratos',{...cBase,fecha_termino_contrato:evalModal.nueva}); await guardarEval({row:{accion:'renovar',nueva_fecha_termino:evalModal.nueva},detalle:{nueva_fecha_termino:evalModal.nueva}}); cerrar(); };
+        const doReasignar=async()=>{ await guardarEval({row:{accion:'reasignar'}}); cerrar(); setTab&&setTab('trabajadores'); };
+        const doNoAplica=async()=>{ if(!(evalModal.motivo||'').trim())return; await guardarEval({row:{accion:'no_aplica'},detalle:{motivo:evalModal.motivo}}); cerrar(); };
+        const doArt161=async()=>{
+          if(!evalModal.fecha||!(evalModal.sel||[]).length)return;
+          const diasAviso=Math.round((new Date(evalModal.fecha+'T12:00:00')-new Date(hoy+'T12:00:00'))/86400000); const sustitutiva=diasAviso<30;
+          for(const tid of (evalModal.sel||[])){ const w=(data.trabajadores||[]).find(x=>x.id===tid); if(!w)continue;
+            await insert('desvinculaciones_programadas',{id:genDesvProgId(tid),trabajador_id:tid,causal:'art161',fecha_carta:hoy,fecha_separacion:dateNoon(evalModal.fecha),dias_aviso:diasAviso,sustitutiva,estado:'programada',created_at:new Date().toISOString()});
+            await update('trabajadores',{...w,activo:true,estado:'PREAVISO',fecha_separacion:dateNoon(evalModal.fecha),motivo_termino:'Art. 161 — Necesidades de la empresa'});
+          }
+          await guardarEval({row:{accion:'art161'},detalle:{fecha_separacion:evalModal.fecha,dias_aviso:diasAviso,sustitutiva}});
+          cerrar();
+        };
+        const T=evalModal.tipo;
+        const titulo={renovar:'Renovar contrato',reasignar:'Reasignar trabajadores',art161:'Iniciar Art. 161 programado',no_aplica:'Marcar “No aplica”'}[T];
+        const okMain=T==='renovar'?!!evalModal.nueva:T==='no_aplica'?!!(evalModal.motivo||'').trim():T==='art161'?(!!evalModal.fecha&&(evalModal.sel||[]).length>0):true;
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}} onClick={cerrar}>
+            <div style={{background:'#fff',borderRadius:10,padding:22,maxWidth:520,width:'100%',maxHeight:'90vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+              <h3 style={{margin:'0 0 4px',fontSize:16,color:C.text}}>{titulo}</h3>
+              <p style={{fontSize:12,color:C.textMuted,marginBottom:14}}>{c.id} — {c.cliente||'(sin cliente)'} · vence {new Date(c.fecha_termino_contrato.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}</p>
+              {T==='renovar'&&(<>
+                <FL label="Nueva fecha de término"><input type="date" style={INP} value={evalModal.nueva} onChange={e=>setEvalModal({...evalModal,nueva:e.target.value})}/></FL>
+                <div style={{height:8}}/>
+                <FL label="Responsable"><input style={INP} value={evalModal.responsable} onChange={e=>setEvalModal({...evalModal,responsable:e.target.value})} placeholder="Quien autoriza la renovación"/></FL>
+                <div style={{height:8}}/>
+                <FL label="Observación"><input style={INP} value={evalModal.obs} onChange={e=>setEvalModal({...evalModal,obs:e.target.value})} placeholder="Nota interna"/></FL>
+              </>)}
+              {T==='reasignar'&&(<>
+                <p style={{fontSize:12,color:C.textMuted,marginBottom:8}}>Se registra la decisión y te llevamos a Trabajadores para gestionar las asignaciones. No se desvincula a nadie.</p>
+                <FL label="Responsable"><input style={INP} value={evalModal.responsable} onChange={e=>setEvalModal({...evalModal,responsable:e.target.value})}/></FL>
+                <div style={{height:8}}/>
+                <FL label="Observación"><input style={INP} value={evalModal.obs} onChange={e=>setEvalModal({...evalModal,obs:e.target.value})} placeholder="Ej: reasignar a CT002 desde el 01-08"/></FL>
+              </>)}
+              {T==='art161'&&(<>
+                <p style={{fontSize:12,color:C.textMuted,marginBottom:8}}>Selecciona los trabajadores a programar. Cada uno quedará en <b>PREAVISO</b> (no se desvincula). La carta de aviso se emite luego desde la ficha de cada trabajador.</p>
+                <div style={{border:`1px solid ${C.border}`,borderRadius:6,padding:8,marginBottom:10,maxHeight:160,overflowY:'auto'}}>
+                  {evalModal.trabajadores.map(t=>{const on=(evalModal.sel||[]).includes(t.id);return(
+                    <label key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 2px',fontSize:13,cursor:'pointer'}}>
+                      <input type="checkbox" checked={on} onChange={()=>{const s=new Set(evalModal.sel||[]); on?s.delete(t.id):s.add(t.id); setEvalModal({...evalModal,sel:[...s]});}}/>
+                      {t.nombre} <span style={{color:C.textMuted,fontSize:11}}>({t.id})</span>
+                    </label>
+                  );})}
+                </div>
+                <FL label="Fecha de separación (futura)"><input type="date" style={INP} value={evalModal.fecha} onChange={e=>setEvalModal({...evalModal,fecha:e.target.value})}/></FL>
+                {evalModal.fecha&&(()=>{const d=Math.round((new Date(evalModal.fecha+'T12:00:00')-new Date(hoy+'T12:00:00'))/86400000);return <p style={{fontSize:11,color:d<30?'#b45309':'#166534',marginTop:6}}>{d} días de aviso · {d<30?'con indemnización sustitutiva':'sin sustitutiva (≥30 días)'}</p>;})()}
+                <div style={{height:8}}/>
+                <FL label="Responsable"><input style={INP} value={evalModal.responsable} onChange={e=>setEvalModal({...evalModal,responsable:e.target.value})}/></FL>
+              </>)}
+              {T==='no_aplica'&&(<>
+                <FL label="Motivo (obligatorio)"><input style={INP} value={evalModal.motivo} onChange={e=>setEvalModal({...evalModal,motivo:e.target.value})} placeholder="Ej: se renovará por acuerdo / no afecta dotación"/></FL>
+                <div style={{height:8}}/>
+                <FL label="Responsable"><input style={INP} value={evalModal.responsable} onChange={e=>setEvalModal({...evalModal,responsable:e.target.value})}/></FL>
+              </>)}
+              <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:18}}>
+                <button onClick={cerrar} style={{padding:'8px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>Cancelar</button>
+                <button onClick={T==='renovar'?doRenovar:T==='reasignar'?doReasignar:T==='art161'?doArt161:doNoAplica} disabled={!okMain}
+                  style={{padding:'8px 18px',borderRadius:6,border:'none',background:okMain?C.accent:'#e5e7eb',color:okMain?'#fff':C.textMuted,cursor:okMain?'pointer':'not-allowed',fontSize:13,fontWeight:700}}>
+                  {T==='renovar'?'Renovar y registrar':T==='reasignar'?'Registrar y ir a Trabajadores':T==='art161'?'Programar preaviso(s)':'Registrar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -6213,7 +6299,7 @@ if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
       {/* ── Contenido ── */}
       <div style={{maxWidth:1280,margin:"0 auto",padding:"28px 24px"}}>
         {!isConfigured&&<AlertBanner type="warning" message="Modo demostración — configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel."/>}
-        {tab==="dashboard"      &&<Dashboard      data={data} contratoId={contratoId}/>}
+        {tab==="dashboard"      &&<Dashboard      data={data} contratoId={contratoId} insert={insert} update={update} setTab={setTab}/>}
         {tab==="contratos"      &&<Contratos       data={data} insert={insert} update={update}/>}
         {tab==="dependencias"   &&<Dependencias    data={data} contratoId={contratoId} insert={insert} update={update}/>}
         {tab==="trabajadores"   &&<Trabajadores    data={data} insert={insert} update={update} saveAsignacion={saveAsignacion} terminarAsignacion={terminarAsignacion} contratoId={contratoId}/>}
@@ -6230,3 +6316,4 @@ if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
     </div>
   );
 }
+ 
