@@ -2313,7 +2313,9 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {cz.aplica&&!hechosOk&&(
                   <p style={{fontSize:11,color:(C.red||'#b91c1c'),margin:0}}>
-                    {!numeralOk?'⚠ Selecciona el numeral del Art. 160 para continuar.':`⚠ Detalla los hechos (mínimo ${hechosMin} caracteres) para continuar.`}
+                    {!numeralOk?'⚠ Selecciona el numeral del Art. 160 para continuar.'
+                      :riesgoAlto?`⚠ Detalla los hechos (mínimo ${hechosMin} caracteres; llevas ${hechosLen}) para continuar.`
+                      :'⚠ Escribe los hechos para continuar.'}
                   </p>
                 )}
                 {cz.aplica&&<button onClick={()=>generarCartaAviso(true)} disabled={!hechosOk} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.accent}`,background:hechosOk?C.accent:C.border,color:"#fff",cursor:hechosOk?"pointer":"not-allowed",textAlign:"left",fontSize:13,fontWeight:600}}>{yaHay?`🔄 Generar nueva versión (v${proximaVersion('carta_aviso')})`:"📨 Generar carta de aviso (v1)"} <span style={{display:"block",fontSize:11,fontWeight:400,opacity:.9}}>Imprime y agrega la fila a la carpeta documental.</span></button>}
