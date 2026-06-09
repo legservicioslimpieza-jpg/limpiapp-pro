@@ -1706,7 +1706,11 @@ function imprimirCartaAviso(trabajador, data, opts={}){
     if(!l) return false;
     return !PL_LABELS.some(lb=> l===lb || (l.startsWith(lb)&&l.slice(lb.length).trim()===''));
   });
-  const hechosHtml = hechosLineas.length ? hechosLineas.map(escHtml).join('<br/>') : '(indicar los hechos concretos que fundamentan la causal invocada)';
+  const hechosHtml = hechosLineas.length ? hechosLineas.map(l=>{
+    const lb=PL_LABELS.find(x=>l.startsWith(x));
+    if(lb){ const val=l.slice(lb.length).trim(); return `<b>${escHtml(lb)}</b><br/>${escHtml(val||'—')}`; }
+    return escHtml(l);
+  }).join('<br/><br/>') : '(indicar los hechos concretos que fundamentan la causal invocada)';
 
   const cuerpo = `
     <h1>Carta de Aviso de Término de Contrato de Trabajo</h1>
@@ -1717,7 +1721,7 @@ function imprimirCartaAviso(trabajador, data, opts={}){
        <b>Domicilio:</b> ${snap.domicilio}</p>
     <p>De mi consideración:</p>
     <p>Por medio de la presente, y en cumplimiento de lo dispuesto en el <b>artículo 162 del Código del Trabajo</b>, comunico a usted que <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, ha resuelto poner término a su contrato de trabajo a contar del <b>${fechaLargaCL(snap.fechaSepISO)}</b>, invocando la causal contemplada en el <b>${snap.nombreCausal}</b>.</p>
-    <div class="clausula"><b>Hechos en que se funda el término.</b> ${hechosHtml}</div>
+    <div class="clausula"><b>Hechos en que se funda el término.</b><br/>${hechosHtml}</div>
     ${indemHtml}
     ${clausAviso161}
     ${clausCotiz}
@@ -1728,7 +1732,7 @@ function imprimirCartaAviso(trabajador, data, opts={}){
       <div class="firma">${EMPRESA.repNombre}<br/>RUT ${EMPRESA.repRut}<br/><b>${EMPRESA.repCargo} · p.p. ${EMPRESA.razon}</b></div>
       <div class="firma">Recibí conforme<br/>Nombre, RUT y fecha<br/><b>${snap.nombre}</b></div>
     </div>
-    <p class="nota" style="margin-top:18px">Documento generado por el ERP. Notifíquese al trabajador <b>personalmente o por carta certificada</b> al domicilio del contrato, conservando el <b>comprobante de envío</b>. Plazo legal de comunicación: ${snap.plazoTxt||'según la causal invocada'}. ${snap.requiereCotiz?'Adjuntar los comprobantes de pago de cotizaciones previsionales.':''}</p>`;
+    <p class="nota" style="margin-top:18px">Documento generado por el ERP. Notifíquese al trabajador <b>personalmente o por carta certificada</b> al <b>domicilio del trabajador</b> señalado en el contrato, conservando el <b>comprobante de envío</b>. Plazo legal de comunicación: ${snap.plazoTxt||'según la causal invocada'}. ${snap.requiereCotiz?'Adjuntar los comprobantes de pago de cotizaciones previsionales.':''}</p>`;
   htmlDocImprimir(`Carta de Aviso ${snap.nombre||''}`, cuerpo);
   return snap;
 }
@@ -2326,8 +2330,10 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
                 <div style={{display:"inline-block",background:RIESGO.bg,border:`1px solid ${RIESGO.bd}`,color:RIESGO.fg,borderRadius:6,padding:"3px 10px",fontSize:11,fontWeight:600,marginBottom:12}}>{RIESGO.txt}</div>
               )}
               {cz.aplica&&domFalta&&(
-                <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:C.yellow}}>
-                  ⚠ El trabajador <b>no tiene domicilio registrado</b> en la ficha. La carta mostrará un texto de relleno. Para el envío por <b>carta certificada</b> conviene agregarlo en Datos personales. <span style={{color:C.textMuted}}>(No bloquea la generación.)</span>
+                <div style={{background:cz.art161?(C.redBg||'#fef2f2'):C.yellowBg,border:`1px solid ${cz.art161?(C.redBorder||'#fecaca'):C.yellowBorder}`,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:cz.art161?(C.red||'#b91c1c'):C.yellow}}>
+                  {cz.art161
+                    ? <>⚠ <b>Carta destinada a envío certificado.</b> El trabajador <b>no tiene domicilio registrado</b>. Se recomienda completar el domicilio en Datos personales <b>antes de emitir la versión definitiva</b>. <span style={{color:C.textMuted}}>(No bloquea; puedes generar un borrador.)</span></>
+                    : <>⚠ El trabajador <b>no tiene domicilio registrado</b>. La carta mostrará un texto de relleno. Para el envío por <b>carta certificada</b> conviene agregarlo en Datos personales. <span style={{color:C.textMuted}}>(No bloquea la generación.)</span></>}
                 </div>
               )}
               {!cz.aplica?(
