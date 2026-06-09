@@ -2905,8 +2905,15 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               :(form.estado==='PREAVISO'||pa)?{t:'Preaviso',c:'#1e40af',bg:'#eff6ff'}
               :{t:'Activo',c:'#166534',bg:'#f0fdf4'};
             const asigs=(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id&&a.activo!==false&&a.estado_asig!=='terminada');
-            const contratosTxt=asigs.length?asigs.map(a=>{const c=(data.contratos||[]).find(x=>x.id===a.contrato_id);return c?(c.cliente||c.nombre||c.id):a.contrato_id;}).join(' + '):'Sin asignación activa';
+            const contratosTxt=asigs.length?asigs.map(a=>{
+              const c=(data.contratos||[]).find(x=>x.id===a.contrato_id);
+              if(!c) return a.contrato_id||'—';
+              const tipoL=(TIPO_CENTRO_TAG[c.tipo_centro_costo||'LICITACION']||{}).label||'';
+              const cli=(c.cliente&&c.cliente.trim()&&c.cliente.trim().toLowerCase()!=='por definir')?` · ${c.cliente}`:'';
+              return `${c.id}${tipoL?` — ${tipoL}`:''}${cli}`;
+            }).join(' + '):'Sin asignación activa';
             const pctFin=asigs.reduce((s,a)=>s+(Number(a.porcentaje_costo)||0),0);
+            const costoImputado=asigs.filter(isAsignacionRemuneracional).reduce((s,a)=>s+(Number(a.sueldo_asignado)||0),0);
             const tabLabel={datos:'Datos personales',remuneracion:'Remuneración',asignaciones:'Asignaciones',anexos:'Anexos',documentos:'Documentos',expediente:'Expediente'}[tab]||'';
             return (
               <div style={{marginBottom:14}}>
@@ -2919,7 +2926,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     <span style={{fontWeight:700,fontSize:14,color:C.text}}>{form.id} · {form.nombre||'(sin nombre)'}</span>
                     <span style={{background:estado.bg,color:estado.c,border:`1px solid ${estado.c}33`,borderRadius:5,padding:'2px 8px',fontSize:11,fontWeight:600}}>{estado.t}</span>
                     <span style={{fontSize:12,color:C.textMuted}}>📋 {contratosTxt}</span>
-                    <span style={{fontSize:12,fontWeight:600,color:pctFin>=100?'#166534':pctFin>0?'#9a3412':'#991b1b'}}>{pctFin}% financiado</span>
+                    {asigs.length>0&&<span style={{fontSize:12,fontWeight:600,color:pctFin>=100?'#166534':pctFin>0?'#9a3412':'#991b1b'}}>{pctFin}% financiado</span>}
+                    {costoImputado>0&&<span style={{fontSize:12,color:C.textMuted}}>💰 Costo imputado: <b style={{color:C.text}}>{clp(costoImputado)}</b></span>}
                   </div>
                 )}
               </div>
