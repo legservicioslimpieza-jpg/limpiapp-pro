@@ -1858,6 +1858,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
 
   // ── Finiquito (solo trabajadores desvinculados) ──
   const desvin = trabajador.estado==='DESVINCULADO' || !trabajador.activo;
+  const enPreaviso = trabajador.estado==='PREAVISO';   // Art. 161 programado: aún activo, pero ya emite carta de aviso
   const openFiniquito=()=>setFiniquitoModal({
     fechaSep: dateOnly(trabajador.fecha_separacion)||'',
     motivoCode: motivoCodeFromLabel(trabajador.motivo_termino),
@@ -2041,16 +2042,23 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
       </div>
       <p style={{fontSize:11,color:C.textDim,margin:"-16px 0 24px"}}>Ciclo completo: el documento generado queda «Pendiente firma». Imprímelo, fírmalo, escanéalo o fotografíalo, y usa <b>⬆️ Subir firmado</b> en su fila de la carpeta. El archivo firmado se adjunta a la <b>misma fila</b> (no se duplica) y el estado pasa a «Firmado».</p>
 
-      {/* ── Egreso: Finiquito (solo trabajadores desvinculados) ── */}
-      {desvin&&(
+      {/* ── Egreso: Finiquito (desvinculados) y Carta de Aviso (desvinculados o preaviso) ── */}
+      {(desvin||enPreaviso)&&(
         <>
           <p style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:.4,margin:"0 0 8px"}}>Egreso del trabajador</p>
+          {enPreaviso&&(
+            <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:'8px 12px',marginBottom:10,fontSize:11,color:'#1e40af'}}>
+              📅 Trabajador en <b>PREAVISO</b> (Art. 161 programado). Emite ahora la <b>Carta de Aviso</b> para respaldar la comunicación. El <b>finiquito</b> se generará al <b>finalizar</b> la desvinculación (desde la ficha → Datos personales).
+            </div>
+          )}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10,marginBottom:24}}>
-            <button style={docBtn} onClick={openFiniquito}>
-              <span style={{fontSize:20}}>📑</span>
-              <span style={{fontWeight:600,color:C.text,fontSize:13}}>Generar Finiquito</span>
-              <span style={{fontSize:11,color:C.textMuted}}>Art. 177 C. del Trabajo · cálculo referencial desde la desvinculación</span>
-            </button>
+            {desvin&&(
+              <button style={docBtn} onClick={openFiniquito}>
+                <span style={{fontSize:20}}>📑</span>
+                <span style={{fontWeight:600,color:C.text,fontSize:13}}>Generar Finiquito</span>
+                <span style={{fontSize:11,color:C.textMuted}}>Art. 177 C. del Trabajo · cálculo referencial desde la desvinculación</span>
+              </button>
+            )}
             <button style={docBtn} onClick={openCartaAviso}>
               <span style={{fontSize:20}}>📨</span>
               <span style={{fontWeight:600,color:C.text,fontSize:13}}>Generar Carta de Aviso</span>
@@ -2790,13 +2798,9 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               </FL>
               {form.fecha_separacion&&<>
                 <FL label="Motivo término">
-                  <select style={{...INP,background:'#fef2f2',cursor:'not-allowed'}} value={form.motivo_termino||""} disabled>
-                    <option value="">— Seleccionar —</option>
-                    <option value="Art. 159 N°4 Vencimiento plazo">Art. 159 N°4 Vencimiento plazo</option>
-                    <option value="Art. 161 Necesidades empresa">Art. 161 Necesidades empresa</option>
-                    <option value="Art. 159 N°1 Mutuo acuerdo">Art. 159 N°1 Mutuo acuerdo</option>
-                    <option value="Art. 160 Falta grave">Art. 160 Falta grave</option>
-                  </select>
+                  <div style={{...INP,background:'#fef2f2',cursor:'default',height:'auto',display:'flex',alignItems:'center',color:form.motivo_termino?C.text:C.textMuted}}>
+                    {form.motivo_termino || '— Sin motivo registrado —'}
+                  </div>
                 </FL>
                 <FL label="Estado del proceso de finiquito">
                   {(()=>{
