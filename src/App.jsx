@@ -487,7 +487,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
                   const n=NIVEL[c.alerta.nivel]||NIVEL.amarilla;
                   const tipoTag=TIPO_CENTRO_TAG[c.tipo_centro_costo||'LICITACION']||TIPO_CENTRO_TAG.LICITACION;
                   const trabAf=(data.asignaciones||[]).filter(a=>a.contrato_id===c.id&&a.afecta_remuneracion!==false&&a.estado_asig==='activa'&&a.activo!==false)
-                    .map(a=>{const t=(data.trabajadores||[]).find(x=>x.id===a.trabajador_id);return t?{id:t.id,nombre:t.nombre||t.id}:null;}).filter(Boolean);
+                    .map(a=>{const t=(data.trabajadores||[]).find(x=>x.id===a.trabajador_id);return t?{id:t.id,nombre:t.nombre||t.id,rut:t.rut}:null;}).filter(Boolean);
                   return(
                     <div key={i} style={{background:n.bg,borderRadius:6,padding:'10px 12px',marginBottom:8}}>
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
@@ -500,7 +500,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
                         <span style={{fontSize:12,fontWeight:700,color:n.text,whiteSpace:'nowrap'}}>{c.alerta.diasCal<=0?'VENCIDA':`${c.alerta.diasHab} d. háb.`}</span>
                       </div>
                       <div style={{fontSize:11,color:n.text,marginTop:6}}>
-                        <b>Trabajadores afectados:</b> {trabAf.length?trabAf.map(t=>`${t.nombre} (${t.id})`).join('  ·  '):'sin asignación remuneracional activa'}
+                        <b>Trabajadores afectados:</b> {trabAf.length?trabAf.map(t=>`${t.nombre}${t.rut?` (${t.rut})`:''}`).join('  ·  '):'sin asignación remuneracional activa'}
                       </div>
                       <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
                         <button onClick={()=>setEvalModal({tipo:'renovar',contrato:c,trabajadores:trabAf,nueva:'',responsable:'',obs:''})} style={BTN_EVAL('#1d4ed8')}>Renovar</button>
@@ -650,7 +650,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
                   {evalModal.trabajadores.map(t=>{const on=(evalModal.sel||[]).includes(t.id);return(
                     <label key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 2px',fontSize:13,cursor:'pointer'}}>
                       <input type="checkbox" checked={on} onChange={()=>{const s=new Set(evalModal.sel||[]); on?s.delete(t.id):s.add(t.id); setEvalModal({...evalModal,sel:[...s]});}}/>
-                      {t.nombre} <span style={{color:C.textMuted,fontSize:11}}>({t.id})</span>
+                      {t.nombre} {t.rut&&<span style={{color:C.textMuted,fontSize:11}}>({t.rut})</span>}
                     </label>
                   );})}
                 </div>
@@ -6316,4 +6316,3 @@ if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
     </div>
   );
 }
- 
