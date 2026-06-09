@@ -1647,40 +1647,69 @@ function causalCarta(label){
 
 // Carta de Aviso de Término de Contrato (Art. 162). Causal-aware. opts: {fechaSep, hechos, modalidad, indemnizaciones, sustitutiva}
 function imprimirCartaAviso(trabajador, data, opts={}){
-  const fechaSep = opts.fechaSep || dateOnly(trabajador.fecha_separacion);
-  if(!fechaSep){ alert("El trabajador no tiene fecha de separación registrada."); return; }
-  const cz = causalCarta(trabajador.motivo_termino);
-  const hechos = (opts.hechos||'').trim();
-  const modalidad = opts.modalidad==='presencial' ? 'presencial ante un ministro de fe' : 'electrónica';
-  const domTrab = trabajador.domicilio || trabajador.direccion || '(domicilio señalado en el contrato de trabajo)';
-  // Numeral específico del Art. 160 (incorporado al nombre de la causal).
-  const numeral = (opts.numeral160||'').trim();
-  const nombreCausal = (cz.requiereNumeral && numeral)
-    ? `artículo 160 ${numeral} del Código del Trabajo`
-    : cz.nombre;
-  // Indemnización: prevalece el texto escrito por el usuario; si no, se incorpora la cláusula automática de la causal.
-  const indemTexto = (opts.indemnizaciones||'').trim() || (cz.indemTxt||'').trim();
-  const mesAnt = (()=>{ const d=new Date(fechaSep+'T12:00:00'); d.setDate(0); return fechaLargaCL(d.toISOString().slice(0,10)); })();
+  // Construye un "snapshot" (fotografía congelada) con todo lo necesario para reimprimir
+  // exactamente la misma carta. Si opts._snapshot viene dado, reimprime desde él.
+  let snap;
+  if(opts._snapshot){
+    snap = opts._snapshot;
+  } else {
+    const fechaSep = opts.fechaSep || dateOnly(trabajador.fecha_separacion);
+    if(!fechaSep){ alert("El trabajador no tiene fecha de separación registrada."); return null; }
+    const cz = causalCarta(trabajador.motivo_termino);
+    const numeral = (opts.numeral160||'').trim();
+    const nombreCausal = (cz.requiereNumeral && numeral) ? `artículo 160 ${numeral} del Código del Trabajo` : cz.nombre;
+    const fechaCartaISO = new Date().toISOString().slice(0,10);
+    // ¿Carta programada? La separación cae en un mes POSTERIOR al de emisión → redacción prudente de cotizaciones.
+    const emit=new Date(fechaCartaISO+'T12:00:00'), sep=new Date(fechaSep+'T12:00:00');
+    const programada = (sep.getFullYear()*12+sep.getMonth()) > (emit.getFullYear()*12+emit.getMonth());
+    snap = {
+      nombre: trabajador.nombre||'—',
+      rut: trabajador.rut||'—',
+      domicilio: trabajador.domicilio || trabajador.direccion || '(domicilio señalado en el contrato de trabajo)',
+      fechaCartaISO,
+      fechaSepISO: fechaSep,
+      causalLabel: trabajador.motivo_termino||'',
+      nombreCausal,
+      numeral160: numeral||null,
+      hechos: (opts.hechos||'').trim(),
+      indemTexto: (opts.indemnizaciones||'').trim() || (cz.indemTxt||'').trim(),
+      modalidadCode: opts.modalidad==='presencial' ? 'presencial' : 'electronico',
+      sustitutiva: !!opts.sustitutiva,
+      origen_necesidad: opts.origen_necesidad||null,   // Ola 2
+      requiereCotiz: cz.requiereCotiz,
+      art161: cz.art161,
+      plazoTxt: cz.plazoTxt,
+      programada,
+      generadoPor: opts._generadoPor||'sistema',
+      generadoEn: new Date().toISOString(),
+      _v: 1,
+    };
+  }
 
-  const clausFiniquito = `Se hace presente que el finiquito le será otorgado en forma <b>${modalidad}</b>. Se deja constancia expresa de que es <b>voluntario</b> para usted aceptar, firmar y recibir el pago en forma electrónica; que siempre podrá optar por concurrir personalmente ante un <b>ministro de fe</b> para su ratificación; y que, si lo estima necesario, podrá formular <b>reserva de derechos</b>.`;
-  const clausCotiz = cz.requiereCotiz
-    ? `<div class="clausula"><b>Estado de cotizaciones previsionales.</b> Se informa que sus cotizaciones previsionales se encuentran pagadas hasta el último día del mes anterior al término (${mesAnt}), adjuntándose a esta comunicación los comprobantes que acreditan dicho pago respecto de todo el período trabajado, conforme al artículo 162 del Código del Trabajo.</div>`
+  const modalidadTxt = snap.modalidadCode==='presencial' ? 'presencial ante un ministro de fe' : 'electrónica';
+  const mesAnt = (()=>{ const d=new Date(snap.fechaSepISO+'T12:00:00'); d.setDate(0); return fechaLargaCL(d.toISOString().slice(0,10)); })();
+  const clausFiniquito = `Se hace presente que el finiquito le será otorgado en forma <b>${modalidadTxt}</b>. Se deja constancia expresa de que es <b>voluntario</b> para usted aceptar, firmar y recibir el pago en forma electrónica; que siempre podrá optar por concurrir personalmente ante un <b>ministro de fe</b> para su ratificación; y que, si lo estima necesario, podrá formular <b>reserva de derechos</b>.`;
+  // Cotizaciones: redacción prudente para cartas programadas (evita afirmar un pago futuro).
+  const clausCotiz = snap.requiereCotiz
+    ? (snap.programada
+        ? `<div class="clausula"><b>Estado de cotizaciones previsionales.</b> Se informa que sus cotizaciones previsionales se encuentran pagadas hasta el último mes legalmente exigible a la fecha de emisión de esta comunicación, sin perjuicio de la obligación del empleador de mantenerlas íntegramente pagadas hasta el término efectivo de la relación laboral. Al término se adjuntarán los comprobantes que acreditan dicho pago, conforme al artículo 162 del Código del Trabajo.</div>`
+        : `<div class="clausula"><b>Estado de cotizaciones previsionales.</b> Se informa que sus cotizaciones previsionales se encuentran pagadas hasta el último día del mes anterior al término (${mesAnt}), adjuntándose a esta comunicación los comprobantes que acreditan dicho pago respecto de todo el período trabajado, conforme al artículo 162 del Código del Trabajo.</div>`)
     : '';
-  const clausAviso161 = cz.art161
-    ? `<div class="clausula"><b>Aviso previo.</b> La presente comunicación se efectúa ${cz.plazoTxt}.${opts.sustitutiva?' En consecuencia, se pagará a usted la indemnización sustitutiva del aviso previo, equivalente a la última remuneración mensual devengada.':''}</div>`
+  const clausAviso161 = snap.art161
+    ? `<div class="clausula"><b>Aviso previo.</b> La presente comunicación se efectúa ${snap.plazoTxt}.${snap.sustitutiva?' En consecuencia, se pagará a usted la indemnización sustitutiva del aviso previo, equivalente a la última remuneración mensual devengada.':''}</div>`
     : '';
-  const indemHtml = indemTexto ? `<div class="clausula"><b>Indemnizaciones.</b> ${indemTexto.replace(/\.\s*$/,'')}.</div>` : '';
+  const indemHtml = snap.indemTexto ? `<div class="clausula"><b>Indemnizaciones.</b> ${snap.indemTexto.replace(/\.\s*$/,'')}.</div>` : '';
 
   const cuerpo = `
     <h1>Carta de Aviso de Término de Contrato de Trabajo</h1>
     <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
-    <p style="text-align:right;margin-top:6px">${EMPRESA.ciudad}, ${fechaLargaCL()}</p>
-    <p style="margin:0"><b>Señor(a):</b> ${trabajador.nombre||'—'}<br/>
-       <b>Cédula de identidad:</b> ${trabajador.rut||'—'}<br/>
-       <b>Domicilio:</b> ${domTrab}</p>
+    <p style="text-align:right;margin-top:6px">${EMPRESA.ciudad}, ${fechaLargaCL(snap.fechaCartaISO)}</p>
+    <p style="margin:0"><b>Señor(a):</b> ${snap.nombre}<br/>
+       <b>Cédula de identidad:</b> ${snap.rut}<br/>
+       <b>Domicilio:</b> ${snap.domicilio}</p>
     <p>De mi consideración:</p>
-    <p>Por medio de la presente, y en cumplimiento de lo dispuesto en el <b>artículo 162 del Código del Trabajo</b>, comunico a usted que <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, ha resuelto poner término a su contrato de trabajo a contar del <b>${fechaLargaCL(fechaSep)}</b>, invocando la causal contemplada en el <b>${nombreCausal}</b>.</p>
-    <div class="clausula"><b>Hechos en que se funda el término.</b> ${hechos || '(indicar los hechos concretos que fundamentan la causal invocada)'}.</div>
+    <p>Por medio de la presente, y en cumplimiento de lo dispuesto en el <b>artículo 162 del Código del Trabajo</b>, comunico a usted que <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, ha resuelto poner término a su contrato de trabajo a contar del <b>${fechaLargaCL(snap.fechaSepISO)}</b>, invocando la causal contemplada en el <b>${snap.nombreCausal}</b>.</p>
+    <div class="clausula"><b>Hechos en que se funda el término.</b> ${snap.hechos || '(indicar los hechos concretos que fundamentan la causal invocada)'}.</div>
     ${indemHtml}
     ${clausAviso161}
     ${clausCotiz}
@@ -1689,10 +1718,11 @@ function imprimirCartaAviso(trabajador, data, opts={}){
     <p>Sin otro particular, le saluda atentamente,</p>
     <div class="firmas" style="margin-top:48px">
       <div class="firma">${EMPRESA.repNombre}<br/>RUT ${EMPRESA.repRut}<br/><b>${EMPRESA.repCargo} · p.p. ${EMPRESA.razon}</b></div>
-      <div class="firma">Recibí conforme<br/>Nombre, RUT y fecha<br/><b>${trabajador.nombre||'—'}</b></div>
+      <div class="firma">Recibí conforme<br/>Nombre, RUT y fecha<br/><b>${snap.nombre}</b></div>
     </div>
-    <p class="nota" style="margin-top:18px">Documento generado por el ERP. Notifíquese al trabajador <b>personalmente o por carta certificada</b> al domicilio del contrato, conservando el <b>comprobante de envío</b>. Plazo legal de comunicación: ${cz.plazoTxt||'según la causal invocada'}. ${cz.requiereCotiz?'Adjuntar los comprobantes de pago de cotizaciones previsionales.':''}</p>`;
-  htmlDocImprimir(`Carta de Aviso ${trabajador.nombre||''}`, cuerpo);
+    <p class="nota" style="margin-top:18px">Documento generado por el ERP. Notifíquese al trabajador <b>personalmente o por carta certificada</b> al domicilio del contrato, conservando el <b>comprobante de envío</b>. Plazo legal de comunicación: ${snap.plazoTxt||'según la causal invocada'}. ${snap.requiereCotiz?'Adjuntar los comprobantes de pago de cotizaciones previsionales.':''}</p>`;
+  htmlDocImprimir(`Carta de Aviso ${snap.nombre||''}`, cuerpo);
+  return snap;
 }
 
 // Conversión simple de monto a palabras (para el contrato). Suficiente para sueldos.
@@ -1817,7 +1847,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
     const vs=docs.filter(d=>d.tipo_documento===tipo&&d.origen==='generado_erp').map(d=>Number(d.version||1));
     return vs.length?Math.max(...vs)+1:1;
   };
-  const insertarGenerado=async(tipo,version)=>{
+  const insertarGenerado=async(tipo,version,extra={})=>{
     await insert('documentos_trabajador',{
       id:genDocTrabId(trabajador.id,tipo),
       trabajador_id:trabajador.id,
@@ -1830,6 +1860,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
       archivo_url:null,
       nombre_archivo:null,
       observaciones:`Emitido por ${quien} (v${version})`,
+      ...extra,
     });
   };
   // Al pulsar un botón generador: si ya existe ese tipo (ERP, no anulado), abre modal.
@@ -1881,15 +1912,26 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
   };
 
   // ── Carta de Aviso de Término (Art. 162) ──
-  const openCartaAviso=()=>setCartaModal({
-    fechaSep: dateOnly(trabajador.fecha_separacion)||'',
-    hechos:'', modalidad:'electronico', indemnizaciones:'', sustitutiva:false, numeral160:'',
-  });
+  const openCartaAviso=()=>{
+    const prev=docs.filter(d=>d.tipo_documento==='carta_aviso'&&d.origen==='generado_erp'&&d.estado!=='anulado'&&d.datos_documento)
+                   .sort((a,b)=>Number(b.version||1)-Number(a.version||1))[0];
+    const s=prev?.datos_documento;
+    setCartaModal({
+      fechaSep: (s?dateOnly(s.fechaSepISO):dateOnly(trabajador.fecha_separacion))||'',
+      hechos: s?.hechos||'',
+      modalidad: s?.modalidadCode||'electronico',
+      indemnizaciones: s?.indemTexto||'',
+      sustitutiva: s?.sustitutiva||false,
+      numeral160: s?.numeral160||'',
+    });
+  };
   const generarCartaAviso=async(crearFila)=>{
-    imprimirCartaAviso(trabajador, data, cartaModal);
-    if(crearFila) await insertarGenerado('carta_aviso', proximaVersion('carta_aviso'));
+    const snap=imprimirCartaAviso(trabajador, data, {...cartaModal, _generadoPor:quien});
+    if(snap&&crearFila) await insertarGenerado('carta_aviso', proximaVersion('carta_aviso'), {datos_documento: snap});
     setCartaModal(null);
   };
+  // Reimpresión EXACTA de una versión guardada (fotografía congelada).
+  const reimprimirCarta=(row)=>{ if(row?.datos_documento) imprimirCartaAviso(trabajador, data, {_snapshot: row.datos_documento}); };
 
   // ── Camino 1: subir documento existente escaneado (empresa en marcha) ──
   const openSubir=()=>setSubForm({
@@ -2002,6 +2044,9 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
             {key:"archivo",label:"Archivo",render:r=>r.archivo_url?<button onClick={()=>verArchivo(r)} style={{color:C.accent,background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer"}}>📄 Ver</button>:<span style={{fontSize:11,color:C.textDim}}>—</span>},
             {key:"acc",label:"",render:r=>(
               <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                {r.tipo_documento==='carta_aviso'&&r.datos_documento&&(
+                  <button onClick={()=>reimprimirCarta(r)} title="Reimprime esta versión exactamente como fue generada" style={{color:C.accent,background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:500}}>🖨 Reimprimir v{r.version||1}</button>
+                )}
                 {r.origen==='generado_erp'&&(
                   <button onClick={()=>pickAndUploadFirmado(r,trabajador,update,quien)} title="Subir el PDF/foto del documento firmado" style={{color:C.green,background:"none",border:`1px solid ${C.greenBorder}`,borderRadius:5,padding:"2px 8px",fontSize:11,cursor:"pointer",fontWeight:500}}>⬆️ {r.archivo_url?"Reemplazar firmado":"Subir firmado"}</button>
                 )}
