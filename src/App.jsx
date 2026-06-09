@@ -2923,7 +2923,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                 </div>
                 {!isNew&&(
                   <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 14px'}}>
-                    <span style={{fontWeight:700,fontSize:14,color:C.text}}>{form.id} · {form.nombre||'(sin nombre)'}</span>
+                    <span style={{fontWeight:700,fontSize:14,color:C.text}}>{form.nombre||form.id}</span>
+                    {form.rut&&<span style={{fontSize:12,color:C.textMuted}}>{form.rut}</span>}
                     <span style={{background:estado.bg,color:estado.c,border:`1px solid ${estado.c}33`,borderRadius:5,padding:'2px 8px',fontSize:11,fontWeight:600}}>{estado.t}</span>
                     <span style={{fontSize:12,color:C.textMuted}}>📋 {contratosTxt}</span>
                     {asigs.length>0&&<span style={{fontSize:12,fontWeight:600,color:pctFin>=100?'#166534':pctFin>0?'#9a3412':'#991b1b'}}>{pctFin}% financiado</span>}
