@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+iimport { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isConfigured } from "./supabase.js";
 import { useAuth } from "./contexts/AuthContext.jsx";
 import Login from "./components/Login.jsx";
@@ -193,7 +193,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp","documentos_trabajador","cumplimiento_egreso"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp","documentos_trabajador","cumplimiento_egreso","desvinculaciones_programadas"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -336,6 +336,27 @@ function calcAlertaFiniquito(fechaSeparacion, feriadosSet=FERIADOS_FALLBACK){
   return {legal,objetivo,diasRestLegal,diasRestObj,diasTranscurridos,semaforo,fmtLegal:fmtD(legal),fmtObjetivo:fmtD(objetivo)};
 }
 
+// Contador del preaviso (Art. 161 programado). Días CORRIDOS hasta la fecha de separación.
+function calcPreaviso(fechaSeparacion){
+  if(!fechaSeparacion) return null;
+  const hoy=new Date(); hoy.setHours(12,0,0,0);
+  const fin=new Date(String(fechaSeparacion).split('T')[0]+'T12:00:00');
+  const diasRest=Math.round((fin-hoy)/(1000*60*60*24));
+  let estado='enCurso', sem={bg:'#f0fdf4',text:'#166534',icon:'🟢'};
+  if(diasRest<=0){ estado='cumplido'; sem={bg:'#f5f3ff',text:'#6d28d9',icon:'⚫'}; }
+  else if(diasRest<=3){ sem={bg:'#fef2f2',text:'#991b1b',icon:'🔴'}; }
+  else if(diasRest<=7){ sem={bg:'#fff7ed',text:'#9a3412',icon:'🟠'}; }
+  else if(diasRest<=15){ sem={bg:'#fefce8',text:'#92400e',icon:'🟡'}; }
+  return {diasRest, estado, sem, fmtFin:fin.toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'numeric'})};
+}
+function genDesvProgId(trabajadorId){
+  return `DP-${(trabajadorId||'TR').slice(-4)}-${Date.now().toString(36).toUpperCase()}`;
+}
+// Devuelve la fila de preaviso ACTIVA (programada) de un trabajador, si existe.
+function preavisoActivo(trabajadorId, data){
+  return (data.desvinculaciones_programadas||[]).find(d=>d.trabajador_id===trabajadorId && d.estado==='programada')||null;
+}
+
 function Dashboard({data,contratoId}){
   const hoy=new Date().toISOString().slice(0,10);
   const chks=(contratoId?data.checklist.filter(c=>c.contrato_id===contratoId):data.checklist).filter(c=>c.activa);
@@ -372,7 +393,13 @@ function Dashboard({data,contratoId}){
           return{...t, af};
         }).filter(t=>t.af).sort((a,b)=>a.af.diasRestLegal-b.af.diasRestLegal);
 
-        if(!alertasLic.length && !alertasFin.length) return null;
+        // PANEL 3: Desvinculaciones programadas (Art. 161 — preaviso)
+        const alertasPreaviso=(data.desvinculaciones_programadas||[]).filter(d=>d.estado==='programada').map(d=>{
+          const t=(data.trabajadores||[]).find(x=>x.id===d.trabajador_id);
+          return {...d, _trab:t, cp:calcPreaviso(d.fecha_separacion)};
+        }).filter(d=>d._trab&&d.cp).sort((a,b)=>a.cp.diasRest-b.cp.diasRest);
+
+        if(!alertasLic.length && !alertasFin.length && !alertasPreaviso.length) return null;
 
         const NIVEL={
           vencida: {bg:'#f5f3ff',text:'#6d28d9',icon:'⚫',label:'Vencida'},
@@ -389,6 +416,29 @@ function Dashboard({data,contratoId}){
         };
         return(
           <div style={{marginBottom:20,display:'flex',flexDirection:'column',gap:12}}>
+
+            {/* PANEL 3 — Desvinculaciones programadas (Art. 161 preaviso) */}
+            {alertasPreaviso.length>0&&(
+              <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:'12px 16px'}}>
+                <p style={{fontWeight:700,color:'#1e40af',fontSize:13,marginBottom:10}}>📅 DESVINCULACIONES PROGRAMADAS (PREAVISO)</p>
+                {alertasPreaviso.map((d,i)=>{
+                  const cp=d.cp, cumplido=cp.estado==='cumplido';
+                  return(
+                    <div key={i} style={{background:cp.sem.bg,border:`1px solid ${cp.sem.text}40`,borderRadius:6,padding:'8px 12px',marginBottom:6,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <div>
+                        <span style={{fontWeight:600,color:cp.sem.text,fontSize:13}}>{cp.sem.icon} {d._trab.nombre}</span>
+                        <span style={{fontSize:11,color:cp.sem.text,marginLeft:8}}>Separación: {cp.fmtFin}</span>
+                        {d.sustitutiva&&<span style={{fontSize:11,color:'#991b1b',marginLeft:8}}>· con sustitutiva</span>}
+                      </div>
+                      <span style={{fontSize:12,fontWeight:700,color:cp.sem.text,whiteSpace:'nowrap'}}>
+                        {cumplido?'⚫ FINALIZAR':`faltan ${cp.diasRest} día(s)`}
+                      </span>
+                    </div>
+                  );
+                })}
+                <p style={{fontSize:10,color:C.textMuted,marginTop:4}}>Gestiona cada preaviso (finalizar / anticipar / cancelar) desde la ficha del trabajador → Datos personales.</p>
+              </div>
+            )}
 
             {/* PANEL 2 — Finiquitos por trabajador */}
             {alertasFin.length>0&&(
@@ -997,7 +1047,7 @@ function calcularFiniquitoPreview(trabajador, asignaciones, fechaSep, motivo, ca
 }
 
 /* ─── Modal Desvinculación Guiada ───────────────────────────── */
-function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onClose}) {
+function DesvinculacionModal({trabajador, data, update, insert, terminarAsignacion, onClose}) {
   const [paso, setPaso] = useState(1);
   const [motivo, setMotivo] = useState('');
   const [fechaSep, setFechaSep] = useState(new Date().toISOString().slice(0,10));
@@ -1006,6 +1056,7 @@ function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onCl
   const [saving, setSaving] = useState(false);
 
   const feriadosDB = data.feriados_chile || [];
+  const hoyStr = new Date().toISOString().slice(0,10);
   const MOTIVOS = [
     {val:'art159n4', label:'Art. 159 N°4 — Vencimiento de plazo fijo'},
     {val:'art161',   label:'Art. 161 — Necesidades de la empresa'},
@@ -1013,12 +1064,43 @@ function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onCl
     {val:'art160',   label:'Art. 160 — Falta grave (sin indemnización)'},
   ];
   const motivoLabel = MOTIVOS.find(m=>m.val===motivo)?.label || '';
+  // Preaviso programado: solo Art. 161 con fecha de separación futura.
+  const esProgramado = motivo==='art161' && fechaSep > hoyStr;
+  const diasAviso = (()=>{ const a=new Date(hoyStr+'T12:00:00'), b=new Date(fechaSep+'T12:00:00'); return Math.round((b-a)/(1000*60*60*24)); })();
+  const sustitutivaProg = esProgramado && diasAviso<30;   // <30 días de aviso => corresponde sustitutiva
 
   const calcularPreview = () => {
     if (!motivo || !fechaSep) return;
+    if (esProgramado) { setPaso(3); return; }   // programado: no hay finiquito todavía
     const p = calcularFiniquitoPreview(trabajador, data.asignaciones, fechaSep, motivo, cartaAviso, feriadosDB);
     setPreview(p);
     setPaso(3);
+  };
+
+  // Programar preaviso (Art. 161 con fecha futura): NO desvincula. Trabajador queda en PREAVISO.
+  const programar = async () => {
+    setSaving(true);
+    await insert('desvinculaciones_programadas', {
+      id: genDesvProgId(trabajador.id),
+      trabajador_id: trabajador.id,
+      causal: 'art161',
+      fecha_carta: hoyStr,
+      fecha_separacion: dateNoon(fechaSep),
+      dias_aviso: diasAviso,
+      sustitutiva: sustitutivaProg,
+      estado: 'programada',
+      created_at: new Date().toISOString(),
+    });
+    await update('trabajadores', {
+      ...trabajador,
+      activo: true,                       // sigue activo
+      estado: 'PREAVISO',
+      fecha_separacion: dateNoon(fechaSep),
+      motivo_termino: motivoLabel,
+      // NO se toca finiquito_estado: aún no hay finiquito
+    });
+    setSaving(false);
+    onClose(true, { _programado:true, activo:true, estado:'PREAVISO', fecha_separacion: dateNoon(fechaSep), motivo_termino: motivoLabel });
   };
 
   const confirmar = async () => {
@@ -1099,9 +1181,18 @@ function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onCl
             <p style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:12}}>Fecha y condiciones</p>
             <FL label="Fecha de separación laboral">
               <input type="date" style={INP} value={fechaSep} onChange={e=>setFechaSep(e.target.value)}
-                max={new Date().toISOString().slice(0,10)}/>
+                max={motivo==='art161'?undefined:hoyStr}/>
             </FL>
-            {motivo==='art161'&&(
+            {motivo==='art161'&&fechaSep>hoyStr&&(
+              <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:'10px 12px',marginTop:8,fontSize:12,color:'#1e40af'}}>
+                📅 <b>Desvinculación PROGRAMADA</b> — faltan <b>{diasAviso} día(s)</b> para la separación ({new Date(fechaSep+'T12:00:00').toLocaleDateString('es-CL')}).<br/>
+                {diasAviso>=30
+                  ? <span>Aviso con 30+ días → <b>no corresponde</b> indemnización sustitutiva.</span>
+                  : <span style={{color:'#991b1b'}}>⚠ Menos de 30 días de aviso → <b>se calculará indemnización sustitutiva</b> (1 mes de sueldo).</span>}
+                <br/><span style={{color:C.textMuted}}>El trabajador seguirá <b>activo</b> y en su asignación hasta esa fecha. No se genera finiquito todavía.</span>
+              </div>
+            )}
+            {motivo==='art161'&&fechaSep<=hoyStr&&(
               <div onClick={()=>setCartaAviso(v=>!v)}
                 style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderRadius:8,border:`1px solid ${cartaAviso?C.green:C.border}`,background:cartaAviso?C.greenBg:'transparent',cursor:'pointer',marginTop:8}}>
                 <input type="checkbox" checked={cartaAviso} onChange={()=>{}} style={{accentColor:C.green,width:16,height:16}}/>
@@ -1110,7 +1201,7 @@ function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onCl
                 </span>
               </div>
             )}
-            {motivo==='art161'&&!cartaAviso&&(
+            {motivo==='art161'&&fechaSep<=hoyStr&&!cartaAviso&&(
               <p style={{fontSize:11,color:'#dc2626',marginTop:6}}>
                 Sin carta de aviso → se calculará indemnización sustitutiva (1 mes de sueldo adicional).
               </p>
@@ -1119,14 +1210,42 @@ function DesvinculacionModal({trabajador, data, update, terminarAsignacion, onCl
               <button onClick={()=>setPaso(1)} style={{padding:'8px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>← Atrás</button>
               <button onClick={calcularPreview} disabled={!fechaSep}
                 style={{padding:'8px 16px',borderRadius:6,border:'none',background:'#dc2626',color:'#fff',cursor:'pointer',fontSize:12,fontWeight:600}}>
-                Calcular →
+                {esProgramado?'Revisar →':'Calcular →'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* PASO 3 (programado): resumen del preaviso, sin finiquito */}
+        {paso===3&&esProgramado&&(
+          <div>
+            <p style={{fontWeight:600,fontSize:13,color:'#1e40af',marginBottom:4}}>📅 Programar desvinculación (preaviso)</p>
+            <p style={{fontSize:11,color:C.textMuted,marginBottom:12}}>{trabajador.nombre} · Art. 161 — Necesidades de la empresa</p>
+            <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,padding:12,marginBottom:12,fontSize:12,color:'#1e40af'}}>
+              <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0'}}><span>Fecha de la carta de aviso</span><b>{new Date(hoyStr+'T12:00:00').toLocaleDateString('es-CL')}</b></div>
+              <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0'}}><span>Fecha de separación programada</span><b>{new Date(fechaSep+'T12:00:00').toLocaleDateString('es-CL')}</b></div>
+              <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0'}}><span>Días de aviso</span><b>{diasAviso} día(s)</b></div>
+              <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',borderTop:`1px solid #bfdbfe`,marginTop:4}}>
+                <span>Indemnización sustitutiva</span>
+                <b style={{color:sustitutivaProg?'#991b1b':'#166534'}}>{sustitutivaProg?'Sí (menos de 30 días)':'No corresponde (30+ días)'}</b>
+              </div>
+            </div>
+            <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 12px',marginBottom:12,fontSize:11,color:C.text}}>
+              Durante el preaviso el trabajador sigue <b>activo</b>, en su asignación y generando remuneración. <b>No se genera finiquito</b> todavía. La finalización es <b>manual</b>: al llegar la fecha (o anticipada con confirmación) recién pasa a DESVINCULADO y se abre el finiquito.
+            </div>
+            <p style={{fontSize:11,color:C.textMuted,marginBottom:12}}>Recuerda emitir la <b>Carta de Aviso (Art. 162)</b> desde la pestaña Documentos para respaldar el aviso.</p>
+            <div style={{display:'flex',justifyContent:'space-between',gap:8}}>
+              <button onClick={()=>setPaso(2)} style={{padding:'8px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>← Atrás</button>
+              <button onClick={programar} disabled={saving}
+                style={{padding:'8px 20px',borderRadius:6,border:'none',background:saving?'#e5e7eb':'#2563eb',color:saving?C.textMuted:'#fff',cursor:saving?'not-allowed':'pointer',fontSize:13,fontWeight:700}}>
+                {saving?'Programando...':'📅 Programar preaviso'}
               </button>
             </div>
           </div>
         )}
 
         {/* PASO 3: Vista previa finiquito */}
-        {paso===3&&preview&&(
+        {paso===3&&!esProgramado&&preview&&(
           <div>
             <p style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:4}}>Vista previa del finiquito</p>
             <p style={{fontSize:11,color:C.textMuted,marginBottom:12}}>Basado en sueldo base legal: {clp(preview.sueldoBase)}</p>
@@ -1511,15 +1630,19 @@ function imprimirFiniquito(trabajador, data, opts={}){
 // Clasifica la causal para la Carta de Aviso (Art. 162): nombre legal, plazo, si requiere estado de cotizaciones y si aplica carta de despido.
 function causalCarta(label){
   const l=(label||'').toLowerCase();
-  if(l.includes('163 bis')) return {nombre:'artículo 163 bis del Código del Trabajo (liquidación o reorganización judicial del empleador)', plazoTxt:'dentro de los 6 días hábiles siguientes a la fecha de separación', requiereCotiz:false, aplica:true, art161:false};
-  if(l.includes('161')||l.includes('desahucio')||l.includes('necesidades')) return {nombre:'artículo 161 del Código del Trabajo (necesidades de la empresa)', plazoTxt:'con a lo menos 30 días de anticipación, salvo que se pague la indemnización sustitutiva del aviso previo', requiereCotiz:true, aplica:true, art161:true};
-  if(l.includes('160')) return {nombre:'artículo 160 del Código del Trabajo', plazoTxt:'dentro de los 3 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false};
-  if(l.includes('159')&&(l.includes('n°6')||l.includes('n6')||l.includes('caso fortuito')||l.includes('fuerza mayor'))) return {nombre:'artículo 159 N°6 del Código del Trabajo (caso fortuito o fuerza mayor)', plazoTxt:'dentro de los 6 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false};
-  if(l.includes('159')&&(l.includes('n°5')||l.includes('n5')||l.includes('conclusión')||l.includes('conclusion'))) return {nombre:'artículo 159 N°5 del Código del Trabajo (conclusión del trabajo o servicio que dio origen al contrato)', plazoTxt:'dentro de los 3 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false};
-  if(l.includes('159')&&(l.includes('n°4')||l.includes('n4')||l.includes('vencimiento'))) return {nombre:'artículo 159 N°4 del Código del Trabajo (vencimiento del plazo convenido)', plazoTxt:'dentro de los 3 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false};
-  if(l.includes('mutuo')||(l.includes('159')&&l.includes('n°1'))) return {nombre:'artículo 159 N°1 del Código del Trabajo (mutuo acuerdo de las partes)', plazoTxt:'', requiereCotiz:false, aplica:false, art161:false};
-  if(l.includes('renuncia')||(l.includes('159')&&l.includes('n°2'))) return {nombre:'artículo 159 N°2 del Código del Trabajo (renuncia del trabajador)', plazoTxt:'', requiereCotiz:false, aplica:false, art161:false};
-  return {nombre: label||'(causal no especificada)', plazoTxt:'dentro de los plazos legales que correspondan', requiereCotiz:true, aplica:true, art161:false};
+  // indemTxt: cláusula de indemnización que se incorpora automáticamente a la carta según la causal.
+  // hechosHint: guía dinámica de qué redactar en los hechos.
+  // riesgo: nivel de exigencia documental (bajo|medio|alto). requiereNumeral: pide numeral (Art. 160).
+  const INDEM_NO = 'Por tratarse de esta causal, no procede el pago de indemnización por años de servicio ni de indemnización sustitutiva del aviso previo. Se pagarán únicamente las remuneraciones devengadas y el feriado proporcional que correspondan.';
+  if(l.includes('163 bis')) return {nombre:'artículo 163 bis del Código del Trabajo (liquidación o reorganización judicial del empleador)', plazoTxt:'dentro de los 6 días hábiles siguientes a la fecha de separación', requiereCotiz:false, aplica:true, art161:false, riesgo:'medio', requiereNumeral:false, indemTxt:'En conformidad al artículo 163 bis, corresponde el pago de la indemnización por años de servicio en los términos que la ley establece para este procedimiento.', hechosHint:'Indica la resolución de liquidación o reorganización judicial y su fecha.'};
+  if(l.includes('161')||l.includes('desahucio')||l.includes('necesidades')) return {nombre:'artículo 161 del Código del Trabajo (necesidades de la empresa)', plazoTxt:'con a lo menos 30 días de anticipación, salvo que se pague la indemnización sustitutiva del aviso previo', requiereCotiz:true, aplica:true, art161:true, riesgo:'medio', requiereNumeral:false, indemTxt:'Por tratarse de la causal del artículo 161, corresponde el pago de la indemnización por años de servicio conforme a la antigüedad del trabajador (si procede según su fecha de inicio), además del aviso previo de 30 días o, en su defecto, de la indemnización sustitutiva del aviso previo.', hechosHint:'Explica los motivos objetivos que fundan el término: reestructuración, modernización, cambios en el mercado, baja de productividad, reducción de dotación, etc. Deben ser hechos concretos y verificables, no fórmulas genéricas.'};
+  if(l.includes('160')) return {nombre:'artículo 160 del Código del Trabajo', plazoTxt:'dentro de los 3 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false, riesgo:'alto', requiereNumeral:true, indemTxt:'Por tratarse de una causal del artículo 160 (caducidad por conducta del trabajador), esta no da derecho a indemnización por años de servicio ni a indemnización sustitutiva del aviso previo. Se pagarán únicamente los días efectivamente trabajados del mes y el feriado proporcional que corresponda.', hechosHint:'Detalla el qué, cuándo y cómo de los hechos: fechas exactas, lugar, personas involucradas, testigos, sumarios o procedimientos. La acusación debe ser precisa, comprobable y respaldada con evidencia (amonestaciones, actas, informes). No uses descripciones genéricas.'};
+  if(l.includes('159')&&(l.includes('n°6')||l.includes('n6')||l.includes('caso fortuito')||l.includes('fuerza mayor'))) return {nombre:'artículo 159 N°6 del Código del Trabajo (caso fortuito o fuerza mayor)', plazoTxt:'dentro de los 6 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false, riesgo:'medio', requiereNumeral:false, indemTxt:INDEM_NO, hechosHint:'Describe el hecho de caso fortuito o fuerza mayor: qué ocurrió, cuándo y cómo impidió la continuidad del contrato.'};
+  if(l.includes('159')&&(l.includes('n°5')||l.includes('n5')||l.includes('conclusión')||l.includes('conclusion'))) return {nombre:'artículo 159 N°5 del Código del Trabajo (conclusión del trabajo o servicio que dio origen al contrato)', plazoTxt:'dentro de los 3 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false, riesgo:'bajo', requiereNumeral:false, indemTxt:INDEM_NO, hechosHint:'Identifica el trabajo o servicio que dio origen al contrato y la fecha en que concluyó (por ejemplo, término de la asignación o faena).'};
+  if(l.includes('159')&&(l.includes('n°4')||l.includes('n4')||l.includes('vencimiento'))) return {nombre:'artículo 159 N°4 del Código del Trabajo (vencimiento del plazo convenido)', plazoTxt:'dentro de los 3 días hábiles siguientes a la fecha de separación', requiereCotiz:true, aplica:true, art161:false, riesgo:'bajo', requiereNumeral:false, indemTxt:INDEM_NO, hechosHint:'Señala la fecha exacta de término del plazo pactada en el contrato original o en sus anexos.'};
+  if(l.includes('mutuo')||(l.includes('159')&&l.includes('n°1'))) return {nombre:'artículo 159 N°1 del Código del Trabajo (mutuo acuerdo de las partes)', plazoTxt:'', requiereCotiz:false, aplica:false, art161:false, riesgo:'bajo', requiereNumeral:false, indemTxt:'', hechosHint:''};
+  if(l.includes('renuncia')||(l.includes('159')&&l.includes('n°2'))) return {nombre:'artículo 159 N°2 del Código del Trabajo (renuncia del trabajador)', plazoTxt:'', requiereCotiz:false, aplica:false, art161:false, riesgo:'bajo', requiereNumeral:false, indemTxt:'', hechosHint:''};
+  return {nombre: label||'(causal no especificada)', plazoTxt:'dentro de los plazos legales que correspondan', requiereCotiz:true, aplica:true, art161:false, riesgo:'medio', requiereNumeral:false, indemTxt:'', hechosHint:'Describe con precisión los hechos que fundan el término del contrato.'};
 }
 
 // Carta de Aviso de Término de Contrato (Art. 162). Causal-aware. opts: {fechaSep, hechos, modalidad, indemnizaciones, sustitutiva}
@@ -1530,6 +1653,13 @@ function imprimirCartaAviso(trabajador, data, opts={}){
   const hechos = (opts.hechos||'').trim();
   const modalidad = opts.modalidad==='presencial' ? 'presencial ante un ministro de fe' : 'electrónica';
   const domTrab = trabajador.domicilio || trabajador.direccion || '(domicilio señalado en el contrato de trabajo)';
+  // Numeral específico del Art. 160 (incorporado al nombre de la causal).
+  const numeral = (opts.numeral160||'').trim();
+  const nombreCausal = (cz.requiereNumeral && numeral)
+    ? `artículo 160 ${numeral} del Código del Trabajo`
+    : cz.nombre;
+  // Indemnización: prevalece el texto escrito por el usuario; si no, se incorpora la cláusula automática de la causal.
+  const indemTexto = (opts.indemnizaciones||'').trim() || (cz.indemTxt||'').trim();
   const mesAnt = (()=>{ const d=new Date(fechaSep+'T12:00:00'); d.setDate(0); return fechaLargaCL(d.toISOString().slice(0,10)); })();
 
   const clausFiniquito = `Se hace presente que el finiquito le será otorgado en forma <b>${modalidad}</b>. Se deja constancia expresa de que es <b>voluntario</b> para usted aceptar, firmar y recibir el pago en forma electrónica; que siempre podrá optar por concurrir personalmente ante un <b>ministro de fe</b> para su ratificación; y que, si lo estima necesario, podrá formular <b>reserva de derechos</b>.`;
@@ -1539,7 +1669,7 @@ function imprimirCartaAviso(trabajador, data, opts={}){
   const clausAviso161 = cz.art161
     ? `<div class="clausula"><b>Aviso previo.</b> La presente comunicación se efectúa ${cz.plazoTxt}.${opts.sustitutiva?' En consecuencia, se pagará a usted la indemnización sustitutiva del aviso previo, equivalente a la última remuneración mensual devengada.':''}</div>`
     : '';
-  const indem = (opts.indemnizaciones||'').trim();
+  const indemHtml = indemTexto ? `<div class="clausula"><b>Indemnizaciones.</b> ${indemTexto.replace(/\.\s*$/,'')}.</div>` : '';
 
   const cuerpo = `
     <h1>Carta de Aviso de Término de Contrato de Trabajo</h1>
@@ -1549,9 +1679,9 @@ function imprimirCartaAviso(trabajador, data, opts={}){
        <b>Cédula de identidad:</b> ${trabajador.rut||'—'}<br/>
        <b>Domicilio:</b> ${domTrab}</p>
     <p>De mi consideración:</p>
-    <p>Por medio de la presente, y en cumplimiento de lo dispuesto en el <b>artículo 162 del Código del Trabajo</b>, comunico a usted que <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, ha resuelto poner término a su contrato de trabajo a contar del <b>${fechaLargaCL(fechaSep)}</b>, invocando la causal contemplada en el <b>${cz.nombre}</b>.</p>
+    <p>Por medio de la presente, y en cumplimiento de lo dispuesto en el <b>artículo 162 del Código del Trabajo</b>, comunico a usted que <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, ha resuelto poner término a su contrato de trabajo a contar del <b>${fechaLargaCL(fechaSep)}</b>, invocando la causal contemplada en el <b>${nombreCausal}</b>.</p>
     <div class="clausula"><b>Hechos en que se funda el término.</b> ${hechos || '(indicar los hechos concretos que fundamentan la causal invocada)'}.</div>
-    ${indem?`<div class="clausula"><b>Indemnizaciones.</b> ${indem}.</div>`:''}
+    ${indemHtml}
     ${clausAviso161}
     ${clausCotiz}
     <div class="clausula"><b>Modalidad del finiquito y derechos del trabajador.</b> ${clausFiniquito}</div>
@@ -1664,7 +1794,7 @@ function pickAndUploadFirmado(doc, trabajador, update, quien){
   inp.click();
 }
 
-function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
+function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCarta}){
   const [eppForm,setEppForm]=useState(null);
   const [subForm,setSubForm]=useState(null);      // formulario subir documento externo
   const [subiendo,setSubiendo]=useState(false);
@@ -1737,6 +1867,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
   });
   // Tras la desvinculación guiada, abre automáticamente el generador de finiquito (con revisión, no emite solo)
   useEffect(()=>{ if(autoFiniquito) openFiniquito(); },[autoFiniquito]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{ if(autoCarta) openCartaAviso(); },[autoCarta]);  // eslint-disable-line react-hooks/exhaustive-deps
   const generarFiniquito=async(crearFila)=>{
     imprimirFiniquito(trabajador, data, finiquitoModal);
     if(crearFila){
@@ -1751,7 +1882,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
   // ── Carta de Aviso de Término (Art. 162) ──
   const openCartaAviso=()=>setCartaModal({
     fechaSep: dateOnly(trabajador.fecha_separacion)||'',
-    hechos:'', modalidad:'electronico', indemnizaciones:'', sustitutiva:false,
+    hechos:'', modalidad:'electronico', indemnizaciones:'', sustitutiva:false, numeral160:'',
   });
   const generarCartaAviso=async(crearFila)=>{
     imprimirCartaAviso(trabajador, data, cartaModal);
@@ -2100,29 +2231,61 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
         const cz=causalCarta(trabajador.motivo_termino);
         const existentes=docs.filter(d=>d.tipo_documento==='carta_aviso'&&d.origen==='generado_erp'&&d.estado!=='anulado');
         const yaHay=existentes.length>0;
-        const hechosOk=(cartaModal.hechos||'').trim().length>0;
+        const riesgoAlto = cz.riesgo==='alto';
+        const hechosMin = riesgoAlto ? 60 : 1;                    // Art. 160: exige hechos detallados
+        const numeralOk = !cz.requiereNumeral || (cartaModal.numeral160||'').trim().length>0;
+        const hechosLen = (cartaModal.hechos||'').trim().length;
+        const hechosOk = hechosLen>=hechosMin && numeralOk;
+        const domFalta = !(trabajador.domicilio||trabajador.direccion);
+        const RIESGO = {alto:{txt:'Riesgo jurídico alto',bg:C.redBg||'#fef2f2',bd:C.redBorder||'#fecaca',fg:C.red||'#b91c1c'},medio:{txt:'Riesgo jurídico medio',bg:C.yellowBg,bd:C.yellowBorder,fg:C.yellow},bajo:{txt:'Riesgo jurídico bajo',bg:C.greenBg||'#f0fdf4',bd:C.greenBorder||'#bbf7d0',fg:C.green||'#15803d'}}[cz.riesgo||'medio'];
         return (
           <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>e.target===e.currentTarget&&setCartaModal(null)}>
             <div style={{background:'#fff',borderRadius:12,padding:24,maxWidth:560,width:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
               <p style={{fontWeight:700,fontSize:15,color:C.text,margin:"0 0 4px"}}>📨 Generar Carta de Aviso de Término</p>
               <p style={{fontSize:12,color:C.textMuted,margin:"0 0 14px"}}>{trabajador.nombre} · Art. 162 del Código del Trabajo</p>
-              <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:C.text}}>
-                <b>Causal:</b> {cz.nombre}<br/>
+              <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:C.text}}>
+                <b>Causal:</b> {(cz.requiereNumeral&&(cartaModal.numeral160||'').trim())?`artículo 160 ${cartaModal.numeral160} del Código del Trabajo`:cz.nombre}<br/>
                 <span style={{color:C.textMuted}}>Plazo de comunicación: {cz.plazoTxt||'—'}.</span>
               </div>
+              {cz.aplica&&(
+                <div style={{display:"inline-block",background:RIESGO.bg,border:`1px solid ${RIESGO.bd}`,color:RIESGO.fg,borderRadius:6,padding:"3px 10px",fontSize:11,fontWeight:600,marginBottom:12}}>{RIESGO.txt}</div>
+              )}
+              {cz.aplica&&domFalta&&(
+                <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,color:C.yellow}}>
+                  ⚠ El trabajador <b>no tiene domicilio registrado</b> en la ficha. La carta mostrará un texto de relleno. Para el envío por <b>carta certificada</b> conviene agregarlo en Datos personales. <span style={{color:C.textMuted}}>(No bloquea la generación.)</span>
+                </div>
+              )}
               {!cz.aplica?(
                 <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:12,color:C.yellow}}>
                   Para esta causal (mutuo acuerdo / renuncia) <b>no corresponde</b> una carta de aviso de despido del Art. 162. El término se documenta con el finiquito y, en su caso, la carta de renuncia del trabajador.
                 </div>
               ):(<>
                 <FL label="Fecha de separación"><input type="date" style={INP} value={cartaModal.fechaSep||""} onChange={e=>setCartaModal({...cartaModal,fechaSep:e.target.value})}/></FL>
+                {cz.requiereNumeral&&(<>
+                  <div style={{height:10}}/>
+                  <FL label="Numeral del Art. 160 (obligatorio)">
+                    <select style={INP} value={cartaModal.numeral160||""} onChange={e=>setCartaModal({...cartaModal,numeral160:e.target.value})}>
+                      <option value="">Selecciona el numeral invocado…</option>
+                      <option value="N°1 (falta de probidad, acoso, vías de hecho, injurias o conducta inmoral)">N°1 — Falta de probidad / acoso / vías de hecho / injurias / conducta inmoral</option>
+                      <option value="N°2 (negociaciones incompatibles)">N°2 — Negociaciones incompatibles</option>
+                      <option value="N°3 (inasistencias injustificadas)">N°3 — Inasistencias injustificadas</option>
+                      <option value="N°4 (abandono del trabajo)">N°4 — Abandono del trabajo</option>
+                      <option value="N°5 (actos u omisiones que afectan la seguridad o el funcionamiento; indisciplina)">N°5 — Actos contra la seguridad / indisciplina</option>
+                      <option value="N°6 (perjuicio material causado intencionalmente)">N°6 — Daño material intencional</option>
+                      <option value="N°7 (incumplimiento grave de las obligaciones del contrato)">N°7 — Incumplimiento grave de las obligaciones</option>
+                    </select>
+                  </FL>
+                </>)}
                 <div style={{height:10}}/>
-                <FL label="Hechos en que se funda el término (obligatorio)">
-                  <textarea style={{...INP,height:80,resize:'vertical',fontFamily:'inherit'}} value={cartaModal.hechos} onChange={e=>setCartaModal({...cartaModal,hechos:e.target.value})} placeholder="Describe los hechos concretos que fundamentan la causal invocada."/>
+                <FL label={riesgoAlto?"Hechos en que se funda el término (obligatorio — detalle exigente)":"Hechos en que se funda el término (obligatorio)"}>
+                  <textarea style={{...INP,height:riesgoAlto?120:80,resize:'vertical',fontFamily:'inherit'}} value={cartaModal.hechos} onChange={e=>setCartaModal({...cartaModal,hechos:e.target.value})} placeholder={cz.hechosHint||"Describe los hechos concretos que fundamentan la causal invocada."}/>
+                  <span style={{display:"block",fontSize:11,color:hechosLen>=hechosMin?C.textMuted:(C.red||'#b91c1c'),marginTop:4}}>
+                    {cz.hechosHint}{riesgoAlto?` · Mínimo ${hechosMin} caracteres (${hechosLen}). Adjunta luego las evidencias (amonestaciones, actas, informes) al expediente.`:''}
+                  </span>
                 </FL>
                 <div style={{height:10}}/>
-                <FL label="Indemnizaciones (opcional)">
-                  <input style={INP} value={cartaModal.indemnizaciones} onChange={e=>setCartaModal({...cartaModal,indemnizaciones:e.target.value})} placeholder="Ej: indemnización por años de servicio según finiquito adjunto."/>
+                <FL label="Indemnizaciones (opcional — sobrescribe el texto automático)">
+                  <input style={INP} value={cartaModal.indemnizaciones} onChange={e=>setCartaModal({...cartaModal,indemnizaciones:e.target.value})} placeholder="Vacío = se usa la cláusula automática de la causal. Ej: indemnización años de servicio según finiquito adjunto."/>
                 </FL>
                 <div style={{height:10}}/>
                 <FL label="Modalidad del finiquito">
@@ -2137,9 +2300,14 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito}){
                     Se paga indemnización sustitutiva del aviso previo (cuando no se dio el aviso con 30 días)
                   </label>
                 )}
-                <p style={{fontSize:11,color:C.textDim,margin:"12px 0 14px"}}>El documento incluye automáticamente el plazo según la causal, el estado de cotizaciones (si aplica) y el texto obligatorio sobre finiquito electrónico/presencial, voluntariedad, ministro de fe y reserva de derechos.</p>
+                <p style={{fontSize:11,color:C.textDim,margin:"12px 0 14px"}}>El documento incluye automáticamente: la cláusula de indemnización según la causal, el plazo de comunicación, el estado de cotizaciones (si aplica) y el texto obligatorio sobre finiquito electrónico/presencial, voluntariedad, ministro de fe y reserva de derechos.</p>
               </>)}
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {cz.aplica&&!hechosOk&&(
+                  <p style={{fontSize:11,color:(C.red||'#b91c1c'),margin:0}}>
+                    {!numeralOk?'⚠ Selecciona el numeral del Art. 160 para continuar.':`⚠ Detalla los hechos (mínimo ${hechosMin} caracteres) para continuar.`}
+                  </p>
+                )}
                 {cz.aplica&&<button onClick={()=>generarCartaAviso(true)} disabled={!hechosOk} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.accent}`,background:hechosOk?C.accent:C.border,color:"#fff",cursor:hechosOk?"pointer":"not-allowed",textAlign:"left",fontSize:13,fontWeight:600}}>{yaHay?`🔄 Generar nueva versión (v${proximaVersion('carta_aviso')})`:"📨 Generar carta de aviso (v1)"} <span style={{display:"block",fontSize:11,fontWeight:400,opacity:.9}}>Imprime y agrega la fila a la carpeta documental.</span></button>}
                 {cz.aplica&&yaHay&&<button onClick={()=>generarCartaAviso(false)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:500,color:C.text}}>👁 Solo reimprimir</button>}
                 <button onClick={()=>setCartaModal(null)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,color:C.textMuted}}>✕ Cancelar</button>
@@ -2421,6 +2589,10 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const [asigForm,setAsigForm]=useState(null);
   const [showDesvincular,setShowDesvincular]=useState(false);
   const [autoFiniquito,setAutoFiniquito]=useState(0);   // señal para abrir el generador de finiquito tras desvincular
+  const [autoCarta,setAutoCarta]=useState(0);           // señal para abrir el generador de carta de aviso tras programar preaviso
+  const [preavisoAccion,setPreavisoAccion]=useState(null);  // {tipo:'cancelar'|'finalizar'|'anticipada', motivo, responsable, ...}
+  const { perfil:perfilTrab } = useAuth();
+  const responsableDefault = perfilTrab?.nombre || '';
   const isNew=form&&!data.trabajadores.find(t=>t.id===form.id);
   const asignadosIds=contratoId?(data.asignaciones||[]).filter(a=>a.contrato_id===contratoId&&a.activo).map(a=>a.trabajador_id):null;
   const trabajadoresFiltrados=asignadosIds?data.trabajadores.filter(t=>asignadosIds.includes(t.id)):data.trabajadores;
@@ -2431,7 +2603,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       .filter(p=>p.periodo)
       .sort((a,b)=>String(b.periodo).localeCompare(String(a.periodo)))[0]?.imm;
     setTab("datos");setAsigForm(null);
-    setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:""});
+    setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",domicilio:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:""});
   };
   const save=async()=>{if(!form.nombre.trim())return;const payload={...form,fecha_actualizacion_datos:new Date().toISOString().slice(0,10)};const ok=isNew?await insert("trabajadores",payload):await update("trabajadores",payload);if(ok){setForm(null);setAsigForm(null);}};
 
@@ -2462,6 +2634,41 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     setAsigForm(null);
   };
 
+  // ── Gestión del preaviso (Art. 161 programado) ──
+  // Cancelar preaviso: deja sin efecto, trabajador vuelve a ACTIVO. Motivo obligatorio.
+  const cancelarPreaviso = async (pa, acc) => {
+    await update('desvinculaciones_programadas', {
+      ...pa, estado:'cancelada',
+      motivo_cancelacion: acc.motivo, responsable_cancelacion: acc.responsable||responsableDefault,
+      fecha_cancelacion: new Date().toISOString().slice(0,10),
+    });
+    await update('trabajadores', { ...form, activo:true, estado:'ACTIVO', fecha_separacion:null, motivo_termino:null });
+    setForm(f=>f?{...f, activo:true, estado:'ACTIVO', fecha_separacion:null, motivo_termino:null}:f);
+    setPreavisoAccion(null);
+  };
+  // Finalizar preaviso: trabajador pasa a DESVINCULADO, cierra asignaciones, abre finiquito. Siempre manual.
+  const finalizarPreaviso = async (pa, acc) => {
+    const anticipada = acc.tipo==='anticipada';
+    const fechaSep = anticipada ? new Date().toISOString().slice(0,10) : dateOnly(pa.fecha_separacion);
+    await update('desvinculaciones_programadas', {
+      ...pa, estado:'finalizada',
+      finalizada_por: acc.responsable||responsableDefault,
+      fecha_finalizacion: new Date().toISOString().slice(0,10),
+      finalizacion_anticipada: anticipada,
+      motivo_finalizacion: anticipada ? (acc.motivo||'') : null,
+      sustitutiva_acuerdo: anticipada ? (acc.sustitutiva_acuerdo||'') : null,
+      observaciones: acc.observaciones || pa.observaciones || null,
+    });
+    const desv = { activo:false, estado:'DESVINCULADO', fecha_separacion: dateNoon(fechaSep), motivo_termino: form.motivo_termino||'Art. 161 — Necesidades de la empresa', finiquito_estado:'pendiente' };
+    await update('trabajadores', { ...form, ...desv });
+    const asigActivas = (data.asignaciones||[]).filter(a=>a.trabajador_id===form.id && (a.estado_asig==='activa'||a.activo!==false));
+    for (const a of asigActivas) { await terminarAsignacion(a, fechaSep); }
+    setForm(f=>f?{...f, ...desv}:f);
+    setPreavisoAccion(null);
+    setTab('documentos');           // abre el ciclo de finiquito
+    setAutoFiniquito(Date.now());
+  };
+
   return(
     <div>
       {showDesvincular&&form&&(
@@ -2469,17 +2676,82 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           trabajador={form}
           data={data}
           update={update}
+          insert={insert}
           terminarAsignacion={terminarAsignacion}
           onClose={(refresh, desv)=>{
             setShowDesvincular(false);
             if(refresh){
-              if(desv) setForm(f=>f?{...f,...desv}:f);   // refleja la desvinculación en la ficha sin cerrarla
-              setTab("documentos");                       // lleva al generador de finiquito
-              setAutoFiniquito(Date.now());               // señal para abrir el modal de finiquito
+              if(desv) setForm(f=>f?{...f,...desv}:f);   // refleja el cambio en la ficha sin cerrarla
+              if(desv&&desv._programado){
+                setTab("documentos");                     // preaviso: invita a emitir la carta de aviso
+                setAutoCarta(Date.now());                 // abre el generador de carta
+              }else{
+                setTab("documentos");                     // desvinculación inmediata: abre finiquito
+                setAutoFiniquito(Date.now());
+              }
             }
           }}
         />
       )}
+      {preavisoAccion&&(()=>{
+        const acc=preavisoAccion;
+        const setAcc=o=>setPreavisoAccion({...acc,...o});
+        const esCancelar=acc.tipo==='cancelar';
+        const esAnticipada=acc.tipo==='anticipada';
+        const motivoReq=esCancelar||esAnticipada;       // motivo obligatorio en cancelar y anticipada
+        const motivoOk=!motivoReq||(acc.motivo||'').trim().length>0;
+        const OVL={position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1100,display:'flex',alignItems:'center',justifyContent:'center',padding:16};
+        const BOX={background:'#fff',borderRadius:12,padding:24,maxWidth:480,width:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'};
+        const titulo=esCancelar?'✕ Cancelar preaviso':esAnticipada?'⏩ Finalización anticipada':'✅ Finalizar desvinculación';
+        const onConfirm=()=>esCancelar?cancelarPreaviso(acc.pa,acc):finalizarPreaviso(acc.pa,acc);
+        return (
+          <div style={OVL} onClick={e=>e.target===e.currentTarget&&setPreavisoAccion(null)}>
+            <div style={BOX}>
+              <p style={{fontWeight:700,fontSize:15,color:esCancelar?C.text:'#991b1b',margin:'0 0 4px'}}>{titulo}</p>
+              <p style={{fontSize:12,color:C.textMuted,margin:'0 0 14px'}}>{form?.nombre}</p>
+              {esCancelar&&(
+                <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 12px',marginBottom:12,fontSize:11,color:C.text}}>
+                  El preaviso quedará <b>sin efecto</b>. El trabajador vuelve a <b>ACTIVO</b> y se borra la fecha de separación. Queda registrado en el historial con motivo y responsable.
+                </div>
+              )}
+              {esAnticipada&&(
+                <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'8px 12px',marginBottom:12,fontSize:11,color:'#991b1b'}}>
+                  ⚠ Finalizas <b>antes</b> de la fecha programada. El trabajador pasará a <b>DESVINCULADO hoy</b>, se cerrarán las asignaciones y se abrirá el finiquito. Acción irreversible.
+                </div>
+              )}
+              {!esCancelar&&!esAnticipada&&(
+                <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:8,padding:'8px 12px',marginBottom:12,fontSize:11,color:'#991b1b'}}>
+                  Llegó la fecha programada. El trabajador pasará a <b>DESVINCULADO</b>, se cerrarán las asignaciones y se abrirá el finiquito.
+                </div>
+              )}
+              {motivoReq&&(
+                <FL label={esCancelar?'Motivo de la cancelación (obligatorio)':'Motivo de la finalización anticipada (obligatorio)'}>
+                  <textarea style={{...INP,height:64,resize:'vertical',fontFamily:'inherit'}} value={acc.motivo||''} onChange={e=>setAcc({motivo:e.target.value})} placeholder={esCancelar?'Ej: trabajador reasignado / mandante revierte solicitud / contrato renovado / error de fecha / acuerdo interno.':'Ej: salida anticipada negociada con el trabajador.'}/>
+                </FL>
+              )}
+              {esAnticipada&&(<>
+                <div style={{height:10}}/>
+                <FL label="¿Se paga sustitutiva o existe acuerdo? (opcional)">
+                  <input style={INP} value={acc.sustitutiva_acuerdo||''} onChange={e=>setAcc({sustitutiva_acuerdo:e.target.value})} placeholder="Ej: se paga sustitutiva de 1 mes / acuerdo de salida sin sustitutiva."/>
+                </FL>
+              </>)}
+              <div style={{height:10}}/>
+              <FL label="Responsable"><input style={INP} value={acc.responsable||''} onChange={e=>setAcc({responsable:e.target.value})} placeholder="Nombre de quien autoriza"/></FL>
+              {!esCancelar&&(<>
+                <div style={{height:10}}/>
+                <FL label="Observación (opcional)"><input style={INP} value={acc.observaciones||''} onChange={e=>setAcc({observaciones:e.target.value})} placeholder="Nota interna"/></FL>
+              </>)}
+              <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:16}}>
+                <button onClick={()=>setPreavisoAccion(null)} style={{padding:'8px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>Volver</button>
+                <button onClick={onConfirm} disabled={!motivoOk}
+                  style={{padding:'8px 18px',borderRadius:6,border:'none',background:motivoOk?(esCancelar?'#6b7280':'#dc2626'):'#e5e7eb',color:motivoOk?'#fff':C.textMuted,cursor:motivoOk?'pointer':'not-allowed',fontSize:13,fontWeight:700}}>
+                  {esCancelar?'Cancelar preaviso':esAnticipada?'Finalizar anticipadamente':'Finalizar desvinculación'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       <PageHeader title="Trabajadores" subtitle={contratoId ? `${trabajadoresFiltrados.filter(t=>t.activo).length} asignados` : `${data.trabajadores.filter(t=>t.activo).length} activos`} action={<PrimaryBtn onClick={openNew}>+ Nuevo trabajador</PrimaryBtn>}/>
       {form&&(
         <div style={{background:C.surface,border:`1px solid ${C.accent}`,borderRadius:8,padding:20,marginBottom:16,boxShadow:`0 0 0 3px ${C.accent}14`}}>
@@ -2494,6 +2766,9 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               <FL label="Tipo contrato"><select style={INP} value={form.tipo_contrato||"PLAZO FIJO"} onChange={e=>setForm({...form,tipo_contrato:e.target.value})}><option>PLAZO FIJO</option><option>INDEFINIDO</option><option>HONORARIOS</option></select></FL>
               <FL label="Teléfono"><input style={INP} value={form.telefono} onChange={e=>setForm({...form,telefono:e.target.value})} placeholder="+569XXXXXXXX"/></FL>
               <FL label="Email"><input style={INP} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="correo@empresa.cl"/></FL>
+              <div style={{gridColumn:"1 / -1"}}>
+                <FL label="Domicilio (dirección del contrato — usado en la carta de aviso por carta certificada)"><input style={INP} value={form.domicilio||""} onChange={e=>setForm({...form,domicilio:e.target.value})} placeholder="Calle, número, depto/villa, comuna, ciudad"/></FL>
+              </div>
               <FL label="Correo para notificaciones laborales"><input style={INP} value={form.correo_notificaciones||""} onChange={e=>setForm({...form,correo_notificaciones:e.target.value})} placeholder="correo donde recibe avisos laborales"/></FL>
               <FL label="Autoriza comunicaciones electrónicas">
                 <select style={INP} value={form.autoriza_com_electronica?"si":"no"} onChange={e=>setForm({...form,autoriza_com_electronica:e.target.value==="si"})}>
@@ -2547,15 +2822,42 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   })()}
                 </FL>
               </>}
-              {/* Botón Desvincular — solo para trabajadores activos */}
-              {form.activo!==false&&!isNew&&(
+              {/* Preaviso activo (Art. 161 programado) — gestión */}
+              {!isNew&&form&&(()=>{
+                const pa=preavisoActivo(form.id, data);
+                if(!pa) return null;
+                const cp=calcPreaviso(pa.fecha_separacion);
+                const cumplido=cp&&cp.estado==='cumplido';
+                return (
+                  <div style={{gridColumn:'1/-1',marginTop:8,background:cp?cp.sem.bg:'#eff6ff',border:`1px solid ${cumplido?'#ddd6fe':'#bfdbfe'}`,borderRadius:8,padding:'12px 14px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                      <span style={{fontWeight:700,fontSize:13,color:cp?cp.sem.text:'#1e40af'}}>📅 Desvinculación programada (PREAVISO)</span>
+                      <span style={{fontWeight:700,fontSize:13,color:cp?cp.sem.text:'#1e40af'}}>{cp?(cumplido?`${cp.sem.icon} Fecha cumplida`:`${cp.sem.icon} faltan ${cp.diasRest} día(s)`):''}</span>
+                    </div>
+                    <div style={{fontSize:11,color:C.textMuted,marginBottom:10,display:'flex',gap:14,flexWrap:'wrap'}}>
+                      <span>Carta: <b>{dateOnly(pa.fecha_carta)?new Date(pa.fecha_carta.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL'):'—'}</b></span>
+                      <span>Separación: <b>{cp?cp.fmtFin:'—'}</b></span>
+                      <span>Sustitutiva: <b style={{color:pa.sustitutiva?'#991b1b':'#166534'}}>{pa.sustitutiva?'Sí':'No'}</b></span>
+                    </div>
+                    <p style={{fontSize:11,color:C.text,marginBottom:10}}>El trabajador sigue <b>activo</b> hasta la fecha. La finalización es <b>manual</b>.</p>
+                    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                      {cumplido
+                        ? <button onClick={()=>setPreavisoAccion({tipo:'finalizar',pa,responsable:responsableDefault})} style={{padding:'8px 14px',borderRadius:6,border:'none',background:'#dc2626',color:'#fff',cursor:'pointer',fontSize:12,fontWeight:700}}>✅ Finalizar desvinculación</button>
+                        : <button onClick={()=>setPreavisoAccion({tipo:'anticipada',pa,responsable:responsableDefault})} style={{padding:'8px 14px',borderRadius:6,border:'1px solid #dc2626',background:'transparent',color:'#dc2626',cursor:'pointer',fontSize:12,fontWeight:600}}>⏩ Finalización anticipada</button>}
+                      <button onClick={()=>setPreavisoAccion({tipo:'cancelar',pa,responsable:responsableDefault})} style={{padding:'8px 14px',borderRadius:6,border:`1px solid ${C.border}`,background:C.surface,color:C.text,cursor:'pointer',fontSize:12,fontWeight:600}}>✕ Cancelar preaviso</button>
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* Botón Desvincular — solo para trabajadores activos SIN preaviso en curso */}
+              {form.activo!==false&&!isNew&&!preavisoActivo(form.id,data)&&(
                 <div style={{gridColumn:'1/-1',marginTop:8}}>
                   <button onClick={()=>setShowDesvincular(true)}
                     style={{width:'100%',padding:'10px 0',borderRadius:8,border:'2px solid #dc2626',background:'transparent',color:'#dc2626',cursor:'pointer',fontSize:13,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
                     🚨 Iniciar proceso de desvinculación
                   </button>
                   <p style={{fontSize:10,color:C.textMuted,textAlign:'center',marginTop:4}}>
-                    Guiará el cálculo del finiquito y cerrará las asignaciones automáticamente
+                    Inmediata (finiquito al instante) o programada (Art. 161 con fecha futura → preaviso)
                   </p>
                 </div>
               )}
@@ -2702,6 +3004,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               insert={insert}
               update={update}
               autoFiniquito={autoFiniquito}
+              autoCarta={autoCarta}
             />
           )}
           {tab==="documentos"&&isNew&&(
