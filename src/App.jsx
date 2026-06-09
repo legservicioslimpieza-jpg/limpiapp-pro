@@ -1699,6 +1699,14 @@ function imprimirCartaAviso(trabajador, data, opts={}){
     ? `<div class="clausula"><b>Aviso previo.</b> La presente comunicación se efectúa ${snap.plazoTxt}.${snap.sustitutiva?' En consecuencia, se pagará a usted la indemnización sustitutiva del aviso previo, equivalente a la última remuneración mensual devengada.':''}</div>`
     : '';
   const indemHtml = snap.indemTexto ? `<div class="clausula"><b>Indemnizaciones.</b> ${snap.indemTexto.replace(/\.\s*$/,'')}.</div>` : '';
+  // Hechos: respeta saltos de línea y omite las etiquetas de la plantilla guiada que quedaron sin contenido.
+  const PL_LABELS=['Motivo objetivo:','Fecha de inicio del problema:','Impacto operacional:','Medidas evaluadas previamente:'];
+  const escHtml=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const hechosLineas=(snap.hechos||'').split('\n').map(l=>l.trim()).filter(l=>{
+    if(!l) return false;
+    return !PL_LABELS.some(lb=> l===lb || (l.startsWith(lb)&&l.slice(lb.length).trim()===''));
+  });
+  const hechosHtml = hechosLineas.length ? hechosLineas.map(escHtml).join('<br/>') : '(indicar los hechos concretos que fundamentan la causal invocada)';
 
   const cuerpo = `
     <h1>Carta de Aviso de Término de Contrato de Trabajo</h1>
@@ -1709,7 +1717,7 @@ function imprimirCartaAviso(trabajador, data, opts={}){
        <b>Domicilio:</b> ${snap.domicilio}</p>
     <p>De mi consideración:</p>
     <p>Por medio de la presente, y en cumplimiento de lo dispuesto en el <b>artículo 162 del Código del Trabajo</b>, comunico a usted que <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, ha resuelto poner término a su contrato de trabajo a contar del <b>${fechaLargaCL(snap.fechaSepISO)}</b>, invocando la causal contemplada en el <b>${snap.nombreCausal}</b>.</p>
-    <div class="clausula"><b>Hechos en que se funda el término.</b> ${snap.hechos || '(indicar los hechos concretos que fundamentan la causal invocada)'}.</div>
+    <div class="clausula"><b>Hechos en que se funda el término.</b> ${hechosHtml}</div>
     ${indemHtml}
     ${clausAviso161}
     ${clausCotiz}
