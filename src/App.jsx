@@ -1923,6 +1923,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
       indemnizaciones: s?.indemTexto||'',
       sustitutiva: s?.sustitutiva||false,
       numeral160: s?.numeral160||'',
+      origen_necesidad: s?.origen_necesidad||'',
     });
   };
   const generarCartaAviso=async(crearFila)=>{
@@ -2285,12 +2286,25 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
         const existentes=docs.filter(d=>d.tipo_documento==='carta_aviso'&&d.origen==='generado_erp'&&d.estado!=='anulado');
         const yaHay=existentes.length>0;
         const riesgoAlto = cz.riesgo==='alto';
-        const hechosMin = riesgoAlto ? 60 : 1;                    // Art. 160: exige hechos detallados
+        const hechosMin = riesgoAlto ? 160 : cz.riesgo==='medio' ? 100 : 1;   // alto(160) > medio(161=100) > bajo
         const numeralOk = !cz.requiereNumeral || (cartaModal.numeral160||'').trim().length>0;
-        const hechosLen = (cartaModal.hechos||'').trim().length;
+        const PLANTILLA_LABELS=['Motivo objetivo:','Fecha de inicio del problema:','Impacto operacional:','Medidas evaluadas previamente:'];
+        let hechosContent=(cartaModal.hechos||''); PLANTILLA_LABELS.forEach(lb=>{ hechosContent=hechosContent.split(lb).join(''); });
+        const hechosLen = hechosContent.replace(/\s+/g,' ').trim().length;   // cuenta solo el contenido (sin etiquetas de plantilla)
         const hechosOk = hechosLen>=hechosMin && numeralOk;
         const domFalta = !(trabajador.domicilio||trabajador.direccion);
         const RIESGO = {alto:{txt:'Riesgo jurídico alto',bg:C.redBg||'#fef2f2',bd:C.redBorder||'#fecaca',fg:C.red||'#b91c1c'},medio:{txt:'Riesgo jurídico medio',bg:C.yellowBg,bd:C.yellowBorder,fg:C.yellow},bajo:{txt:'Riesgo jurídico bajo',bg:C.greenBg||'#f0fdf4',bd:C.greenBorder||'#bbf7d0',fg:C.green||'#15803d'}}[cz.riesgo||'medio'];
+        // Cruce con contrato / asignación activa
+        const asigsTrab=(data.asignaciones||[]).filter(a=>a.trabajador_id===trabajador.id && a.estado_asig==='activa' && a.activo!==false);
+        const cruces=asigsTrab.map(a=>({asig:a, contrato:(data.contratos||[]).find(ct=>ct.id===a.contrato_id)}));
+        const ctIds=asigsTrab.map(a=>a.contrato_id);
+        // Respaldo documental disponible (solo referencia; no es causal)
+        const nInc=(data.incidencias||[]).filter(i=>i.trabajador_id===trabajador.id).length;
+        const nSup=(data.supervisiones||[]).filter(s=>ctIds.includes(s.contrato_id)).length;
+        // Origen de la necesidad (Art. 161)
+        const ORIGENES=['Término de contrato','Reducción de dotación','Reestructuración','Disminución de ingresos','Cambios operacionales','Solicitud del mandante','Otro'];
+        const esMandante = cartaModal.origen_necesidad==='Solicitud del mandante';
+        const PLANTILLA_161='Motivo objetivo: \nFecha de inicio del problema: \nImpacto operacional: \nMedidas evaluadas previamente: ';
         return (
           <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>e.target===e.currentTarget&&setCartaModal(null)}>
             <div style={{background:'#fff',borderRadius:12,padding:24,maxWidth:560,width:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
@@ -2314,6 +2328,33 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
                 </div>
               ):(<>
                 <FL label="Fecha de separación"><input type="date" style={INP} value={cartaModal.fechaSep||""} onChange={e=>setCartaModal({...cartaModal,fechaSep:e.target.value})}/></FL>
+                {cruces.length>0&&(
+                  <div style={{marginTop:10,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 12px',fontSize:11,color:C.text}}>
+                    <b>Contrato / asignación asociada</b>
+                    {cruces.map((cr,i)=>(
+                      <div key={i} style={{marginTop:3,color:C.textMuted}}>
+                        • {cr.contrato?(cr.contrato.cliente||cr.contrato.nombre||cr.contrato.id):(cr.asig.contrato_id||'—')}
+                        {cr.contrato?.tipo_centro_costo?` · ${(TIPO_CENTRO_TAG[cr.contrato.tipo_centro_costo]||{}).label||cr.contrato.tipo_centro_costo}`:''}
+                        {cr.contrato?.fecha_termino_contrato?` · término contrato ${dateOnly(cr.contrato.fecha_termino_contrato)}`:''}
+                        {cr.asig?.fecha_termino_asig?` · término asignación ${dateOnly(cr.asig.fecha_termino_asig)}`:''}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {cz.art161&&(<>
+                  <div style={{height:10}}/>
+                  <FL label="Origen de la necesidad">
+                    <select style={INP} value={cartaModal.origen_necesidad||""} onChange={e=>setCartaModal({...cartaModal,origen_necesidad:e.target.value})}>
+                      <option value="">Selecciona el origen…</option>
+                      {ORIGENES.map(o=><option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </FL>
+                  {esMandante&&(
+                    <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:'8px 12px',marginTop:6,fontSize:11,color:C.yellow}}>
+                      ⚠ "Solicitud del mandante" <b>no basta por sí sola</b> como causal legal. La causal sigue siendo el <b>Art. 161</b> (necesidades de la empresa), y debe respaldarse con <b>correo, oficio, acta o informe de supervisión</b>. <span style={{color:C.textMuted}}>(Por ahora solo se advierte; no bloquea.)</span>
+                    </div>
+                  )}
+                </>)}
                 {cz.requiereNumeral&&(<>
                   <div style={{height:10}}/>
                   <FL label="Numeral del Art. 160 (obligatorio)">
@@ -2330,12 +2371,27 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
                   </FL>
                 </>)}
                 <div style={{height:10}}/>
-                <FL label={riesgoAlto?"Hechos en que se funda el término (obligatorio — detalle exigente)":"Hechos en que se funda el término (obligatorio)"}>
-                  <textarea style={{...INP,height:riesgoAlto?120:80,resize:'vertical',fontFamily:'inherit'}} value={cartaModal.hechos} onChange={e=>setCartaModal({...cartaModal,hechos:e.target.value})} placeholder={cz.hechosHint||"Describe los hechos concretos que fundamentan la causal invocada."}/>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:12,fontWeight:600,color:C.text}}>{riesgoAlto?"Hechos en que se funda el término (obligatorio — detalle exigente)":"Hechos en que se funda el término (obligatorio)"}</span>
+                  {cz.art161&&<button type="button" onClick={()=>setCartaModal({...cartaModal,hechos:(cartaModal.hechos?cartaModal.hechos+'\n':'')+PLANTILLA_161})} style={{fontSize:11,color:C.accent,background:'none',border:`1px solid ${C.border}`,borderRadius:5,padding:'2px 8px',cursor:'pointer',fontWeight:500}}>📋 Insertar estructura guiada</button>}
+                </div>
+                <FL label="">
+                  <textarea style={{...INP,height:riesgoAlto?140:110,resize:'vertical',fontFamily:'inherit'}} value={cartaModal.hechos} onChange={e=>setCartaModal({...cartaModal,hechos:e.target.value})} placeholder={cz.hechosHint||"Describe los hechos concretos que fundamentan la causal invocada."}/>
                   <span style={{display:"block",fontSize:11,color:hechosLen>=hechosMin?C.textMuted:(C.red||'#b91c1c'),marginTop:4}}>
-                    {cz.hechosHint}{riesgoAlto?` · Mínimo ${hechosMin} caracteres (${hechosLen}). Adjunta luego las evidencias (amonestaciones, actas, informes) al expediente.`:''}
+                    {cz.hechosHint}{hechosMin>1?` · Mínimo ${hechosMin} caracteres (llevas ${hechosLen}).${riesgoAlto?' Adjunta luego las evidencias (amonestaciones, actas, informes) al expediente.':''}`:''}
                   </span>
                 </FL>
+                <div style={{height:10}}/>
+                <div style={{background:C.surfaceAlt,border:`1px solid ${riesgoAlto?(C.redBorder||'#fecaca'):C.border}`,borderRadius:8,padding:'8px 12px',fontSize:11,color:C.text}}>
+                  📎 <b>Respaldo documental disponible</b> <span style={{color:C.textMuted}}>(solo referencia; no constituye causal)</span>
+                  <div style={{marginTop:4,display:'flex',gap:14,flexWrap:'wrap'}}>
+                    <span>Supervisiones: <b>{nSup}</b></span>
+                    <span>Incidencias: <b>{nInc}</b></span>
+                    <span>Cartas de compromiso: <b>—</b></span>
+                    <span>Amonestaciones: <b>—</b></span>
+                  </div>
+                  <div style={{fontSize:10,color:C.textMuted,marginTop:4}}>Cartas de compromiso y amonestaciones se integrarán con el Expediente de Desvinculación.{riesgoAlto?' En Art. 160, adjunta las evidencias al expediente antes de notificar.':''}</div>
+                </div>
                 <div style={{height:10}}/>
                 <FL label="Indemnizaciones (opcional — sobrescribe el texto automático)">
                   <input style={INP} value={cartaModal.indemnizaciones} onChange={e=>setCartaModal({...cartaModal,indemnizaciones:e.target.value})} placeholder="Vacío = se usa la cláusula automática de la causal. Ej: indemnización años de servicio según finiquito adjunto."/>
@@ -2359,7 +2415,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
                 {cz.aplica&&!hechosOk&&(
                   <p style={{fontSize:11,color:(C.red||'#b91c1c'),margin:0}}>
                     {!numeralOk?'⚠ Selecciona el numeral del Art. 160 para continuar.'
-                      :riesgoAlto?`⚠ Detalla los hechos (mínimo ${hechosMin} caracteres; llevas ${hechosLen}) para continuar.`
+                      :hechosMin>1?`⚠ Detalla los hechos (mínimo ${hechosMin} caracteres; llevas ${hechosLen}) para continuar.`
                       :'⚠ Escribe los hechos para continuar.'}
                   </p>
                 )}
