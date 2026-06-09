@@ -505,7 +505,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
                       <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
                         <button onClick={()=>setEvalModal({tipo:'renovar',contrato:c,trabajadores:trabAf,nueva:'',responsable:'',obs:''})} style={BTN_EVAL('#1d4ed8')}>Renovar</button>
                         <button onClick={()=>setEvalModal({tipo:'reasignar',contrato:c,trabajadores:trabAf,responsable:'',obs:''})} style={BTN_EVAL('#0e7490')}>Reasignar</button>
-                        <button onClick={()=>setEvalModal({tipo:'art161',contrato:c,trabajadores:trabAf,sel:trabAf.map(t=>t.id),fecha:'',responsable:'',obs:''})} style={BTN_EVAL('#b45309')} disabled={!trabAf.length} title={trabAf.length?'':'No hay trabajadores afectados'}>Iniciar Art. 161 programado</button>
+                        <button onClick={()=>setEvalModal({tipo:'art161',contrato:c,trabajadores:trabAf,sel:trabAf.filter(t=>!preavisoActivo(t.id,data)).map(t=>t.id),fecha:'',responsable:'',obs:''})} style={BTN_EVAL('#b45309')} disabled={!trabAf.length} title={trabAf.length?'':'No hay trabajadores afectados'}>Iniciar Art. 161 programado</button>
                         <button onClick={()=>setEvalModal({tipo:'no_aplica',contrato:c,trabajadores:trabAf,motivo:'',responsable:''})} style={BTN_EVAL('#6b7280')}>No aplica</button>
                       </div>
                     </div>
@@ -616,7 +616,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
         const doArt161=async()=>{
           if(!evalModal.fecha||!(evalModal.sel||[]).length)return;
           const diasAviso=Math.round((new Date(evalModal.fecha+'T12:00:00')-new Date(hoy+'T12:00:00'))/86400000); const sustitutiva=diasAviso<30;
-          for(const tid of (evalModal.sel||[])){ const w=(data.trabajadores||[]).find(x=>x.id===tid); if(!w)continue;
+          for(const tid of (evalModal.sel||[])){ const w=(data.trabajadores||[]).find(x=>x.id===tid); if(!w||preavisoActivo(tid,data))continue;
             await insert('desvinculaciones_programadas',{id:genDesvProgId(tid),trabajador_id:tid,causal:'art161',fecha_carta:hoy,fecha_separacion:dateNoon(evalModal.fecha),dias_aviso:diasAviso,sustitutiva,estado:'programada',created_at:new Date().toISOString()});
             await update('trabajadores',{...w,activo:true,estado:'PREAVISO',fecha_separacion:dateNoon(evalModal.fecha),motivo_termino:'Art. 161 — Necesidades de la empresa'});
           }
@@ -647,10 +647,11 @@ function Dashboard({data,contratoId,insert,update,setTab}){
               {T==='art161'&&(<>
                 <p style={{fontSize:12,color:C.textMuted,marginBottom:8}}>Selecciona los trabajadores a programar. Cada uno quedará en <b>PREAVISO</b> (no se desvincula). La carta de aviso se emite luego desde la ficha de cada trabajador.</p>
                 <div style={{border:`1px solid ${C.border}`,borderRadius:6,padding:8,marginBottom:10,maxHeight:160,overflowY:'auto'}}>
-                  {evalModal.trabajadores.map(t=>{const on=(evalModal.sel||[]).includes(t.id);return(
-                    <label key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 2px',fontSize:13,cursor:'pointer'}}>
-                      <input type="checkbox" checked={on} onChange={()=>{const s=new Set(evalModal.sel||[]); on?s.delete(t.id):s.add(t.id); setEvalModal({...evalModal,sel:[...s]});}}/>
+                  {evalModal.trabajadores.map(t=>{const on=(evalModal.sel||[]).includes(t.id);const yaPre=preavisoActivo(t.id,data);return(
+                    <label key={t.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 2px',fontSize:13,cursor:yaPre?'not-allowed':'pointer',opacity:yaPre?0.55:1}}>
+                      <input type="checkbox" disabled={yaPre} checked={on&&!yaPre} onChange={()=>{const s=new Set(evalModal.sel||[]); on?s.delete(t.id):s.add(t.id); setEvalModal({...evalModal,sel:[...s]});}}/>
                       {t.nombre} {t.rut&&<span style={{color:C.textMuted,fontSize:11}}>({t.rut})</span>}
+                      {yaPre&&<span style={{color:'#1e40af',fontSize:11}}>· ya en preaviso</span>}
                     </label>
                   );})}
                 </div>
