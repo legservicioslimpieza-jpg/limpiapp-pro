@@ -2880,6 +2880,32 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       <PageHeader title="Trabajadores" subtitle={contratoId ? `${trabajadoresFiltrados.filter(t=>t.activo).length} asignados` : `${data.trabajadores.filter(t=>t.activo).length} activos`} action={<PrimaryBtn onClick={openNew}>+ Nuevo trabajador</PrimaryBtn>}/>
       {form&&(
         <div style={{background:C.surface,border:`1px solid ${C.accent}`,borderRadius:8,padding:20,marginBottom:16,boxShadow:`0 0 0 3px ${C.accent}14`}}>
+          {(()=>{
+            const pa=preavisoActivo(form.id, data);
+            const estado=(form.activo===false||form.estado==='DESVINCULADO')?{t:'Desvinculado',c:'#6b7280',bg:'#f3f4f6'}
+              :(form.estado==='PREAVISO'||pa)?{t:'Preaviso',c:'#1e40af',bg:'#eff6ff'}
+              :{t:'Activo',c:'#166534',bg:'#f0fdf4'};
+            const asigs=(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id&&a.activo!==false&&a.estado_asig!=='terminada');
+            const contratosTxt=asigs.length?asigs.map(a=>{const c=(data.contratos||[]).find(x=>x.id===a.contrato_id);return c?(c.cliente||c.nombre||c.id):a.contrato_id;}).join(' + '):'Sin asignación activa';
+            const pctFin=asigs.reduce((s,a)=>s+(Number(a.porcentaje_costo)||0),0);
+            const tabLabel={datos:'Datos personales',remuneracion:'Remuneración',asignaciones:'Asignaciones',anexos:'Anexos',documentos:'Documentos',expediente:'Expediente'}[tab]||'';
+            return (
+              <div style={{marginBottom:14}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,flexWrap:'wrap',gap:8}}>
+                  <button onClick={()=>{setForm(null);setTab('datos');}} style={{background:'none',border:`1px solid ${C.border}`,borderRadius:6,padding:'4px 10px',fontSize:12,cursor:'pointer',color:C.text,fontWeight:600}}>← Volver a Trabajadores</button>
+                  <span style={{fontSize:11,color:C.textMuted}}>Trabajadores › <b style={{color:C.text}}>{isNew?'Nuevo trabajador':(form.nombre||form.id)}</b>{tabLabel?` › ${tabLabel}`:''}</span>
+                </div>
+                {!isNew&&(
+                  <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 14px'}}>
+                    <span style={{fontWeight:700,fontSize:14,color:C.text}}>{form.id} · {form.nombre||'(sin nombre)'}</span>
+                    <span style={{background:estado.bg,color:estado.c,border:`1px solid ${estado.c}33`,borderRadius:5,padding:'2px 8px',fontSize:11,fontWeight:600}}>{estado.t}</span>
+                    <span style={{fontSize:12,color:C.textMuted}}>📋 {contratosTxt}</span>
+                    <span style={{fontSize:12,fontWeight:600,color:pctFin>=100?'#166534':pctFin>0?'#9a3412':'#991b1b'}}>{pctFin}% financiado</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <div style={{display:"flex",gap:8,marginBottom:16,borderBottom:`1px solid ${C.borderLight}`,paddingBottom:12}}>
             {["datos","remuneracion","asignaciones","anexos","documentos","expediente"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.textMuted,border:`1px solid ${tab===t?C.accent:C.border}`,borderRadius:6,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:tab===t?600:400}}>{t==="datos"?"Datos personales":t==="remuneracion"?"Remuneración":t==="asignaciones"?"Asignaciones":t==="anexos"?"Anexos":t==="documentos"?"Documentos":"Expediente"}</button>)}
           </div>
