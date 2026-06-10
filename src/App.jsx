@@ -1188,6 +1188,9 @@ function DesvinculacionModal({trabajador, data, update, insert, terminarAsignaci
   const [cartaAviso, setCartaAviso] = useState(false);
   const [preview, setPreview] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [avisoMultiOk, setAvisoMultiOk] = useState(false);
+  const asignacionesActivas = (data.asignaciones||[]).filter(a=>a.trabajador_id===trabajador.id && a.estado_asig==='activa' && a.activo!==false);
+  const mostrarAvisoMulti = asignacionesActivas.length>1 && !avisoMultiOk;
 
   const feriadosDB = data.feriados_chile || [];
   const hoyStr = new Date().toISOString().slice(0,10);
@@ -1277,14 +1280,37 @@ function DesvinculacionModal({trabajador, data, update, insert, terminarAsignaci
         </div>
 
         {/* Indicador de pasos */}
+        {!mostrarAvisoMulti && (
         <div style={{display:'flex',gap:4,marginBottom:20}}>
           {[1,2,3,4].map(n=>(
             <div key={n} style={{flex:1,height:4,borderRadius:2,background:n<=paso?'#dc2626':C.borderLight}}/>
           ))}
         </div>
+        )}
+
+        {/* PASO 0: advertencia obligatoria si hay multiples asignaciones activas */}
+        {mostrarAvisoMulti && (
+          <div>
+            <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,padding:'12px 14px',marginBottom:14}}>
+              <p style={{fontWeight:700,fontSize:13,color:'#991b1b',marginBottom:8}}>⚠ Esta desvinculación terminará TODAS las asignaciones activas del trabajador.</p>
+              <div style={{marginBottom:8}}>
+                {asignacionesActivas.map(a=>{ const c=(data.contratos||[]).find(x=>x.id===a.contrato_id); return (
+                  <div key={a.id} style={{fontSize:12,color:'#7f1d1d',padding:'2px 0'}}>• {a.contrato_id}{c&&c.cliente?` — ${c.cliente}`:''}</div>
+                ); })}
+              </div>
+              <p style={{fontSize:11.5,color:'#92400e',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:6,padding:'8px 10px',margin:0}}>
+                Si solo deseas <b>terminar una asignación</b> sin desvincular al trabajador, usa <b>Asignaciones → Terminar</b> (ahí se genera el anexo si corresponde).
+              </p>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}>
+              <button onClick={()=>onClose(false,{_irAsignaciones:true})} style={{padding:'9px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12,fontWeight:600,color:C.text}}>← Ir a Asignaciones</button>
+              <button onClick={()=>setAvisoMultiOk(true)} style={{padding:'9px 16px',borderRadius:6,border:'none',background:'#dc2626',color:'#fff',cursor:'pointer',fontSize:12,fontWeight:700}}>Continuar con desvinculación completa</button>
+            </div>
+          </div>
+        )}
 
         {/* PASO 1: Motivo */}
-        {paso===1&&(
+        {!mostrarAvisoMulti && paso===1&&(
           <div>
             <p style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:12}}>Motivo de término</p>
             {MOTIVOS.map(m=>(
@@ -2939,6 +2965,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           terminarAsignacion={terminarAsignacion}
           onClose={(refresh, desv)=>{
             setShowDesvincular(false);
+            if(desv&&desv._irAsignaciones){ setTab("asignaciones"); return; }
             if(refresh){
               if(desv) setForm(f=>f?{...f,...desv}:f);   // refleja el cambio en la ficha sin cerrarla
               if(desv&&desv._programado){
