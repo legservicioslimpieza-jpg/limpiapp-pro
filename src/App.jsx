@@ -409,14 +409,16 @@ function Dashboard({data,contratoId,insert,update,setTab}){
         const feriadosSet=buildFeriadosSet(data.feriados_chile||[]);
 
         // PANEL 1: Vencimiento de licitaciones / continuidad contractual
-        const evalResueltas=new Set((data.evaluaciones_vencimiento||[]).filter(e=>e.estado!=='pendiente').map(e=>`${e.contrato_id}|${(e.detalle&&e.detalle.termino_evaluado)||''}`));
+        const evalsResueltas=(data.evaluaciones_vencimiento||[]).filter(e=>e.estado!=='pendiente');
         const alertasLic=(data.contratos||[]).filter(c=>c.fecha_termino_contrato&&c.activo).map(c=>{
           const u=umbralAlertaContrato(c);
           if(!u.alertaTermino) return null;                       // privado permanente: sin alerta de termino
-          if(evalResueltas.has(`${c.id}|${dateOnly(c.fecha_termino_contrato)}`)) return null;  // ya evaluado para esta fecha
           const a=calcAlertaLicitacion(c.fecha_termino_contrato, u.diasAlerta, feriadosSet);
-          return{...c, alerta:a};
-        }).filter(c=>c&&c.alerta&&c.alerta.nivel!=='normal').sort((a,b)=>a.alerta.diasCal-b.alerta.diasCal);
+          if(!a||a.nivel==='normal') return null;                 // fuera del umbral por tipo: no mostrar
+          const ev=evalsResueltas.filter(e=>e.contrato_id===c.id&&((e.detalle&&e.detalle.termino_evaluado)||'')===dateOnly(c.fecha_termino_contrato))
+            .sort((x,y)=>String(y.fecha_resolucion||y.created_at||'').localeCompare(String(x.fecha_resolucion||x.created_at||'')))[0];
+          return{...c, alerta:a, resuelta:ev||null};               // resuelto dentro de rango: se muestra con chip, no desaparece
+        }).filter(Boolean).sort((a,b)=>a.alerta.diasCal-b.alerta.diasCal);
 
         // PANEL 2: Finiquitos pendientes por trabajador (fecha_separacion individual)
         const alertasFin=(data.trabajadores||[]).filter(t=>
@@ -440,6 +442,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
           naranja: {bg:'#fff7ed',text:'#9a3412',icon:'🟠',label:'Urgente'},
           amarilla:{bg:'#fefce8',text:'#92400e',icon:'⚠️',label:'Atención'},
         };
+        const ACCION_LABEL={renovar:'Renovado',reasignar:'Reasignado',art161:'Art. 161 programado',no_aplica:'No aplica'};
         const SEM={
           vencido: {bg:'#f5f3ff',text:'#6d28d9',icon:'⚫'},
           rojo:    {bg:'#fef2f2',text:'#991b1b',icon:'🔴'},
@@ -530,12 +533,20 @@ function Dashboard({data,contratoId,insert,update,setTab}){
                       <div style={{fontSize:11,color:n.text,marginTop:6}}>
                         <b>Trabajadores afectados:</b> {trabAf.length?trabAf.map(t=>`${t.nombre}${t.rut?` (${t.rut})`:''}`).join('  ·  '):'sin asignación remuneracional activa'}
                       </div>
+                      {c.resuelta?(
+                        <div style={{marginTop:8}}>
+                          <span style={{display:'inline-block',background:'#ecfdf5',border:'1px solid #a7f3d0',color:'#047857',borderRadius:6,fontSize:11,fontWeight:600,padding:'4px 10px'}}>
+                            ✅ Resuelto · {ACCION_LABEL[c.resuelta.accion]||c.resuelta.accion||'evaluado'}{c.resuelta.responsable?` · ${c.resuelta.responsable}`:''}{(c.resuelta.fecha_resolucion||c.resuelta.created_at)?` · ${new Date(String(c.resuelta.fecha_resolucion||c.resuelta.created_at).split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}`:''}
+                          </span>
+                        </div>
+                      ):(
                       <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
                         <button onClick={()=>setEvalModal({tipo:'renovar',contrato:c,trabajadores:trabAf,nueva:'',responsable:'',obs:''})} style={BTN_EVAL('#1d4ed8')}>Renovar</button>
                         <button onClick={()=>setEvalModal({tipo:'reasignar',contrato:c,trabajadores:trabAf,responsable:'',obs:''})} style={BTN_EVAL('#0e7490')}>Reasignar</button>
                         <button onClick={()=>setEvalModal({tipo:'art161',contrato:c,trabajadores:trabAf,sel:trabAf.filter(t=>!preavisoActivo(t.id,data)).map(t=>t.id),fecha:'',responsable:'',obs:''})} style={BTN_EVAL('#b45309')} disabled={!trabAf.length} title={trabAf.length?'':'No hay trabajadores afectados'}>Iniciar Art. 161 programado</button>
                         <button onClick={()=>setEvalModal({tipo:'no_aplica',contrato:c,trabajadores:trabAf,motivo:'',responsable:''})} style={BTN_EVAL('#6b7280')}>No aplica</button>
                       </div>
+                      )}
                     </div>
                   );
                 })}
@@ -778,13 +789,22 @@ function Contratos({data,insert,update}){
             {key:"financ",label:"Financiamiento",render:r=>{const f=FINANC_TAG[r.estado_financiero||"financiado"]||FINANC_TAG["financiado"];return<span style={{fontSize:11,color:f.text,background:f.bg,border:`1px solid ${f.border}`,borderRadius:4,padding:"2px 8px",display:"inline-block",whiteSpace:"nowrap"}}>{f.icon} {(r.estado_financiero||"financiado").replace(/_/g," ")}</span>;}},
             {key:"vence",label:"Vencimiento",render:r=>{
               if(!r.fecha_termino_contrato) return <span style={{color:C.textMuted,fontSize:11}}>—</span>;
-              const a=calcAlertaLicitacion(r.fecha_termino_contrato, r.dias_alerta||60);
+              const u=umbralAlertaContrato(r);
+              const a=u.alertaTermino?calcAlertaLicitacion(r.fecha_termino_contrato, u.diasAlerta):null;
               const fechaDisplay=new Date(r.fecha_termino_contrato.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL');
               if(!r.activo||r.estado==='Inactivo'){
                 return(
                   <div style={{fontSize:11}}>
                     <span style={{color:C.textMuted}}>{fechaDisplay}</span>
                     <br/><span style={{color:'#6d28d9',fontWeight:600}}>⚫ Vencida</span>
+                  </div>
+                );
+              }
+              if(!a){
+                return(
+                  <div style={{fontSize:11}}>
+                    <span style={{color:C.textMuted}}>{fechaDisplay}</span>
+                    <br/><span style={{color:C.textMuted,fontWeight:600}}>♾️ Permanente</span>
                   </div>
                 );
               }
