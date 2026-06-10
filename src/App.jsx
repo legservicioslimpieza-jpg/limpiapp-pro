@@ -171,6 +171,34 @@ function FL({label,children,span}) {
   );
 }
 const INP={width:"100%",background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,boxSizing:"border-box"};
+// Campo de fecha con escritura libre dd/mm/aaaa (valida solo al completar 10 caracteres) + calendario.
+// Permite fechas futuras (salvo que se pase max). No transforma ni guarda fechas parciales.
+function FechaInput({value,onChange,style,max}){
+  const isoToDisp=iso=>{ if(!iso) return ''; const p=String(iso).split('T')[0].split('-'); return (p.length===3&&p[0]&&p[1]&&p[2])?`${p[2]}/${p[1]}/${p[0]}`:''; };
+  const [txt,setTxt]=useState(isoToDisp(value));
+  const [msg,setMsg]=useState('');
+  useEffect(()=>{ setTxt(isoToDisp(value)); },[value]);
+  const commit=v=>{
+    if(v.length===0){ setMsg(''); onChange(''); return; }
+    if(v.length<10){ setMsg('Completa la fecha en formato dd/mm/aaaa'); return; }
+    const m=v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if(!m){ setMsg('Completa la fecha en formato dd/mm/aaaa'); return; }
+    const d=m[1],mo=m[2],y=m[3]; const iso=`${y}-${mo}-${d}`; const dt=new Date(iso+'T12:00:00');
+    if(isNaN(dt)||dt.getFullYear()!=+y||(dt.getMonth()+1)!=+mo||dt.getDate()!=+d){ setMsg('Fecha inválida'); return; }
+    if(max&&iso>max){ setMsg('La fecha no puede ser posterior a hoy'); return; }
+    setMsg(''); onChange(iso);
+  };
+  const onText=e=>{ const v=e.target.value.replace(/[^\d/]/g,'').slice(0,10); setTxt(v); if(v.length===10||v.length===0) commit(v); else setMsg('Completa la fecha en formato dd/mm/aaaa'); };
+  return (
+    <div>
+      <div style={{display:'flex',gap:6,alignItems:'center'}}>
+        <input style={{...(style||INP),flex:1}} value={txt} onChange={onText} placeholder="dd/mm/aaaa" inputMode="numeric" maxLength={10}/>
+        <input type="date" aria-label="Abrir calendario" title="Calendario" style={{width:36,minWidth:36,padding:'6px 2px',border:`1px solid ${C.border}`,borderRadius:6,background:C.surface,color:C.text,boxSizing:'border-box',cursor:'pointer'}} value={value?String(value).split('T')[0]:''} max={max||undefined} onChange={e=>{ const iv=e.target.value; if(iv){ setTxt(isoToDisp(iv)); setMsg(''); onChange(iv); } }}/>
+      </div>
+      {msg&&<div style={{fontSize:11,color:'#9a3412',marginTop:4}}>{msg}</div>}
+    </div>
+  );
+}
 function PrimaryBtn({onClick,children,disabled,color,small}){
   return <button onClick={onClick} disabled={disabled} style={{background:disabled?"#e5e7eb":(color||C.accent),color:"#fff",border:"none",borderRadius:6,padding:small?"5px 12px":"7px 16px",fontSize:12,fontWeight:600,cursor:disabled?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:5}}>{children}</button>;
 }
@@ -632,7 +660,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
               <h3 style={{margin:'0 0 4px',fontSize:16,color:C.text}}>{titulo}</h3>
               <p style={{fontSize:12,color:C.textMuted,marginBottom:14}}>{c.id} — {c.cliente||'(sin cliente)'} · vence {new Date(c.fecha_termino_contrato.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}</p>
               {T==='renovar'&&(<>
-                <FL label="Nueva fecha de término"><input type="date" style={INP} value={evalModal.nueva} onChange={e=>setEvalModal({...evalModal,nueva:e.target.value})}/></FL>
+                <FL label="Nueva fecha de término"><FechaInput value={evalModal.nueva} onChange={v=>setEvalModal({...evalModal,nueva:v})} style={INP}/></FL>
                 <div style={{height:8}}/>
                 <FL label="Responsable"><input style={INP} value={evalModal.responsable} onChange={e=>setEvalModal({...evalModal,responsable:e.target.value})} placeholder="Quien autoriza la renovación"/></FL>
                 <div style={{height:8}}/>
@@ -655,7 +683,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
                     </label>
                   );})}
                 </div>
-                <FL label="Fecha de separación (futura)"><input type="date" style={INP} value={evalModal.fecha} onChange={e=>setEvalModal({...evalModal,fecha:e.target.value})}/></FL>
+                <FL label="Fecha de separación (futura)"><FechaInput value={evalModal.fecha} onChange={v=>setEvalModal({...evalModal,fecha:v})} style={INP}/></FL>
                 {evalModal.fecha&&(()=>{const d=Math.round((new Date(evalModal.fecha+'T12:00:00')-new Date(hoy+'T12:00:00'))/86400000);return <p style={{fontSize:11,color:d<30?'#b45309':'#166534',marginTop:6}}>{d} días de aviso · {d<30?'con indemnización sustitutiva':'sin sustitutiva (≥30 días)'}</p>;})()}
                 <div style={{height:8}}/>
                 <FL label="Responsable"><input style={INP} value={evalModal.responsable} onChange={e=>setEvalModal({...evalModal,responsable:e.target.value})}/></FL>
@@ -730,8 +758,8 @@ function Contratos({data,insert,update}){
           <FL label="Tipo de centro"><select style={INP} value={form.tipo_centro_costo||"LICITACION_PUBLICA"} onChange={e=>setForm({...form,tipo_centro_costo:e.target.value})}><option value="LICITACION_PUBLICA">Licitación pública (alerta 33 días)</option><option value="LICITACION_PRIVADA">Licitación privada (configurable)</option><option value="PRIVADO_PERMANENTE">Contrato privado permanente (sin alerta de término)</option><option value="EVENTUAL">Servicio eventual (alerta 15 días)</option><option value="CORPORATIVO">Corporativo (configurable)</option><option value="LICITACION">Licitación (legado)</option></select></FL>
           <FL label="Estado"><select style={INP} value={form.estado} onChange={e=>setForm({...form,estado:e.target.value,activo:["Vigente","Renovación"].includes(e.target.value)})}>{ESTADOS_CT.map(s=><option key={s}>{s}</option>)}</select></FL>
           <FL label="Financiamiento"><select style={INP} value={form.estado_financiero||"financiado"} onChange={e=>setForm({...form,estado_financiero:e.target.value})}><option value="financiado">🟢 Financiado</option><option value="parcial">🟡 Parcial</option><option value="sin_financiamiento">🔴 Sin financiamiento</option><option value="en_riesgo">🟠 En riesgo</option><option value="cerrado">⚫ Cerrado</option></select></FL>
-          <FL label="Fecha inicio licitación"><input type="date" style={INP} value={form.fecha_inicio_contrato||""} onChange={e=>setForm({...form,fecha_inicio_contrato:e.target.value})}/></FL>
-          <FL label="Fecha término licitación"><input type="date" style={INP} value={form.fecha_termino_contrato||""} onChange={e=>setForm({...form,fecha_termino_contrato:e.target.value})}/></FL>
+          <FL label="Fecha inicio licitación"><FechaInput value={form.fecha_inicio_contrato||""} onChange={v=>setForm({...form,fecha_inicio_contrato:v})} style={INP}/></FL>
+          <FL label="Fecha término licitación"><FechaInput value={form.fecha_termino_contrato||""} onChange={v=>setForm({...form,fecha_termino_contrato:v})} style={INP}/></FL>
           <FL label="Probabilidad renovación"><select style={INP} value={form.probabilidad_renovacion||"media"} onChange={e=>setForm({...form,probabilidad_renovacion:e.target.value})}><option value="alta">Alta</option><option value="media">Media</option><option value="baja">Baja</option><option value="descartada">Descartada</option></select></FL>
           <FL label="Estado renovación"><select style={INP} value={form.estado_renovacion||"pendiente"} onChange={e=>setForm({...form,estado_renovacion:e.target.value})}><option value="vigente">Vigente</option><option value="en evaluacion">En evaluación</option><option value="pendiente">Pendiente</option><option value="adjudicada otra">Adjudicada otra empresa</option><option value="renovada">Renovada</option><option value="cerrada">Cerrada</option></select></FL>
           <FL label="Días de alerta (aviso anticipado)"><input type="number" min={30} max={180} style={INP} value={form.dias_alerta||60} onChange={e=>setForm({...form,dias_alerta:Number(e.target.value)})}/></FL>
@@ -1286,7 +1314,7 @@ function DesvinculacionModal({trabajador, data, update, insert, terminarAsignaci
           <div>
             <p style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:12}}>Fecha y condiciones</p>
             <FL label="Fecha de separación laboral">
-              <input type="date" style={INP} value={fechaSep} onChange={e=>setFechaSep(e.target.value)}
+              <FechaInput value={fechaSep} onChange={v=>setFechaSep(v)} style={INP}
                 max={motivo==='art161'?undefined:hoyStr}/>
             </FL>
             {motivo==='art161'&&fechaSep>hoyStr&&(
