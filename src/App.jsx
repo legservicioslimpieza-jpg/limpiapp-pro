@@ -3033,8 +3033,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
         const cerrar=()=>setRetiroModal(null);
         const ejecutar=async(conAnexo)=>{
           if(!retiroModal.fecha)return;
-          await terminarAsignacion(a,retiroModal.fecha);
-          setAsigForm(null);
+          const fecha=retiroModal.fecha;
+          // Navegacion + prefill SINCRONOS (antes del await), para que el setTab no se pierda con el loadAll de terminarAsignacion.
           if(conAnexo&&imp.requiereAnexo){
             setAnexoPrefill({
               tipo_anexo: imp.tipoAnexoSugerido||'',
@@ -3044,9 +3044,11 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               centro_anterior: antes.centros.join(', '), centro_nuevo: despues.centros.join(', '),
               porcentaje_anterior: antes.pctFinanciado, porcentaje_nuevo: despues.pctFinanciado,
             });
-            setRetiroModal(null);
             setTab('anexos');
-          } else { setRetiroModal(null); }
+          }
+          setRetiroModal(null);
+          setAsigForm(null);
+          await terminarAsignacion(a,fecha);
         };
         const Row=({l,v})=>(<div style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'2px 0'}}><span style={{color:C.textMuted}}>{l}</span><span style={{fontWeight:600,color:C.text}}>{v}</span></div>);
         return (
