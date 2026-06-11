@@ -677,6 +677,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
           cerrar();
         };
         const doReasignar=async()=>{ await guardarEval({row:{accion:'reasignar'}}); cerrar(); setTab&&setTab('trabajadores'); };
+        const doReasignarMover=async(t)=>{ pendingMovilidadStart={trabajadorId:t.id, origenContratoId:cBase.id}; await guardarEval({row:{accion:'reasignar'},detalle:{trabajador_id:t.id}}); cerrar(); setTab&&setTab('trabajadores'); };
         const doNoAplica=async()=>{ if(!(evalModal.motivo||'').trim())return; await guardarEval({row:{accion:'no_aplica'},detalle:{motivo:evalModal.motivo}}); cerrar(); };
         const doArt161=async()=>{
           if(!evalModal.fecha||!(evalModal.sel||[]).length)return;
@@ -705,10 +706,20 @@ function Dashboard({data,contratoId,insert,update,setTab}){
                 <FL label="Observación"><input style={INP} value={evalModal.obs} onChange={e=>setEvalModal({...evalModal,obs:e.target.value})} placeholder="Nota interna"/></FL>
               </>)}
               {T==='reasignar'&&(<>
-                <p style={{fontSize:12,color:C.textMuted,marginBottom:8}}>Se registra la decisión y te llevamos a Trabajadores para gestionar las asignaciones. No se desvincula a nadie.</p>
-                <FL label="Responsable"><input style={INP} value={evalModal.responsable} onChange={e=>setEvalModal({...evalModal,responsable:e.target.value})}/></FL>
-                <div style={{height:8}}/>
-                <FL label="Observación"><input style={INP} value={evalModal.obs} onChange={e=>setEvalModal({...evalModal,obs:e.target.value})} placeholder="Ej: reasignar a CT002 desde el 01-08"/></FL>
+                <p style={{fontSize:12,color:C.textMuted,marginBottom:8}}>Elige el trabajador a mover. Se abrirá el flujo de <b>Movilidad interna</b> (mismo proceso que desde la ficha). No se desvincula a nadie.</p>
+                {(evalModal.trabajadores||[]).length>0?(
+                  <div style={{border:`1px solid ${C.border}`,borderRadius:6,padding:8,marginBottom:10,maxHeight:200,overflowY:'auto'}}>
+                    {evalModal.trabajadores.map(t=>(
+                      <div key={t.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'5px 2px',fontSize:13,borderBottom:`1px solid ${C.borderLight}`}}>
+                        <span>{t.nombre} {t.rut&&<span style={{color:C.textMuted,fontSize:11}}>({t.rut})</span>}</span>
+                        <button onClick={()=>doReasignarMover(t)} style={{padding:'5px 12px',borderRadius:6,border:'none',background:'#0e7490',color:'#fff',cursor:'pointer',fontSize:12,fontWeight:600}}>Mover →</button>
+                      </div>
+                    ))}
+                  </div>
+                ):(
+                  <p style={{fontSize:12,color:C.textMuted,marginBottom:10}}>Este contrato no tiene trabajadores con asignación remuneracional activa.</p>
+                )}
+                <FL label="Observación (opcional)"><input style={INP} value={evalModal.obs} onChange={e=>setEvalModal({...evalModal,obs:e.target.value})} placeholder="Ej: reasignar a CT002 desde el 01-08"/></FL>
               </>)}
               {T==='art161'&&(<>
                 <p style={{fontSize:12,color:C.textMuted,marginBottom:8}}>Selecciona los trabajadores a programar. Cada uno quedará en <b>PREAVISO</b> (no se desvincula). La carta de aviso se emite luego desde la ficha de cada trabajador.</p>
@@ -2918,6 +2929,8 @@ function TabExpediente({trabajador, data, update}){
 // remonta toda la UI (Spinner), borrando el estado local de Trabajadores. Esta variable
 // vive fuera de React y sobrevive al remonte; Trabajadores la restaura al montar.
 let pendingAnexoHandoff = null;
+// Lanzamiento de Movilidad desde Capa B (Reasignar). Sobrevive a la navegación entre módulos.
+let pendingMovilidadStart = null;
 
 function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,contratoId}){
   const [form,setForm]=useState(null);
@@ -2925,12 +2938,26 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const [asigForm,setAsigForm]=useState(null);
   const [retiroModal,setRetiroModal]=useState(null);
   const [anexoPrefill,setAnexoPrefill]=useState(null);
-  // Tras el remonte que provoca loadAll, restaura ficha + pestaña Anexos + prefill.
+  const [movilidadModal,setMovilidadModal]=useState(null);
+  // Tras el/los remonte(s) que provoca loadAll, restaura ficha + pestaña + prefill.
+  // waitForContratoId: si está, solo restaura cuando ya existe esa asignación activa (último remonte del doble write de movilidad).
   useEffect(()=>{
     if(pendingAnexoHandoff){
-      const h=pendingAnexoHandoff; pendingAnexoHandoff=null;
+      const h=pendingAnexoHandoff;
       const w=(data.trabajadores||[]).find(t=>t.id===h.trabajadorId);
-      if(w){ setForm(w); setTab('anexos'); setAnexoPrefill(h.prefill); }
+      if(!w) return;
+      if(h.waitForContratoId && !(data.asignaciones||[]).some(a=>a.trabajador_id===h.trabajadorId&&a.contrato_id===h.waitForContratoId&&a.estado_asig==='activa')) return;
+      pendingAnexoHandoff=null;
+      setForm(w); setTab(h.tab||'anexos'); if(h.prefill) setAnexoPrefill(h.prefill);
+    }
+  },[]); // eslint-disable-line
+  // Lanzamiento de Movilidad desde Capa B (Reasignar): abre la ficha y el MovilidadModal con origen preseleccionado.
+  useEffect(()=>{
+    if(pendingMovilidadStart){
+      const h=pendingMovilidadStart; pendingMovilidadStart=null;
+      const w=(data.trabajadores||[]).find(t=>t.id===h.trabajadorId);
+      const o=(data.asignaciones||[]).find(a=>a.trabajador_id===h.trabajadorId&&a.contrato_id===h.origenContratoId&&a.estado_asig==='activa');
+      if(w&&o){ setForm(w); setTab('asignaciones'); abrirMovilidad(o,w); }
     }
   },[]); // eslint-disable-line
   const [showDesvincular,setShowDesvincular]=useState(false);
@@ -2973,6 +3000,21 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   };
   const terminarAsig=(a)=>{
     setRetiroModal({asig:a, fecha:new Date().toISOString().slice(0,10), motivo:'', responsable:''});
+  };
+  const abrirMovilidad=(o)=>{
+    const hoy=new Date().toISOString().slice(0,10);
+    setMovilidadModal({
+      origen:o, fechaSalida:hoy, fechaEntrada:hoy,
+      destino:{
+        contrato_id:'', afecta_remuneracion:o.afecta_remuneracion!==false,
+        sueldo_asignado:Number(o.sueldo_asignado)||0, porcentaje_costo:Number(o.porcentaje_costo)||0,
+        horas_semanales:Number(o.horas_semanales)||45, jornada:o.jornada||'', horario:o.horario||'',
+        dias_semana:o.dias_semana||'Lun-Vie',
+        bono_asistencia:Number(o.bono_asistencia)||0, bono_movilizacion:Number(o.bono_movilizacion)||0,
+        bono_colacion:Number(o.bono_colacion)||0, gratificacion_monto:Number(o.gratificacion_monto)||0,
+        descripcion:o.descripcion||'',
+      },
+    });
   };
 
   // ── Gestión del preaviso (Art. 161 programado) ──
@@ -3085,6 +3127,87 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   <button disabled={!retiroModal.fecha} onClick={()=>ejecutar(true)} style={{padding:'9px 16px',borderRadius:6,border:'none',background:'#b45309',color:'#fff',cursor:retiroModal.fecha?'pointer':'not-allowed',opacity:retiroModal.fecha?1:0.5,fontSize:12,fontWeight:700}}>Terminar y generar anexo</button>
                 </>):(
                   <button disabled={!retiroModal.fecha} onClick={()=>ejecutar(false)} style={{padding:'9px 16px',borderRadius:6,border:'none',background:C.accent,color:'#fff',cursor:retiroModal.fecha?'pointer':'not-allowed',opacity:retiroModal.fecha?1:0.5,fontSize:12,fontWeight:700}}>Terminar asignación</button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {movilidadModal&&form&&(()=>{
+        const o=movilidadModal.origen, d=movilidadModal.destino;
+        const activas=(data.asignaciones||[]).filter(x=>x.trabajador_id===form.id&&x.estado_asig==='activa'&&x.activo!==false);
+        const restantes=activas.filter(x=>!(x.contrato_id===o.contrato_id&&x.trabajador_id===o.trabajador_id));
+        const destinoAsig={contrato_id:d.contrato_id, trabajador_id:form.id, estado_asig:'activa', activo:true, afecta_remuneracion:d.afecta_remuneracion!==false, sueldo_asignado:Number(d.sueldo_asignado)||0, porcentaje_costo:Number(d.porcentaje_costo)||0, horas_semanales:Number(d.horas_semanales)||0, jornada:d.jornada, horario:d.horario, dias_semana:d.dias_semana, bono_asistencia:Number(d.bono_asistencia)||0, bono_movilizacion:Number(d.bono_movilizacion)||0, bono_colacion:Number(d.bono_colacion)||0, gratificacion_monto:Number(d.gratificacion_monto)||0, descripcion:d.descripcion};
+        const antes=construirCondicionLaboral(activas,data.contratos);
+        const despues=construirCondicionLaboral([...restantes,destinoAsig],data.contratos);
+        const imp=calcularImpactoLaboral(antes,despues);
+        const tipoLbl=(TIPOS_ANEXO.find(x=>x.val===imp.tipoAnexoSugerido)||{}).label||imp.tipoAnexoSugerido;
+        const cerrar=()=>setMovilidadModal(null);
+        const valido=!!(d.contrato_id&&movilidadModal.fechaSalida&&movilidadModal.fechaEntrada);
+        const setD=(p)=>setMovilidadModal({...movilidadModal,destino:{...movilidadModal.destino,...p}});
+        const ejecutar=async(conAnexo)=>{
+          if(!valido)return;
+          const usaAnexo=conAnexo&&imp.requiereAnexo;
+          pendingAnexoHandoff={ trabajadorId:form.id, tab:usaAnexo?'anexos':'asignaciones', waitForContratoId:d.contrato_id,
+            prefill: usaAnexo?{
+              tipo_anexo: imp.tipoAnexoSugerido||'',
+              motivo:`Movilidad interna: ${o.contrato_id} → ${d.contrato_id}`,
+              sueldo_anterior:antes.remuneracion, sueldo_nuevo:despues.remuneracion,
+              jornada_anterior:`${antes.horasSemanales} h/sem`, jornada_nueva:`${despues.horasSemanales} h/sem`,
+              centro_anterior:o.contrato_id, centro_nuevo:d.contrato_id,
+              porcentaje_anterior:antes.pctFinanciado, porcentaje_nuevo:despues.pctFinanciado,
+            }:undefined };
+          setMovilidadModal(null); setAsigForm(null);
+          await terminarAsignacion(o, movilidadModal.fechaSalida);
+          await saveAsignacion({...destinoAsig, fecha_inicio_asig:movilidadModal.fechaEntrada, fecha_termino_asig:null});
+        };
+        const Row=({l,v})=>(<div style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'2px 0'}}><span style={{color:C.textMuted}}>{l}</span><span style={{fontWeight:600,color:C.text}}>{v}</span></div>);
+        const otrosContratos=(data.contratos||[]).filter(c=>c.id!==o.contrato_id);
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}} onClick={cerrar}>
+            <div style={{background:'#fff',borderRadius:10,padding:22,maxWidth:600,width:'100%',maxHeight:'92vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+              <h3 style={{margin:'0 0 4px',fontSize:16,color:C.text}}>Mover a otro centro</h3>
+              <p style={{fontSize:12,color:C.textMuted,marginBottom:14}}>{form.nombre} · movilidad interna. <b>No</b> es desvinculación: el trabajador sigue activo, sin finiquito ni carta.</p>
+
+              <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 12px',marginBottom:12,fontSize:13}}>
+                <b>Origen:</b> {o.contrato_id}{(data.contratos||[]).find(c=>c.id===o.contrato_id)?.cliente?` — ${(data.contratos||[]).find(c=>c.id===o.contrato_id).cliente}`:''}
+              </div>
+
+              <FL label="Centro destino"><select style={INP} value={d.contrato_id} onChange={e=>setD({contrato_id:e.target.value})}><option value="">— selecciona —</option>{otrosContratos.map(c=><option key={c.id} value={c.id}>{c.id}{c.cliente?` — ${c.cliente}`:''}</option>)}</select></FL>
+              <div style={{display:'flex',gap:10,marginTop:8}}>
+                <div style={{flex:1}}><FL label="Fecha salida origen"><FechaInput value={movilidadModal.fechaSalida} onChange={v=>setMovilidadModal({...movilidadModal,fechaSalida:v})} style={INP}/></FL></div>
+                <div style={{flex:1}}><FL label="Fecha entrada destino"><FechaInput value={movilidadModal.fechaEntrada} onChange={v=>setMovilidadModal({...movilidadModal,fechaEntrada:v})} style={INP}/></FL></div>
+              </div>
+
+              <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.4,margin:'14px 0 6px'}}>Condiciones en el destino</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                <FL label="Sueldo asignado"><input type="number" style={INP} value={d.sueldo_asignado} onChange={e=>setD({sueldo_asignado:Number(e.target.value)})}/></FL>
+                <FL label="% costo"><input type="number" min={0} max={500} style={INP} value={d.porcentaje_costo} onChange={e=>setD({porcentaje_costo:Number(e.target.value)})}/></FL>
+                <FL label="Horas semanales"><input type="number" style={INP} value={d.horas_semanales} onChange={e=>setD({horas_semanales:Number(e.target.value)})}/></FL>
+                <FL label="Días semana"><input style={INP} value={d.dias_semana} onChange={e=>setD({dias_semana:e.target.value})}/></FL>
+                <FL label="Jornada"><input style={INP} value={d.jornada} onChange={e=>setD({jornada:e.target.value})}/></FL>
+                <FL label="Horario"><input style={INP} value={d.horario} onChange={e=>setD({horario:e.target.value})}/></FL>
+              </div>
+              <div style={{marginTop:8}}><FL label="Descripción / funciones"><input style={INP} value={d.descripcion} onChange={e=>setD({descripcion:e.target.value})}/></FL></div>
+
+              <div style={{marginTop:14,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 12px'}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.4,marginBottom:6}}>Impacto laboral calculado</div>
+                <Row l="Remuneración imputada" v={`$${clp(antes.remuneracion)} → $${clp(despues.remuneracion)}`}/>
+                <Row l="% financiado" v={`${antes.pctFinanciado}% → ${despues.pctFinanciado}%`}/>
+                <Row l="Jornada (h/sem)" v={`${antes.horasSemanales} → ${despues.horasSemanales}`}/>
+                <Row l="Centro" v={`${o.contrato_id} → ${d.contrato_id||'(destino)'}`}/>
+              </div>
+              {imp.requiereAnexo&&(<div style={{marginTop:10,fontSize:12,color:'#9a3412',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:6,padding:'8px 10px'}}>⚠ Cambian condiciones laborales → corresponde <b>anexo</b>. Tipo sugerido: <b>{tipoLbl}</b>.</div>)}
+              {!imp.requiereAnexo&&imp.posibleCambioLugar&&(<div style={{marginTop:10,fontSize:12,color:C.textMuted,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:6,padding:'8px 10px'}}>Solo cambia el centro/imputación (posible cambio de lugar a confirmar). No dispara anexo por sí solo.</div>)}
+              {imp.sinFinanciamiento&&(<div style={{marginTop:10,fontSize:12,fontWeight:600,color:'#991b1b',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,padding:'8px 10px'}}>⚠ Quedaría <b>sin financiamiento remuneracional</b>.</div>)}
+
+              <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:16,flexWrap:'wrap'}}>
+                <button onClick={cerrar} style={{padding:'9px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12,fontWeight:600,color:C.text}}>Cancelar</button>
+                {imp.requiereAnexo?(<>
+                  <button disabled={!valido} onClick={()=>ejecutar(false)} style={{padding:'9px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:valido?'pointer':'not-allowed',opacity:valido?1:0.5,fontSize:12,fontWeight:600,color:C.text}}>Mover sin anexo</button>
+                  <button disabled={!valido} onClick={()=>ejecutar(true)} style={{padding:'9px 16px',borderRadius:6,border:'none',background:'#b45309',color:'#fff',cursor:valido?'pointer':'not-allowed',opacity:valido?1:0.5,fontSize:12,fontWeight:700}}>Mover y generar anexo</button>
+                </>):(
+                  <button disabled={!valido} onClick={()=>ejecutar(false)} style={{padding:'9px 16px',borderRadius:6,border:'none',background:C.accent,color:'#fff',cursor:valido?'pointer':'not-allowed',opacity:valido?1:0.5,fontSize:12,fontWeight:700}}>Mover trabajador</button>
                 )}
               </div>
             </div>
@@ -3418,6 +3541,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {key:"jornada",label:"Jornada",render:r=><span style={{fontSize:12,color:C.textMuted}}>{r.jornada||r.horario||"—"}</span>},
                     {key:"acciones",label:"",render:r=><div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
                       <button onClick={()=>setAsigForm({...r,_edit:true,_original_contrato_id:r.contrato_id})} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>
+                      {r.estado_asig!=="terminada"&&r.activo!==false&&<button onClick={()=>abrirMovilidad(r)} style={{color:"#0e7490",background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Mover</button>}
                       {r.estado_asig!=="terminada"&&r.activo!==false&&<button onClick={()=>terminarAsig(r)} style={{color:C.red,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Terminar</button>}
                     </div>},
                   ]}
