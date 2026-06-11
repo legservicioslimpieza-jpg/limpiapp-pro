@@ -931,47 +931,24 @@ function genAnexoId(trabajadorId){
 }
 
 function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTrabajador, prefill, clearPrefill}){
-  const [form,setForm]=useState(null);
+  const blankAnexo=(pf={})=>({
+    id:genAnexoId(trabajador.id), trabajador_id:trabajador.id, tipo_anexo:'',
+    fecha_firma:'', fecha_vigencia:'', motivo:'',
+    sueldo_anterior:trabajador.sueldo_base||0, sueldo_nuevo:trabajador.sueldo_base||0,
+    jornada_anterior:trabajador.jornada||'', jornada_nueva:'',
+    horario_anterior:'', horario_nuevo:'', centro_anterior:'', centro_nuevo:'',
+    porcentaje_anterior:0, porcentaje_nuevo:0,
+    documento_url:'', estado:'borrador', observaciones:'', ...pf,
+  });
+  const [form,setForm]=useState(()=> prefill ? blankAnexo(prefill) : null);
   const anexos=(data.anexos_contrato||[]).filter(a=>a.trabajador_id===trabajador.id)
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
 
-  const openNew=()=>setForm({
-    id:genAnexoId(trabajador.id),
-    trabajador_id:trabajador.id,
-    tipo_anexo:'',
-    fecha_firma:'',
-    fecha_vigencia:'',
-    motivo:'',
-    sueldo_anterior:trabajador.sueldo_base||0,
-    sueldo_nuevo:trabajador.sueldo_base||0,
-    jornada_anterior:trabajador.jornada||'',
-    jornada_nueva:'',
-    horario_anterior:'',
-    horario_nuevo:'',
-    centro_anterior:'',
-    centro_nuevo:'',
-    porcentaje_anterior:0,
-    porcentaje_nuevo:0,
-    documento_url:'',
-    estado:'borrador',
-    observaciones:'',
-  });
+  const openNew=()=>setForm(blankAnexo());
 
-  // Pre-llenado desde el Retiro de asignación (Motor de Impacto). Abre el form con los valores antes/después.
+  // Pre-llenado desde el Retiro de asignación (por si la pestaña ya estaba montada). Abre el form y limpia el prefill.
   useEffect(()=>{
-    if(prefill){
-      setForm({
-        id:genAnexoId(trabajador.id), trabajador_id:trabajador.id,
-        tipo_anexo:'', fecha_firma:'', fecha_vigencia:'', motivo:'',
-        sueldo_anterior:trabajador.sueldo_base||0, sueldo_nuevo:trabajador.sueldo_base||0,
-        jornada_anterior:trabajador.jornada||'', jornada_nueva:'',
-        horario_anterior:'', horario_nuevo:'', centro_anterior:'', centro_nuevo:'',
-        porcentaje_anterior:0, porcentaje_nuevo:0,
-        documento_url:'', estado:'borrador', observaciones:'',
-        ...prefill,
-      });
-      clearPrefill&&clearPrefill();
-    }
+    if(prefill){ setForm(blankAnexo(prefill)); clearPrefill&&clearPrefill(); }
   },[prefill]); // eslint-disable-line
 
   const save=async()=>{
@@ -2937,12 +2914,25 @@ function TabExpediente({trabajador, data, update}){
   );
 }
 
+// Handoff Retiro -> Anexos. terminarAsignacion -> loadAll pone loading=true y la App
+// remonta toda la UI (Spinner), borrando el estado local de Trabajadores. Esta variable
+// vive fuera de React y sobrevive al remonte; Trabajadores la restaura al montar.
+let pendingAnexoHandoff = null;
+
 function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,contratoId}){
   const [form,setForm]=useState(null);
   const [tab,setTab]=useState("datos");
   const [asigForm,setAsigForm]=useState(null);
   const [retiroModal,setRetiroModal]=useState(null);
   const [anexoPrefill,setAnexoPrefill]=useState(null);
+  // Tras el remonte que provoca loadAll, restaura ficha + pestaña Anexos + prefill.
+  useEffect(()=>{
+    if(pendingAnexoHandoff){
+      const h=pendingAnexoHandoff; pendingAnexoHandoff=null;
+      const w=(data.trabajadores||[]).find(t=>t.id===h.trabajadorId);
+      if(w){ setForm(w); setTab('anexos'); setAnexoPrefill(h.prefill); }
+    }
+  },[]); // eslint-disable-line
   const [showDesvincular,setShowDesvincular]=useState(false);
   const [autoFiniquito,setAutoFiniquito]=useState(0);   // señal para abrir el generador de finiquito tras desvincular
   const [autoCarta,setAutoCarta]=useState(0);           // señal para abrir el generador de carta de aviso tras programar preaviso
@@ -3036,15 +3026,16 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           const fecha=retiroModal.fecha;
           // Navegacion + prefill SINCRONOS (antes del await), para que el setTab no se pierda con el loadAll de terminarAsignacion.
           if(conAnexo&&imp.requiereAnexo){
-            setAnexoPrefill({
+            // El loadAll de terminarAsignacion remonta la app (Spinner por loading) y borra el estado local;
+            // por eso guardamos el handoff en pendingAnexoHandoff (sobrevive al remonte) y Trabajadores lo restaura al montar.
+            pendingAnexoHandoff={ trabajadorId: form.id, prefill:{
               tipo_anexo: imp.tipoAnexoSugerido||'',
               motivo: retiroModal.motivo || `Retiro de asignación ${a.contrato_id}`,
               sueldo_anterior: antes.remuneracion, sueldo_nuevo: despues.remuneracion,
               jornada_anterior: `${antes.horasSemanales} h/sem`, jornada_nueva: `${despues.horasSemanales} h/sem`,
               centro_anterior: antes.centros.join(', '), centro_nuevo: despues.centros.join(', '),
               porcentaje_anterior: antes.pctFinanciado, porcentaje_nuevo: despues.pctFinanciado,
-            });
-            setTab('anexos');
+            }};
           }
           setRetiroModal(null);
           setAsigForm(null);
