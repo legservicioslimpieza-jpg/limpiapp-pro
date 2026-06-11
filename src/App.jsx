@@ -417,7 +417,8 @@ function Dashboard({data,contratoId,insert,update,setTab}){
           if(!a||a.nivel==='normal') return null;                 // fuera del umbral por tipo: no mostrar
           const ev=evalsResueltas.filter(e=>e.contrato_id===c.id&&((e.detalle&&e.detalle.termino_evaluado)||'')===dateOnly(c.fecha_termino_contrato))
             .sort((x,y)=>String(y.fecha_resolucion||y.created_at||'').localeCompare(String(x.fecha_resolucion||x.created_at||'')))[0];
-          return{...c, alerta:a, resuelta:ev||null};               // resuelto dentro de rango: se muestra con chip, no desaparece
+          const enGestion = ev && (ev.estado==='en_gestion' || (ev.detalle&&ev.detalle.en_gestion));
+          return{...c, alerta:a, resuelta:(ev&&!enGestion)?ev:null, enGestion:enGestion?ev:null};               // resuelto dentro de rango: se muestra con chip, no desaparece
         }).filter(Boolean).sort((a,b)=>a.alerta.diasCal-b.alerta.diasCal);
 
         // PANEL 2: Finiquitos pendientes por trabajador (fecha_separacion individual)
@@ -516,6 +517,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
                 <p style={{fontWeight:700,color:'#92400e',fontSize:13,marginBottom:8}}>📋 CONTRATOS / ASIGNACIONES POR VENCER — Evaluación de continuidad</p>
                 {alertasLic.map((c,i)=>{
                   const n=NIVEL[c.alerta.nivel]||NIVEL.amarilla;
+                  const u=umbralAlertaContrato(c);
                   const tipoTag=TIPO_CENTRO_TAG[c.tipo_centro_costo||'LICITACION']||TIPO_CENTRO_TAG.LICITACION;
                   const trabAf=(data.asignaciones||[]).filter(a=>a.contrato_id===c.id&&a.afecta_remuneracion!==false&&a.estado_asig==='activa'&&a.activo!==false)
                     .map(a=>{const t=(data.trabajadores||[]).find(x=>x.id===a.trabajador_id);return t?{id:t.id,nombre:t.nombre||t.id,rut:t.rut}:null;}).filter(Boolean);
@@ -527,21 +529,33 @@ function Dashboard({data,contratoId,insert,update,setTab}){
                           <span style={{display:'inline-block',marginLeft:8,background:tipoTag.bg,color:tipoTag.text,border:`1px solid ${tipoTag.border}`,borderRadius:4,fontSize:10,fontWeight:600,padding:'1px 6px'}}>{tipoTag.label}</span>
                           <span style={{fontSize:11,color:n.text,marginLeft:8}}>Vence {new Date(c.fecha_termino_contrato.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}</span>
                           {c.probabilidad_renovacion&&<span style={{fontSize:11,color:n.text,marginLeft:8}}>· Renovación: {c.probabilidad_renovacion}</span>}
+                          <div style={{fontSize:10,color:n.text,opacity:0.85,marginTop:2}}>Umbral efectivo: {u.diasAlerta} d. háb.{u.manual?` · manual (sobrescribe default ${tipoTag.label} ${u.defaultTipo} d.)`:` · default del tipo`}</div>
                         </div>
                         <span style={{fontSize:12,fontWeight:700,color:n.text,whiteSpace:'nowrap'}}>{c.alerta.diasCal<=0?'VENCIDA':`${c.alerta.diasHab} d. háb.`}</span>
                       </div>
                       <div style={{fontSize:11,color:n.text,marginTop:6}}>
                         <b>Trabajadores afectados:</b> {trabAf.length?trabAf.map(t=>`${t.nombre}${t.rut?` (${t.rut})`:''}`).join('  ·  '):'sin asignación remuneracional activa'}
                       </div>
-                      {c.resuelta?(
+                      {c.resuelta&&(
                         <div style={{marginTop:8}}>
                           <span style={{display:'inline-block',background:'#ecfdf5',border:'1px solid #a7f3d0',color:'#047857',borderRadius:6,fontSize:11,fontWeight:600,padding:'4px 10px'}}>
                             ✅ Resuelto · {ACCION_LABEL[c.resuelta.accion]||c.resuelta.accion||'evaluado'}{c.resuelta.responsable?` · ${c.resuelta.responsable}`:''}{(c.resuelta.fecha_resolucion||c.resuelta.created_at)?` · ${new Date(String(c.resuelta.fecha_resolucion||c.resuelta.created_at).split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}`:''}
                           </span>
                         </div>
-                      ):(
+                      )}
+                      {c.enGestion&&(
+                        <div style={{marginTop:8}}>
+                          <span style={{display:'inline-block',background:'#fff7ed',border:'1px solid #fed7aa',color:'#9a3412',borderRadius:6,fontSize:11,fontWeight:600,padding:'4px 10px'}}>
+                            🔄 Renovación en gestión — falta nueva fecha formal{c.enGestion.responsable?` · ${c.enGestion.responsable}`:''}{(c.enGestion.fecha_resolucion||c.enGestion.created_at)?` · ${new Date(String(c.enGestion.fecha_resolucion||c.enGestion.created_at).split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}`:''}
+                          </span>
+                          {(c.alerta.nivel==='roja'||c.alerta.nivel==='vencida')&&(
+                            <div style={{marginTop:6,fontSize:11,fontWeight:600,color:'#991b1b',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,padding:'6px 10px'}}>⚠ Renovación en gestión y el contrato está por vencer sin fecha formal. Ingresa la nueva fecha de término.</div>
+                          )}
+                        </div>
+                      )}
+                      {!c.resuelta&&(
                       <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
-                        <button onClick={()=>setEvalModal({tipo:'renovar',contrato:c,trabajadores:trabAf,nueva:'',responsable:'',obs:''})} style={BTN_EVAL('#1d4ed8')}>Renovar</button>
+                        <button onClick={()=>setEvalModal({tipo:'renovar',contrato:c,trabajadores:trabAf,nueva:'',responsable:'',obs:''})} style={BTN_EVAL('#1d4ed8')}>{c.enGestion?'Ingresar fecha formal':'Renovar'}</button>
                         <button onClick={()=>setEvalModal({tipo:'reasignar',contrato:c,trabajadores:trabAf,responsable:'',obs:''})} style={BTN_EVAL('#0e7490')}>Reasignar</button>
                         <button onClick={()=>setEvalModal({tipo:'art161',contrato:c,trabajadores:trabAf,sel:trabAf.filter(t=>!preavisoActivo(t.id,data)).map(t=>t.id),fecha:'',responsable:'',obs:''})} style={BTN_EVAL('#b45309')} disabled={!trabAf.length} title={trabAf.length?'':'No hay trabajadores afectados'}>Iniciar Art. 161 programado</button>
                         <button onClick={()=>setEvalModal({tipo:'no_aplica',contrato:c,trabajadores:trabAf,motivo:'',responsable:''})} style={BTN_EVAL('#6b7280')}>No aplica</button>
@@ -649,7 +663,16 @@ function Dashboard({data,contratoId,insert,update,setTab}){
         const guardarEval=async(extra)=>{
           await insert('evaluaciones_vencimiento',{id:genId('EV'),contrato_id:c.id,fecha_alerta:hoy,trabajadores_afectados:evalModal.trabajadores.map(t=>t.id),responsable:evalModal.responsable||'',observaciones:evalModal.obs||'',fecha_resolucion:hoy,estado:'resuelta',created_at:new Date().toISOString(),...(extra.row||{}),detalle:{termino_evaluado:terminoEval,...(extra.detalle||{})}});
         };
-        const doRenovar=async()=>{ if(!evalModal.nueva)return; await update('contratos',{...cBase,fecha_termino_contrato:evalModal.nueva}); await guardarEval({row:{accion:'renovar',nueva_fecha_termino:evalModal.nueva},detalle:{nueva_fecha_termino:evalModal.nueva}}); cerrar(); };
+        const doRenovar=async()=>{
+          if(evalModal.nueva){
+            if(evalModal.nueva<=dateOnly(cBase.fecha_termino_contrato)){ alert('La nueva fecha de término debe ser posterior a la actual ('+new Date(cBase.fecha_termino_contrato.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')+').'); return; }
+            await update('contratos',{...cBase,fecha_termino_contrato:evalModal.nueva});
+            await guardarEval({row:{accion:'renovar',estado:'resuelta',nueva_fecha_termino:evalModal.nueva},detalle:{nueva_fecha_termino:evalModal.nueva}});
+          } else {
+            await guardarEval({row:{accion:'renovar',estado:'en_gestion'},detalle:{en_gestion:true}});
+          }
+          cerrar();
+        };
         const doReasignar=async()=>{ await guardarEval({row:{accion:'reasignar'}}); cerrar(); setTab&&setTab('trabajadores'); };
         const doNoAplica=async()=>{ if(!(evalModal.motivo||'').trim())return; await guardarEval({row:{accion:'no_aplica'},detalle:{motivo:evalModal.motivo}}); cerrar(); };
         const doArt161=async()=>{
@@ -664,14 +687,15 @@ function Dashboard({data,contratoId,insert,update,setTab}){
         };
         const T=evalModal.tipo;
         const titulo={renovar:'Renovar contrato',reasignar:'Reasignar trabajadores',art161:'Iniciar Art. 161 programado',no_aplica:'Marcar “No aplica”'}[T];
-        const okMain=T==='renovar'?!!evalModal.nueva:T==='no_aplica'?!!(evalModal.motivo||'').trim():T==='art161'?(!!evalModal.fecha&&(evalModal.sel||[]).length>0):true;
+        const okMain=T==='renovar'?true:T==='no_aplica'?!!(evalModal.motivo||'').trim():T==='art161'?(!!evalModal.fecha&&(evalModal.sel||[]).length>0):true;
         return (
           <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}} onClick={cerrar}>
             <div style={{background:'#fff',borderRadius:10,padding:22,maxWidth:520,width:'100%',maxHeight:'90vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
               <h3 style={{margin:'0 0 4px',fontSize:16,color:C.text}}>{titulo}</h3>
               <p style={{fontSize:12,color:C.textMuted,marginBottom:14}}>{c.id} — {c.cliente||'(sin cliente)'} · vence {new Date(c.fecha_termino_contrato.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL')}</p>
               {T==='renovar'&&(<>
-                <FL label="Nueva fecha de término"><FechaInput value={evalModal.nueva} onChange={v=>setEvalModal({...evalModal,nueva:v})} style={INP}/></FL>
+                <FL label="Nueva fecha de término (opcional)"><FechaInput value={evalModal.nueva} onChange={v=>setEvalModal({...evalModal,nueva:v})} style={INP}/></FL>
+                <p style={{fontSize:11,color:C.textMuted,marginTop:4}}>Deja la fecha vacía para registrar la renovación <b>en gestión</b> (decisión de continuidad, aún sin fecha formal). Si ya tienes la fecha, debe ser <b>posterior</b> al término actual.</p>
                 <div style={{height:8}}/>
                 <FL label="Responsable"><input style={INP} value={evalModal.responsable} onChange={e=>setEvalModal({...evalModal,responsable:e.target.value})} placeholder="Quien autoriza la renovación"/></FL>
                 <div style={{height:8}}/>
@@ -730,17 +754,21 @@ const TIPO_CENTRO_TAG={
   'LICITACION': {bg:'#eff6ff',text:'#1d4ed8',border:'#bfdbfe',label:'Licitación (legado)'},
 };
 // Umbral de alerta por tipo de contrato (Capa B). alertaTermino=false => no alerta de termino (solo revision).
+function defaultUmbralTipo(t){
+  switch(t){
+    case 'LICITACION_PUBLICA': case 'LICITACION': return 33;
+    case 'LICITACION_PRIVADA': return 45;
+    case 'EVENTUAL':           return 15;
+    case 'CORPORATIVO':        return 60;
+    case 'PRIVADO_PERMANENTE': return 0;
+    default:                   return 33;
+  }
+}
 function umbralAlertaContrato(c){
   const t=c?.tipo_centro_costo||'LICITACION';
   const d=Number(c?.dias_alerta)||0;
-  switch(t){
-    case 'LICITACION_PUBLICA': case 'LICITACION': return {diasAlerta:d||33, alertaTermino:true};
-    case 'LICITACION_PRIVADA': return {diasAlerta:d||45, alertaTermino:true};
-    case 'EVENTUAL':           return {diasAlerta:d||15, alertaTermino:true};
-    case 'CORPORATIVO':        return {diasAlerta:d||60, alertaTermino:true};
-    case 'PRIVADO_PERMANENTE': return {diasAlerta:0,      alertaTermino:false};
-    default:                   return {diasAlerta:d||33, alertaTermino:true};
-  }
+  if(t==='PRIVADO_PERMANENTE') return {diasAlerta:0, alertaTermino:false, manual:false, defaultTipo:0};
+  return {diasAlerta: d||defaultUmbralTipo(t), alertaTermino:true, manual:d>0, defaultTipo:defaultUmbralTipo(t)};
 }
 const FINANC_TAG={
   'financiado':         {bg:'#f0fdf4',text:'#15803d',border:'#86efac',icon:'🟢'},
@@ -815,6 +843,7 @@ function Contratos({data,insert,update}){
                 <div style={{fontSize:11}}>
                   <span style={{color:C.textMuted}}>{fechaDisplay}</span>
                   <br/><span style={{color:col,fontWeight:600}}>{ico} {a.diasCal<=0?'Vencida':`${a.diasHab} d. háb.`}</span>
+                  <br/><span style={{color:C.textMuted,fontSize:9}}>Umbral {u.diasAlerta}d {u.manual?`· manual (default ${u.defaultTipo}d)`:`· default tipo`}</span>
                 </div>
               );
             }},
@@ -6391,4 +6420,3 @@ if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
         </div>
     </div>
   );
-}
