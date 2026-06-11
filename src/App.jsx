@@ -4,6 +4,7 @@ import { useAuth } from "./contexts/AuthContext.jsx";
 import Login from "./components/Login.jsx";
 import PortalTrabajador from "./components/PortalTrabajador.jsx";
 import { UserMenu } from "./components/ProtectedRoute.jsx";
+import { construirCondicionLaboral, calcularImpactoLaboral } from "./utils/motorImpacto.js";
 
 /* ─── Paleta ERP corporativa ────────────────────────────────── */
 const C = {
@@ -929,7 +930,7 @@ function genAnexoId(trabajadorId){
   return `ANX-${(trabajadorId||'TR').slice(-4)}-${ts}`;
 }
 
-function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTrabajador}){
+function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTrabajador, prefill, clearPrefill}){
   const [form,setForm]=useState(null);
   const anexos=(data.anexos_contrato||[]).filter(a=>a.trabajador_id===trabajador.id)
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
@@ -955,6 +956,23 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
     estado:'borrador',
     observaciones:'',
   });
+
+  // Pre-llenado desde el Retiro de asignación (Motor de Impacto). Abre el form con los valores antes/después.
+  useEffect(()=>{
+    if(prefill){
+      setForm({
+        id:genAnexoId(trabajador.id), trabajador_id:trabajador.id,
+        tipo_anexo:'', fecha_firma:'', fecha_vigencia:'', motivo:'',
+        sueldo_anterior:trabajador.sueldo_base||0, sueldo_nuevo:trabajador.sueldo_base||0,
+        jornada_anterior:trabajador.jornada||'', jornada_nueva:'',
+        horario_anterior:'', horario_nuevo:'', centro_anterior:'', centro_nuevo:'',
+        porcentaje_anterior:0, porcentaje_nuevo:0,
+        documento_url:'', estado:'borrador', observaciones:'',
+        ...prefill,
+      });
+      clearPrefill&&clearPrefill();
+    }
+  },[prefill]); // eslint-disable-line
 
   const save=async()=>{
     const rec={...form,
@@ -2923,6 +2941,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const [form,setForm]=useState(null);
   const [tab,setTab]=useState("datos");
   const [asigForm,setAsigForm]=useState(null);
+  const [retiroModal,setRetiroModal]=useState(null);
+  const [anexoPrefill,setAnexoPrefill]=useState(null);
   const [showDesvincular,setShowDesvincular]=useState(false);
   const [autoFiniquito,setAutoFiniquito]=useState(0);   // señal para abrir el generador de finiquito tras desvincular
   const [autoCarta,setAutoCarta]=useState(0);           // señal para abrir el generador de carta de aviso tras programar preaviso
@@ -2961,13 +2981,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     const ok=await saveAsignacion(registro);
     if(ok)setAsigForm(null);
   };
-  const terminarAsig=async(a)=>{
-    const hoy=new Date().toISOString().slice(0,10);
-    const fecha=window.prompt("Fecha de término de la asignación (AAAA-MM-DD)", hoy);
-    if(!fecha)return;
-    if(!window.confirm(`Terminar asignación ${a.contrato_id} con fecha ${fecha}?`))return;
-    await terminarAsignacion(a,fecha);
-    setAsigForm(null);
+  const terminarAsig=(a)=>{
+    setRetiroModal({asig:a, fecha:new Date().toISOString().slice(0,10), motivo:'', responsable:''});
   };
 
   // ── Gestión del preaviso (Art. 161 programado) ──
@@ -3007,6 +3022,82 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
 
   return(
     <div>
+      {retiroModal&&form&&(()=>{
+        const a=retiroModal.asig;
+        const activas=(data.asignaciones||[]).filter(x=>x.trabajador_id===form.id&&x.estado_asig==='activa'&&x.activo!==false);
+        const restantes=activas.filter(x=>!(x.contrato_id===a.contrato_id&&x.trabajador_id===a.trabajador_id));
+        const antes=construirCondicionLaboral(activas,data.contratos);
+        const despues=construirCondicionLaboral(restantes,data.contratos);
+        const imp=calcularImpactoLaboral(antes,despues);
+        const tipoLbl=(TIPOS_ANEXO.find(x=>x.val===imp.tipoAnexoSugerido)||{}).label||imp.tipoAnexoSugerido;
+        const cerrar=()=>setRetiroModal(null);
+        const ejecutar=async(conAnexo)=>{
+          if(!retiroModal.fecha)return;
+          await terminarAsignacion(a,retiroModal.fecha);
+          setAsigForm(null);
+          if(conAnexo&&imp.requiereAnexo){
+            setAnexoPrefill({
+              tipo_anexo: imp.tipoAnexoSugerido||'',
+              motivo: retiroModal.motivo || `Retiro de asignación ${a.contrato_id}`,
+              sueldo_anterior: antes.remuneracion, sueldo_nuevo: despues.remuneracion,
+              jornada_anterior: `${antes.horasSemanales} h/sem`, jornada_nueva: `${despues.horasSemanales} h/sem`,
+              centro_anterior: antes.centros.join(', '), centro_nuevo: despues.centros.join(', '),
+              porcentaje_anterior: antes.pctFinanciado, porcentaje_nuevo: despues.pctFinanciado,
+            });
+            setRetiroModal(null);
+            setTab('anexos');
+          } else { setRetiroModal(null); }
+        };
+        const Row=({l,v})=>(<div style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'2px 0'}}><span style={{color:C.textMuted}}>{l}</span><span style={{fontWeight:600,color:C.text}}>{v}</span></div>);
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}} onClick={cerrar}>
+            <div style={{background:'#fff',borderRadius:10,padding:22,maxWidth:540,width:'100%',maxHeight:'90vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+              <h3 style={{margin:'0 0 4px',fontSize:16,color:C.text}}>Retirar de asignación</h3>
+              <p style={{fontSize:12,color:C.textMuted,marginBottom:14}}>{form.nombre} · sale de <b>{a.contrato_id}</b>. El trabajador <b>mantiene su relación laboral</b> y sus demás asignaciones.</p>
+
+              <FL label="Fecha de término de la asignación"><FechaInput value={retiroModal.fecha} onChange={v=>setRetiroModal({...retiroModal,fecha:v})} style={INP}/></FL>
+              <div style={{height:8}}/>
+              <FL label="Motivo (operacional)"><input style={INP} value={retiroModal.motivo} onChange={e=>setRetiroModal({...retiroModal,motivo:e.target.value})} placeholder="Ej: fin de cobertura, redistribución"/></FL>
+              <div style={{height:8}}/>
+              <FL label="Responsable"><input style={INP} value={retiroModal.responsable} onChange={e=>setRetiroModal({...retiroModal,responsable:e.target.value})}/></FL>
+
+              <div style={{marginTop:14,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 12px'}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.4,marginBottom:6}}>Impacto laboral calculado</div>
+                <Row l="Remuneración imputada" v={`$${clp(antes.remuneracion)} → $${clp(despues.remuneracion)}`}/>
+                <Row l="% financiado" v={`${antes.pctFinanciado}% → ${despues.pctFinanciado}%`}/>
+                <Row l="Jornada (h/sem)" v={`${antes.horasSemanales} → ${despues.horasSemanales}`}/>
+                <Row l="Centro que sale" v={a.contrato_id}/>
+              </div>
+
+              {imp.requiereAnexo&&(
+                <div style={{marginTop:10,fontSize:12,color:'#9a3412',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:6,padding:'8px 10px'}}>
+                  ⚠ Este retiro <b>modifica condiciones laborales</b> → corresponde <b>anexo</b>. Tipo sugerido: <b>{tipoLbl}</b>.
+                </div>
+              )}
+              {!imp.requiereAnexo&&imp.posibleCambioLugar&&(
+                <div style={{marginTop:10,fontSize:12,color:C.textMuted,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:6,padding:'8px 10px'}}>
+                  Posible cambio de lugar de prestación (confirmar). No dispara anexo por sí solo.
+                </div>
+              )}
+              {imp.sinFinanciamiento&&(
+                <div style={{marginTop:10,fontSize:12,fontWeight:600,color:'#991b1b',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6,padding:'8px 10px'}}>
+                  ⚠ El trabajador quedará <b>activo sin financiamiento remuneracional</b>.
+                </div>
+              )}
+
+              <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:16,flexWrap:'wrap'}}>
+                <button onClick={cerrar} style={{padding:'9px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12,fontWeight:600,color:C.text}}>Cancelar</button>
+                {imp.requiereAnexo?(<>
+                  <button disabled={!retiroModal.fecha} onClick={()=>ejecutar(false)} style={{padding:'9px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:retiroModal.fecha?'pointer':'not-allowed',opacity:retiroModal.fecha?1:0.5,fontSize:12,fontWeight:600,color:C.text}}>Terminar sin anexo</button>
+                  <button disabled={!retiroModal.fecha} onClick={()=>ejecutar(true)} style={{padding:'9px 16px',borderRadius:6,border:'none',background:'#b45309',color:'#fff',cursor:retiroModal.fecha?'pointer':'not-allowed',opacity:retiroModal.fecha?1:0.5,fontSize:12,fontWeight:700}}>Terminar y generar anexo</button>
+                </>):(
+                  <button disabled={!retiroModal.fecha} onClick={()=>ejecutar(false)} style={{padding:'9px 16px',borderRadius:6,border:'none',background:C.accent,color:'#fff',cursor:retiroModal.fecha?'pointer':'not-allowed',opacity:retiroModal.fecha?1:0.5,fontSize:12,fontWeight:700}}>Terminar asignación</button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {showDesvincular&&form&&(
         <DesvinculacionModal
           trabajador={form}
@@ -3360,6 +3451,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               update={update}
               saveAsignacion={saveAsignacion}
               setFormTrabajador={setForm}
+              prefill={anexoPrefill}
+              clearPrefill={()=>setAnexoPrefill(null)}
             />
           )}
           {tab==="anexos"&&isNew&&(
