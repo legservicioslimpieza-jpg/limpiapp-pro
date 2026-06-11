@@ -6420,3 +6420,4 @@ if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
         </div>
     </div>
   );
+}
