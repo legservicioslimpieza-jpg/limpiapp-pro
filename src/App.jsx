@@ -417,8 +417,10 @@ function Dashboard({data,contratoId,insert,update,setTab}){
           if(!a||a.nivel==='normal') return null;                 // fuera del umbral por tipo: no mostrar
           const ev=evalsResueltas.filter(e=>e.contrato_id===c.id&&((e.detalle&&e.detalle.termino_evaluado)||'')===dateOnly(c.fecha_termino_contrato))
             .sort((x,y)=>String(y.fecha_resolucion||y.created_at||'').localeCompare(String(x.fecha_resolucion||x.created_at||'')))[0];
-          const enGestion = ev && (ev.estado==='en_gestion' || (ev.detalle&&ev.detalle.en_gestion));
-          return{...c, alerta:a, resuelta:(ev&&!enGestion)?ev:null, enGestion:enGestion?ev:null};               // resuelto dentro de rango: se muestra con chip, no desaparece
+          // Un 'renovar' que aun calza con la fecha de termino vigente NO movio la fecha
+          // (una renovacion real cambia la fecha y deja de calzar) => en gestion, nunca verde. Cubre registros legados no-op.
+          const enGestion = ev && ev.accion==='renovar';
+          return{...c, alerta:a, resuelta:(ev&&!enGestion)?ev:null, enGestion:enGestion?ev:null};               // resuelto (reasignar/art161/no_aplica) o en gestion (renovar): se muestra con chip, no desaparece
         }).filter(Boolean).sort((a,b)=>a.alerta.diasCal-b.alerta.diasCal);
 
         // PANEL 2: Finiquitos pendientes por trabajador (fecha_separacion individual)
