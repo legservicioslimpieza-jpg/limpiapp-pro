@@ -582,7 +582,15 @@ export default function PortalTrabajador() {
 
   // Fase 3A.0: registrar primer login (idempotente; la hora la pone el servidor vía now())
   useEffect(() => {
-    if (perfil?.id) supabase.rpc('registrar_primer_login').catch(() => {})
+    if (!perfil?.id) return
+
+    ;(async () => {
+      try {
+        await supabase.rpc('registrar_primer_login')
+      } catch (e) {
+        console.warn('No se pudo registrar primer login', e)
+      }
+    })()
   }, [perfil?.id])
 
   // Fase 3A.0: gate de cambio de clave obligatorio — bloquea el portal hasta cambiarla
