@@ -3691,6 +3691,7 @@ function ModoQR({ depId, loading }) {
 
   // ---- GPS no bloqueante ----
   const capturarGPS = (setter)=>{
+    setter({buscando:true});
     if(!navigator.geolocation){ setter({obtenido:false}); return; }
     navigator.geolocation.getCurrentPosition(
       p=>setter({lat:+p.coords.latitude.toFixed(6),lng:+p.coords.longitude.toFixed(6),precision:p.coords.accuracy?Math.round(p.coords.accuracy):null,obtenido:true}),
@@ -3760,6 +3761,7 @@ function ModoQR({ depId, loading }) {
 
   const cerrar = async ()=>{
     if(marcadas.size===0){ alert('Marca al menos una tarea realizada.'); return; }
+    if(fotosDespues.length<1){ alert('Toma al menos 1 foto del resultado.'); return; }
     setEnviando(true);
     try{
       const fotos=await subirFotos(fotosDespues,`${actividadId}_despues`);
@@ -3798,13 +3800,33 @@ function ModoQR({ depId, loading }) {
           <input type="file" accept="image/*" capture="environment" onChange={hacerAgregar(lista,setLista)} style={{display:"none"}}/>
         </label>
       )}
+      <div style={{display:"flex",gap:12,marginTop:10,fontSize:12,flexWrap:"wrap"}}>
+        {[0,1,2].map(i=>(<span key={i} style={{color:lista[i]?"#4ade80":"#64748b"}}>{lista[i]?"✔":"□"} Foto {i+1}</span>))}
+      </div>
+      <div style={{color:lista.length>=1?"#4ade80":"#fbbf24",fontSize:12,marginTop:6}}>{lista.length>=1?`${lista.length} foto${lista.length>1?'s':''} lista${lista.length>1?'s':''}`:"Se requiere al menos 1 fotografía (máx. 3)"}</div>
     </div>
   );
 
   const BloqueGPS = (gps, etiqueta)=>(
     gps?.obtenido
       ? <div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📍 GPS {etiqueta}: {gps.lat}, {gps.lng}{gps.precision?` (±${gps.precision}m)`:''}</div>
-      : <div style={{color:"#fbbf24",fontSize:12,marginTop:4}}>⚠️ Sin GPS {etiqueta} — se registrará sin coordenadas</div>
+      : gps?.buscando
+        ? <div style={{color:"#fbbf24",fontSize:12,marginTop:4}}>🟡 Buscando ubicación {etiqueta}…</div>
+        : <div style={{color:"#fbbf24",fontSize:12,marginTop:4}}>⚠️ No fue posible obtener la ubicación {etiqueta}. La actividad continuará sin georreferenciación.</div>
+  );
+
+  const Stepper = (activo)=>(
+    <div style={{display:"flex",alignItems:"center",gap:6,width:"100%",maxWidth:420,marginBottom:14}}>
+      <div style={{flex:1,display:"flex",alignItems:"center",gap:8}}>
+        <div style={{width:26,height:26,borderRadius:"50%",background:"#16a34a",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13}}>1</div>
+        <span style={{color:activo==='antes'?"#fff":"#4ade80",fontSize:13,fontWeight:600}}>Antes</span>
+      </div>
+      <div style={{flex:1,height:2,background:activo==='despues'?"#16a34a":"#334155"}}/>
+      <div style={{flex:1,display:"flex",alignItems:"center",gap:8,justifyContent:"flex-end"}}>
+        <div style={{width:26,height:26,borderRadius:"50%",background:activo==='despues'?"#16a34a":"#334155",color:activo==='despues'?"#fff":"#94a3b8",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13}}>2</div>
+        <span style={{color:activo==='despues'?"#fff":"#94a3b8",fontSize:13,fontWeight:600}}>Después</span>
+      </div>
+    </div>
   );
 
   // ===== Render =====
@@ -3866,15 +3888,16 @@ function ModoQR({ depId, loading }) {
 
       {fase==='antes' && (
         <>
+          {Stepper('antes')}
           <div style={{...card,border:"1px solid #1e3a8a"}}>
             <div style={{color:"#93c5fd",fontSize:15,fontWeight:700,marginBottom:4}}>Paso 1 · ANTES</div>
-            <div style={{color:"#cbd5e1",fontSize:14}}>Hola <b>{trabajador?.nombre}</b>. Toma hasta 3 fotos del estado <b>antes</b> de trabajar e inicia la actividad.</div>
+            <div style={{color:"#cbd5e1",fontSize:14}}>Hola <b>{trabajador?.nombre}</b>. Toma de 1 a 3 fotos del estado <b>antes</b> de trabajar e inicia la actividad.</div>
             {BloqueGPS(gpsInicio,"inicio")}
           </div>
-          {BloqueFotos("Fotos ANTES", fotosAntes, setFotosAntes)}
+          {BloqueFotos("Estado inicial del área", fotosAntes, setFotosAntes)}
           <div style={{width:"100%",maxWidth:420}}>
-            <button style={enviando?btnD:btnG} disabled={enviando} onClick={iniciar}>
-              {enviando?"Iniciando…":"▶ Iniciar actividad"}
+            <button style={fotosAntes.length>=1&&!enviando?btnG:btnD} disabled={enviando||fotosAntes.length<1} onClick={iniciar}>
+              {enviando?"Iniciando…":fotosAntes.length<1?"Toma al menos 1 foto":"▶ Iniciar actividad"}
             </button>
             <div style={{color:"#475569",fontSize:12,textAlign:"center",marginTop:8}}>La actividad queda guardada; podrás cerrarla aunque cierres el navegador.</div>
           </div>
@@ -3883,6 +3906,7 @@ function ModoQR({ depId, loading }) {
 
       {fase==='despues' && (
         <>
+          {Stepper('despues')}
           <div style={{...card,border:"1px solid #166534"}}>
             <div style={{color:"#4ade80",fontSize:15,fontWeight:700,marginBottom:4}}>Paso 2 · DESPUÉS</div>
             <div style={{color:"#cbd5e1",fontSize:14}}>{trabajador?.nombre} · marca las tareas realizadas y toma hasta 3 fotos del resultado.</div>
@@ -3904,7 +3928,7 @@ function ModoQR({ depId, loading }) {
             ))}
           </div>
 
-          {BloqueFotos("Fotos DESPUÉS", fotosDespues, setFotosDespues)}
+          {BloqueFotos("Resultado del trabajo", fotosDespues, setFotosDespues)}
 
           <div style={card}>
             <div style={lbl}>Observación (opcional)</div>
@@ -3913,8 +3937,8 @@ function ModoQR({ depId, loading }) {
           </div>
 
           <div style={{width:"100%",maxWidth:420}}>
-            <button style={marcadas.size>0&&!enviando?btnG:btnD} disabled={enviando||marcadas.size===0} onClick={cerrar}>
-              {enviando?"Cerrando…":marcadas.size>0?`✓ Cerrar actividad (${marcadas.size} tarea${marcadas.size!==1?"s":""})`:"Marca al menos una tarea"}
+            <button style={marcadas.size>0&&fotosDespues.length>=1&&!enviando?btnG:btnD} disabled={enviando||marcadas.size===0||fotosDespues.length<1} onClick={cerrar}>
+              {enviando?"Cerrando…":marcadas.size<1?"Marca al menos una tarea":fotosDespues.length<1?"Toma al menos 1 foto":`✓ Cerrar actividad (${marcadas.size} tarea${marcadas.size!==1?"s":""})`}
             </button>
           </div>
         </>
