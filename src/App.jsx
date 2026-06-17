@@ -3651,229 +3651,274 @@ function Lightbox({ url, onClose }) {
 /* ─── QR Components ──────────────────────────────────────────── */
 
 /* Modo QR — interfaz trabajador cuando escanea el QR */
-function ModoQR({ depId, data, insert, loading }) {
-  const [tId, setTId] = useState('');
+function ModoQR({ depId, loading }) {
+  const [fase, setFase] = useState('cargando'); // cargando|error|acreditar|antes|despues|listo
+  const [errorMsg, setErrorMsg] = useState('');
+  const [depInfo, setDepInfo] = useState(null);   // {dependencia, contrato, checklist}
+  const [codigo, setCodigo] = useState('');
+  const [acreditando, setAcreditando] = useState(false);
+  const [acredError, setAcredError] = useState('');
+  const [trabajador, setTrabajador] = useState(null); // {id, nombre}
+  const [actividadId, setActividadId] = useState(null);
+  const [gpsInicio, setGpsInicio] = useState(null);   // {lat,lng,precision,obtenido}
+  const [gpsCierre, setGpsCierre] = useState(null);
+  const [fotosAntes, setFotosAntes] = useState([]);
+  const [fotosDespues, setFotosDespues] = useState([]);
   const [marcadas, setMarcadas] = useState(new Set());
-  const [gps, setGps] = useState(null);
-  const [confirmado, setConfirmado] = useState(false);
-  const [enviando, setEnviando] = useState(false);
   const [obs, setObs] = useState('');
-  const [fotos, setFotos] = useState([]); // hasta 3 fotos
+  const [enviando, setEnviando] = useState(false);
 
-  const dep = (data.dependencias||[]).find(d=>d.id===depId);
-  const contrato = dep?(data.contratos||[]).find(c=>c.id===dep.contrato_id):null;
-  const tareas = dep?(data.checklist||[]).filter(t=>t.dep_id===dep.id&&t.activa):[];
-  const trabajadoresContrato = dep
-    ? (data.asignaciones||[]).filter(a=>a.contrato_id===dep.contrato_id&&a.activo)
-        .map(a=>(data.trabajadores||[]).find(t=>t.id===a.trabajador_id))
-        .filter(t=>t&&t.cargo!=="Gerente y Supervisor"&&t.cargo!=="Representante Legal")
-    : [];
-
-  useEffect(()=>{
-    if(!navigator.geolocation)return;
-    navigator.geolocation.getCurrentPosition(
-      p=>setGps({lat:p.coords.latitude.toFixed(6),lng:p.coords.longitude.toFixed(6)}),
-      ()=>{}
-    );
-  },[]);
-
-  const toggle = (id) => setMarcadas(prev=>{
-    const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n;
-  });
-
-  const agregarFoto = async (e) => {
-    if(fotos.length>=3) return;
-    const file = e.target.files[0];
-    if(!file) return;
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.src = url;
-    await new Promise(r=>img.onload=r);
-    const maxW=1024, scale=Math.min(1,maxW/img.width);
-    const canvas=document.createElement("canvas");
-    canvas.width=Math.round(img.width*scale);
-    canvas.height=Math.round(img.height*scale);
-    canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
-    const blob=await new Promise(r=>canvas.toBlob(r,"image/jpeg",0.75));
-    const preview=URL.createObjectURL(blob);
-    setFotos(prev=>[...prev,{blob,preview}]);
-    URL.revokeObjectURL(url);
-    e.target.value=""; // reset input para permitir otra foto
-  };
-
-  const quitarFoto = (idx) => setFotos(prev=>prev.filter((_,i)=>i!==idx));
-
-  const subirFotos = async (evId) => {
-    if(!fotos.length) return null;
-    const urls=[];
-    for(let i=0;i<fotos.length;i++){
-      try{
-        const nombre=`${evId}_${i}.jpg`;
-        const {error}=await supabase.storage.from("evidencias-fotos").upload(nombre,fotos[i].blob,{contentType:"image/jpeg",upsert:true});
-        if(!error){
-          const {data}=supabase.storage.from("evidencias-fotos").getPublicUrl(nombre);
-          urls.push(data.publicUrl);
-        }
-      }catch{}
-    }
-    return urls.length ? JSON.stringify(urls) : null;
-  };
-
-  const registrar = async () => {
-    if(!tId||marcadas.size===0){alert("Selecciona tu nombre y al menos una tarea completada.");return;}
-    setEnviando(true);
-    const ahora = new Date().toISOString();
-    let fotoUrl = null;
-    let primerEv = true;
-    for(const chkId of marcadas){
-      const evId=`EV${Date.now()}${Math.random().toString(36).slice(2,6)}`;
-      if(primerEv && fotos.length){ fotoUrl = await subirFotos(evId); primerEv=false; }
-      await insert("evidencias",{
-        id:evId, checklist_id:chkId, trabajador_id:tId,
-        contrato_id:dep.contrato_id, fecha_hora:ahora,
-        observacion:obs||"Registrado vía QR", cumplido:true,
-        via_qr:true, latitud:gps?.lat||null, longitud:gps?.lng||null,
-        foto:fotoUrl,
-      });
-      await new Promise(r=>setTimeout(r,50));
-    }
-    setConfirmado(true); setEnviando(false);
-  };
-
-  const mS = {minHeight:"100vh",background:"#0f172a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"24px 16px",fontFamily:"Arial,sans-serif"};
+  const mS   = {minHeight:"100vh",background:"#0f172a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"24px 16px",fontFamily:"Arial,sans-serif"};
   const card = {background:"#1e293b",borderRadius:12,padding:"20px",width:"100%",maxWidth:420,marginBottom:16};
   const btnG = {background:"#16a34a",color:"#fff",border:"none",borderRadius:10,padding:"16px 24px",fontSize:18,fontWeight:700,width:"100%",cursor:"pointer"};
   const btnD = {background:"#374151",color:"#9ca3af",border:"none",borderRadius:10,padding:"16px 24px",fontSize:18,fontWeight:700,width:"100%",cursor:"not-allowed"};
+  const inputS = {width:"100%",background:"#0f172a",color:"#fff",border:"1px solid #374151",borderRadius:8,padding:"12px",fontSize:16,boxSizing:"border-box"};
+  const lbl  = {color:"#94a3b8",fontSize:13,marginBottom:8,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5};
 
-  if(loading)return<div style={{...mS,justifyContent:"center"}}><div style={{color:"#fff",fontSize:20}}>Cargando...</div></div>;
-  if(!dep||!contrato)return<div style={mS}><div style={{color:"#f87171",fontSize:18,textAlign:"center"}}>❌ QR inválido o dependencia no encontrada.<br/>Contacta al supervisor.</div></div>;
+  // ---- Carga inicial: qr_dependencia (sin depender de loadAll) ----
+  useEffect(()=>{
+    let vivo=true;
+    (async()=>{
+      try{
+        const {data,error}=await supabase.rpc('qr_dependencia',{p_dep:depId});
+        if(!vivo)return;
+        if(error||!data||!data.valido){ setErrorMsg('QR inválido o dependencia no encontrada.'); setFase('error'); return; }
+        setDepInfo(data); setFase('acreditar');
+      }catch{ if(vivo){ setErrorMsg('No se pudo cargar la dependencia. Revisa tu conexión.'); setFase('error'); } }
+    })();
+    return ()=>{vivo=false;};
+  },[depId]);
 
-  if(confirmado){
-    const t=data.trabajadores.find(w=>w.id===tId);
+  // ---- GPS no bloqueante ----
+  const capturarGPS = (setter)=>{
+    if(!navigator.geolocation){ setter({obtenido:false}); return; }
+    navigator.geolocation.getCurrentPosition(
+      p=>setter({lat:+p.coords.latitude.toFixed(6),lng:+p.coords.longitude.toFixed(6),precision:p.coords.accuracy?Math.round(p.coords.accuracy):null,obtenido:true}),
+      ()=>setter({obtenido:false}),
+      {enableHighAccuracy:true,timeout:8000}
+    );
+  };
+
+  // ---- Fotos: resize en cliente + subida a Storage ----
+  const hacerAgregar = (lista,setLista)=>async(e)=>{
+    if(lista.length>=3){ e.target.value=""; return; }
+    const file=e.target.files[0]; if(!file)return;
+    const img=new Image(); const url=URL.createObjectURL(file); img.src=url; await new Promise(r=>img.onload=r);
+    const maxW=1024, scale=Math.min(1,maxW/img.width);
+    const canvas=document.createElement("canvas"); canvas.width=Math.round(img.width*scale); canvas.height=Math.round(img.height*scale);
+    canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
+    const blob=await new Promise(r=>canvas.toBlob(r,"image/jpeg",0.75));
+    const preview=URL.createObjectURL(blob);
+    setLista(prev=>[...prev,{blob,preview}]); URL.revokeObjectURL(url); e.target.value="";
+  };
+  const subirFotos = async (arr,prefix)=>{
+    const out=[];
+    for(let i=0;i<arr.length;i++){
+      try{
+        const nombre=`qr/${prefix}_${i}.jpg`;
+        const {error}=await supabase.storage.from("evidencias-fotos").upload(nombre,arr[i].blob,{contentType:"image/jpeg",upsert:true});
+        if(!error){ const {data}=supabase.storage.from("evidencias-fotos").getPublicUrl(nombre); out.push({storage_path:nombre,public_url:data.publicUrl,orden:i}); }
+      }catch{}
+    }
+    return out;
+  };
+
+  // ---- Acciones ----
+  const toggle = (id)=>setMarcadas(prev=>{const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n;});
+
+  const acreditar = async ()=>{
+    if(!codigo.trim())return;
+    setAcreditando(true); setAcredError('');
+    try{
+      const {data:val}=await supabase.rpc('qr_validar_trabajador',{p_dep:depId,p_codigo:codigo.trim()});
+      if(!val||!val.valido){ setAcredError('Código/RUT no válido para esta dependencia. Verifica o contacta al supervisor.'); setAcreditando(false); return; }
+      setTrabajador({id:val.trabajador_id,nombre:val.nombre});
+      const {data:pend}=await supabase.rpc('qr_actividad_pendiente',{p_dep:depId,p_codigo:codigo.trim()});
+      if(pend&&pend.pendiente){ setActividadId(pend.actividad_id); capturarGPS(setGpsCierre); setFase('despues'); }
+      else { capturarGPS(setGpsInicio); setFase('antes'); }
+    }catch{ setAcredError('Error de conexión. Intenta de nuevo.'); }
+    setAcreditando(false);
+  };
+
+  const iniciar = async ()=>{
+    setEnviando(true);
+    try{
+      const fotos=await subirFotos(fotosAntes,`${depId}_${Date.now()}_antes`);
+      const {data:res}=await supabase.rpc('qr_iniciar_evidencia',{
+        p_dep:depId,p_codigo:codigo.trim(),
+        p_lat:gpsInicio?.lat??null,p_lng:gpsInicio?.lng??null,p_precision:gpsInicio?.precision??null,
+        p_gps_ok:!!gpsInicio?.obtenido,p_fotos:fotos
+      });
+      if(!res||!res.ok){ alert('No se pudo iniciar la actividad.'); setEnviando(false); return; }
+      setActividadId(res.actividad_id);
+      try{ localStorage.setItem(`qr_act_${depId}`,res.actividad_id); }catch{}
+      capturarGPS(setGpsCierre);
+      setFase('despues');
+    }catch{ alert('Error al iniciar. Revisa tu conexión.'); }
+    setEnviando(false);
+  };
+
+  const cerrar = async ()=>{
+    if(marcadas.size===0){ alert('Marca al menos una tarea realizada.'); return; }
+    setEnviando(true);
+    try{
+      const fotos=await subirFotos(fotosDespues,`${actividadId}_despues`);
+      const {data:res}=await supabase.rpc('qr_cerrar_evidencia',{
+        p_actividad:actividadId,p_dep:depId,p_codigo:codigo.trim(),
+        p_tareas:[...marcadas],p_obs:obs||null,
+        p_lat:gpsCierre?.lat??null,p_lng:gpsCierre?.lng??null,p_precision:gpsCierre?.precision??null,
+        p_gps_ok:!!gpsCierre?.obtenido,p_fotos:fotos
+      });
+      if(!res||!res.ok){ alert('No se pudo cerrar la actividad. '+(res?.error||'')); setEnviando(false); return; }
+      try{ localStorage.removeItem(`qr_act_${depId}`); }catch{}
+      setFase('listo');
+    }catch{ alert('Error al cerrar. Revisa tu conexión.'); }
+    setEnviando(false);
+  };
+
+  // ---- Sub-render: bloque de fotos ----
+  const BloqueFotos = (titulo, lista, setLista)=>(
+    <div style={card}>
+      <div style={lbl}>📷 {titulo} ({lista.length}/3)</div>
+      {lista.length>0&&(
+        <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+          {lista.map((f,i)=>(
+            <div key={i} style={{position:"relative"}}>
+              <img src={f.preview} alt={`foto ${i+1}`} style={{width:80,height:80,objectFit:"cover",borderRadius:8,border:"2px solid #16a34a"}}/>
+              <button onClick={()=>setLista(lista.filter((_,j)=>j!==i))}
+                style={{position:"absolute",top:-6,right:-6,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",fontSize:12}}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {lista.length<3&&(
+        <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#0f172a",border:"2px dashed #374151",borderRadius:8,padding:"14px",cursor:"pointer"}}>
+          <span style={{fontSize:20}}>📷</span>
+          <span style={{color:"#94a3b8",fontSize:14}}>{lista.length===0?"Tomar foto":"Agregar otra foto"}</span>
+          <input type="file" accept="image/*" capture="environment" onChange={hacerAgregar(lista,setLista)} style={{display:"none"}}/>
+        </label>
+      )}
+    </div>
+  );
+
+  const BloqueGPS = (gps, etiqueta)=>(
+    gps?.obtenido
+      ? <div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📍 GPS {etiqueta}: {gps.lat}, {gps.lng}{gps.precision?` (±${gps.precision}m)`:''}</div>
+      : <div style={{color:"#fbbf24",fontSize:12,marginTop:4}}>⚠️ Sin GPS {etiqueta} — se registrará sin coordenadas</div>
+  );
+
+  // ===== Render =====
+  if(loading||fase==='cargando') return <div style={{...mS,justifyContent:"center"}}><div style={{color:"#fff",fontSize:20}}>Cargando…</div></div>;
+  if(fase==='error') return <div style={mS}><div style={{color:"#f87171",fontSize:18,textAlign:"center",maxWidth:420}}>❌ {errorMsg}<br/>Contacta al supervisor.</div></div>;
+
+  const dep=depInfo.dependencia, contrato=depInfo.contrato, checklist=depInfo.checklist||[];
+
+  const Header = (
+    <div style={{textAlign:"center",marginBottom:16,width:"100%",maxWidth:420}}>
+      <div style={{color:"#3b82f6",fontSize:13,fontWeight:600,letterSpacing:1,marginBottom:4}}>LIMPIAPP PRO · LEG SERVICIOS DE LIMPIEZA</div>
+      <div style={{color:"#fff",fontSize:22,fontWeight:700,marginBottom:2}}>{dep.nombre}</div>
+      <div style={{color:"#94a3b8",fontSize:14}}>{contrato.cliente}</div>
+      <div style={{color:"#64748b",fontSize:12,marginTop:4}}>{new Date().toLocaleDateString("es-CL",{weekday:"long",day:"2-digit",month:"long",year:"numeric"})}</div>
+    </div>
+  );
+
+  if(fase==='listo'){
     const ahora=new Date();
     return(
       <div style={mS}>
         <div style={{...card,textAlign:"center",border:"2px solid #16a34a"}}>
           <div style={{fontSize:64,marginBottom:8}}>✅</div>
-          <div style={{color:"#4ade80",fontSize:22,fontWeight:700,marginBottom:8}}>¡Registrado!</div>
-          <div style={{color:"#fff",fontSize:16,marginBottom:4}}>{t?.nombre||"—"}</div>
-          <div style={{color:"#94a3b8",fontSize:14,marginBottom:4}}>{dep.nombre}</div>
-          <div style={{color:"#94a3b8",fontSize:14,marginBottom:4}}>{contrato.cliente}</div>
-          <div style={{color:"#4ade80",fontSize:15,fontWeight:600,marginBottom:4}}>
-            {ahora.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})} hrs — {ahora.toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"})}
-          </div>
-          <div style={{color:"#94a3b8",fontSize:13}}>{marcadas.size} tarea{marcadas.size!==1?"s":""} registrada{marcadas.size!==1?"s":""}</div>
-          {gps&&<div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📍 GPS registrado</div>}
-          {fotos.length>0&&<div style={{color:"#4ade80",fontSize:12,marginTop:4}}>📷 {fotos.length} foto{fotos.length>1?"s":""} subida{fotos.length>1?"s":""} al servidor</div>}
+          <div style={{color:"#4ade80",fontSize:22,fontWeight:700,marginBottom:8}}>¡Actividad completada!</div>
+          <div style={{color:"#fff",fontSize:16,marginBottom:4}}>{trabajador?.nombre||"—"}</div>
+          <div style={{color:"#94a3b8",fontSize:14,marginBottom:4}}>{dep.nombre} · {contrato.cliente}</div>
+          <div style={{color:"#4ade80",fontSize:15,fontWeight:600,marginBottom:4}}>{ahora.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})} hrs — {ahora.toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div>
+          <div style={{color:"#94a3b8",fontSize:13}}>{marcadas.size} tarea{marcadas.size!==1?"s":""} · evidencia ANTES/DESPUÉS registrada</div>
         </div>
-        <button style={{...btnG,maxWidth:420}} onClick={()=>{setConfirmado(false);setMarcadas(new Set());setObs('');}}>
-          + Registrar otra tarea
-        </button>
+        <button style={{...btnG,maxWidth:420}} onClick={()=>{
+          setFase('acreditar'); setCodigo(''); setTrabajador(null); setActividadId(null);
+          setGpsInicio(null); setGpsCierre(null); setFotosAntes([]); setFotosDespues([]);
+          setMarcadas(new Set()); setObs(''); setAcredError('');
+        }}>+ Nueva actividad</button>
       </div>
     );
   }
 
   return(
     <div style={mS}>
-      {/* Header */}
-      <div style={{textAlign:"center",marginBottom:16,width:"100%",maxWidth:420}}>
-        <div style={{color:"#3b82f6",fontSize:13,fontWeight:600,letterSpacing:1,marginBottom:4}}>LIMPIAPP PRO · LEG SERVICIOS DE LIMPIEZA</div>
-        <div style={{color:"#fff",fontSize:22,fontWeight:700,marginBottom:2}}>{dep.nombre}</div>
-        <div style={{color:"#94a3b8",fontSize:14}}>{contrato.cliente}</div>
-        <div style={{color:"#64748b",fontSize:12,marginTop:4}}>
-          {new Date().toLocaleDateString("es-CL",{weekday:"long",day:"2-digit",month:"long",year:"numeric"})}
-        </div>
-      </div>
+      {Header}
 
-      {/* Selector trabajador */}
-      <div style={card}>
-        <div style={{color:"#94a3b8",fontSize:13,marginBottom:8,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>Trabajador(a)</div>
-        <select
-          style={{width:"100%",background:"#0f172a",color:"#fff",border:"1px solid #374151",borderRadius:8,padding:"12px",fontSize:16}}
-          value={tId} onChange={e=>setTId(e.target.value)}>
-          <option value="">— Selecciona tu nombre —</option>
-          {trabajadoresContrato.map(t=>(
-            <option key={t.id} value={t.id}>{t.nombre}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Tareas */}
-      <div style={card}>
-        <div style={{color:"#94a3b8",fontSize:13,marginBottom:12,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>
-          Tareas a registrar ({tareas.length} en esta área)
-        </div>
-        {tareas.length===0&&<div style={{color:"#64748b",fontSize:14}}>No hay tareas activas para esta área.</div>}
-        {tareas.map(t=>(
-          <div key={t.id}
-            onClick={()=>toggle(t.id)}
-            style={{display:"flex",alignItems:"flex-start",gap:12,padding:"12px 0",borderBottom:"1px solid #334155",cursor:"pointer"}}>
-            <div style={{width:28,height:28,borderRadius:6,border:`2px solid ${marcadas.has(t.id)?"#16a34a":"#475569"}`,
-              background:marcadas.has(t.id)?"#16a34a":"transparent",
-              display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:2}}>
-              {marcadas.has(t.id)&&<span style={{color:"#fff",fontSize:18,fontWeight:700}}>✓</span>}
-            </div>
-            <div style={{flex:1}}>
-              <div style={{color:marcadas.has(t.id)?"#4ade80":"#f1f5f9",fontSize:15,lineHeight:1.4}}>{t.tarea}</div>
-              <div style={{color:"#64748b",fontSize:12,marginTop:2}}>{t.periodicidad}</div>
-            </div>
+      {fase==='acreditar' && (
+        <>
+          <div style={card}>
+            <div style={lbl}>Acreditación</div>
+            <div style={{color:"#cbd5e1",fontSize:14,marginBottom:10}}>Ingresa tu <b>código interno</b> o <b>RUT</b> para continuar.</div>
+            <input style={inputS} value={codigo} onChange={e=>setCodigo(e.target.value)} placeholder="Ej: TR003 o 22.111.563-5" autoCapitalize="characters"
+              onKeyDown={e=>{if(e.key==='Enter')acreditar();}}/>
+            {acredError&&<div style={{color:"#f87171",fontSize:13,marginTop:8}}>{acredError}</div>}
           </div>
-        ))}
-      </div>
+          <div style={{width:"100%",maxWidth:420}}>
+            <button style={codigo.trim()&&!acreditando?btnG:btnD} disabled={!codigo.trim()||acreditando} onClick={acreditar}>
+              {acreditando?"Validando…":"Continuar"}
+            </button>
+          </div>
+        </>
+      )}
 
-      {/* Fotos evidencia — hasta 3 */}
-      <div style={card}>
-        <div style={{color:"#94a3b8",fontSize:13,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>
-          📷 Fotos del área ({fotos.length}/3)
-        </div>
-        {/* Miniaturas */}
-        {fotos.length>0&&(
-          <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
-            {fotos.map((f,i)=>(
-              <div key={i} style={{position:"relative"}}>
-                <img src={f.preview} alt={`foto ${i+1}`} style={{width:80,height:80,objectFit:"cover",borderRadius:8,border:"2px solid #16a34a"}}/>
-                <button onClick={()=>quitarFoto(i)}
-                  style={{position:"absolute",top:-6,right:-6,background:"#ef4444",color:"#fff",border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+      {fase==='antes' && (
+        <>
+          <div style={{...card,border:"1px solid #1e3a8a"}}>
+            <div style={{color:"#93c5fd",fontSize:15,fontWeight:700,marginBottom:4}}>Paso 1 · ANTES</div>
+            <div style={{color:"#cbd5e1",fontSize:14}}>Hola <b>{trabajador?.nombre}</b>. Toma hasta 3 fotos del estado <b>antes</b> de trabajar e inicia la actividad.</div>
+            {BloqueGPS(gpsInicio,"inicio")}
+          </div>
+          {BloqueFotos("Fotos ANTES", fotosAntes, setFotosAntes)}
+          <div style={{width:"100%",maxWidth:420}}>
+            <button style={enviando?btnD:btnG} disabled={enviando} onClick={iniciar}>
+              {enviando?"Iniciando…":"▶ Iniciar actividad"}
+            </button>
+            <div style={{color:"#475569",fontSize:12,textAlign:"center",marginTop:8}}>La actividad queda guardada; podrás cerrarla aunque cierres el navegador.</div>
+          </div>
+        </>
+      )}
+
+      {fase==='despues' && (
+        <>
+          <div style={{...card,border:"1px solid #166534"}}>
+            <div style={{color:"#4ade80",fontSize:15,fontWeight:700,marginBottom:4}}>Paso 2 · DESPUÉS</div>
+            <div style={{color:"#cbd5e1",fontSize:14}}>{trabajador?.nombre} · marca las tareas realizadas y toma hasta 3 fotos del resultado.</div>
+          </div>
+
+          <div style={card}>
+            <div style={lbl}>Tareas realizadas ({checklist.length} en esta área)</div>
+            {checklist.length===0&&<div style={{color:"#64748b",fontSize:14}}>No hay tareas activas para esta área.</div>}
+            {checklist.map(t=>(
+              <div key={t.id} onClick={()=>toggle(t.id)} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"12px 0",borderBottom:"1px solid #334155",cursor:"pointer"}}>
+                <div style={{width:28,height:28,borderRadius:6,border:`2px solid ${marcadas.has(t.id)?"#16a34a":"#475569"}`,background:marcadas.has(t.id)?"#16a34a":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:2}}>
+                  {marcadas.has(t.id)&&<span style={{color:"#fff",fontSize:18,fontWeight:700}}>✓</span>}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{color:marcadas.has(t.id)?"#4ade80":"#f1f5f9",fontSize:15,lineHeight:1.4}}>{t.tarea}</div>
+                  {t.periodicidad&&<div style={{color:"#64748b",fontSize:12,marginTop:2}}>{t.periodicidad}</div>}
+                </div>
               </div>
             ))}
           </div>
-        )}
-        {/* Botón agregar foto */}
-        {fotos.length<3&&(
-          <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#0f172a",border:"2px dashed #374151",borderRadius:8,padding:"14px",cursor:"pointer"}}>
-            <span style={{fontSize:20}}>📷</span>
-            <div>
-              <div style={{color:"#94a3b8",fontSize:14}}>{fotos.length===0?"Tomar foto del área limpia":"Agregar otra foto"}</div>
-              <div style={{color:"#64748b",fontSize:11}}>{fotos.length===0?"Opcional — recomendado para respaldo":""}</div>
-            </div>
-            <input type="file" accept="image/*" capture="environment" onChange={agregarFoto} style={{display:"none"}}/>
-          </label>
-        )}
-        {fotos.length>0&&<div style={{color:"#4ade80",fontSize:12,marginTop:6}}>✓ {fotos.length} foto{fotos.length>1?"s":""} lista{fotos.length>1?"s":""} para subir</div>}
-      </div>
 
-      {/* Observación */}
-      <div style={card}>
-        <div style={{color:"#94a3b8",fontSize:13,marginBottom:8,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>Observación (opcional)</div>
-        <input
-          style={{width:"100%",background:"#0f172a",color:"#fff",border:"1px solid #374151",borderRadius:8,padding:"10px",fontSize:14,boxSizing:"border-box"}}
-          value={obs} onChange={e=>setObs(e.target.value)}
-          placeholder="Ej: requirió producto adicional, vidrios muy sucios..."/>
-        {gps&&<div style={{color:"#4ade80",fontSize:12,marginTop:8}}>📍 GPS: {gps.lat}, {gps.lng}</div>}
-        {!gps&&<div style={{color:"#64748b",fontSize:12,marginTop:8}}>⚠️ GPS no disponible — se registrará sin coordenadas</div>}
-      </div>
+          {BloqueFotos("Fotos DESPUÉS", fotosDespues, setFotosDespues)}
 
-      {/* Botón registrar */}
-      <div style={{width:"100%",maxWidth:420}}>
-        <button
-          style={tId&&marcadas.size>0?btnG:btnD}
-          onClick={registrar} disabled={enviando||!tId||marcadas.size===0}>
-          {enviando?"Registrando...": tId&&marcadas.size>0?`✓ Registrar ${marcadas.size} tarea${marcadas.size!==1?"s":""}`:"Selecciona nombre y tareas"}
-        </button>
-        <div style={{color:"#475569",fontSize:12,textAlign:"center",marginTop:8}}>
-          Registro seguro · {new Date().toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})} hrs
-        </div>
-      </div>
+          <div style={card}>
+            <div style={lbl}>Observación (opcional)</div>
+            <input style={inputS} value={obs} onChange={e=>setObs(e.target.value)} placeholder="Ej: requirió producto adicional, vidrios muy sucios…"/>
+            {BloqueGPS(gpsCierre,"cierre")}
+          </div>
+
+          <div style={{width:"100%",maxWidth:420}}>
+            <button style={marcadas.size>0&&!enviando?btnG:btnD} disabled={enviando||marcadas.size===0} onClick={cerrar}>
+              {enviando?"Cerrando…":marcadas.size>0?`✓ Cerrar actividad (${marcadas.size} tarea${marcadas.size!==1?"s":""})`:"Marca al menos una tarea"}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
