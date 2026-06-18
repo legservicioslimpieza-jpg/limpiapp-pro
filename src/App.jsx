@@ -222,7 +222,7 @@ function Spinner(){
 }
 
 /* ─── Hook de datos ─────────────────────────────────────────── */
-const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp","documentos_trabajador","cumplimiento_egreso","desvinculaciones_programadas","evaluaciones_vencimiento"];
+const TABLES=["trabajadores","contratos","dependencias","checklist","evidencias","incidencias","supervisiones","tasas_afp","parametros_legales","liquidaciones","asignaciones","tabla_iusc","horarios","asistencia","feriados_chile","obligaciones_mensuales","anexos_contrato","entregas_epp","documentos_trabajador","cumplimiento_egreso","desvinculaciones_programadas","evaluaciones_vencimiento","qr_actividades","qr_actividad_fotos"];
 
 function useData(){
   const [data,setData]=useState(null);
@@ -3956,6 +3956,116 @@ function parseFotos(foto) {
 }
 
 /* ─── Módulo Evidencias ──────────────────────────────────────── */
+/* ─── Actividades QR — vista superior por actividad ─────────── */
+function ActividadesQR({ data, contratoId }) {
+  const [filtroC, setFiltroC] = useState(contratoId||"");
+  const [filtroE, setFiltroE] = useState("");
+  const [expand, setExpand] = useState(null);
+  const [lb, setLb] = useState(null);
+
+  const nombreTrab = (id)=>(data.trabajadores||[]).find(t=>t.id===id)?.nombre||"—";
+  const cliente = (id)=>(data.contratos||[]).find(c=>c.id===id)?.cliente||"—";
+  const nombreDep = (id)=>(data.dependencias||[]).find(d=>d.id===id)?.nombre||"—";
+  const tareaTxt = (id)=>(data.checklist||[]).find(c=>c.id===id)?.tarea||id;
+  const fmt = (s)=> s ? new Date(s).toLocaleString("es-CL",{timeZone:"America/Santiago",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
+  const dur = (a)=>{ if(!a.fecha_hora_inicio||!a.fecha_hora_cierre) return "—"; const m=Math.max(0,Math.round((new Date(a.fecha_hora_cierre)-new Date(a.fecha_hora_inicio))/60000)); return m>=60?`${Math.floor(m/60)}h ${m%60}m`:`${m}m`; };
+  const fotosDe = (id)=> (data.qr_actividad_fotos||[]).filter(f=>f.actividad_id===id);
+
+  const acts = (data.qr_actividades||[])
+    .filter(a => (!filtroC || a.contrato_id===filtroC) && (!filtroE || a.estado===filtroE))
+    .sort((a,b)=> (b.fecha_hora_inicio||"").localeCompare(a.fecha_hora_inicio||""));
+
+  const contratos = (data.contratos||[]);
+  const EstadoBadge = ({e})=> e==='completado'
+    ? <span style={{background:"#dcfce7",color:"#166534",borderRadius:5,padding:"2px 8px",fontSize:11,fontWeight:700}}>COMPLETADO</span>
+    : <span style={{background:"#fef3c7",color:"#92400e",borderRadius:5,padding:"2px 8px",fontSize:11,fontWeight:700}}>EN PROCESO</span>;
+  const gpsBadge = (ok)=> ok
+    ? <span style={{color:"#16a34a",fontSize:11}}>📍 sí</span>
+    : <span style={{color:"#b45309",fontSize:11}}>⚠ no</span>;
+
+  return (
+    <div>
+      {lb&&<Lightbox url={lb} onClose={()=>setLb(null)}/>}
+      <div style={{marginBottom:14}}>
+        <h1 style={{color:C.text,fontSize:18,fontWeight:600,margin:"0 0 3px"}}>📲 Actividades QR</h1>
+        <p style={{color:C.textMuted,fontSize:12,margin:0}}>Una fila por actividad operacional · ANTES/DESPUÉS · evidencia georreferenciada</p>
+      </div>
+
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",marginBottom:14,display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-end"}}>
+        <div><div style={{fontSize:11,color:C.textMuted,marginBottom:4,fontWeight:600}}>CONTRATO</div>
+          <select value={filtroC} onChange={e=>setFiltroC(e.target.value)} style={{padding:"8px",borderRadius:6,border:`1px solid ${C.border}`,fontSize:13}}>
+            <option value="">Todos</option>{contratos.map(c=><option key={c.id} value={c.id}>{c.cliente||c.id}</option>)}
+          </select>
+        </div>
+        <div><div style={{fontSize:11,color:C.textMuted,marginBottom:4,fontWeight:600}}>ESTADO</div>
+          <select value={filtroE} onChange={e=>setFiltroE(e.target.value)} style={{padding:"8px",borderRadius:6,border:`1px solid ${C.border}`,fontSize:13}}>
+            <option value="">Todos</option><option value="en_proceso">En proceso</option><option value="completado">Completado</option>
+          </select>
+        </div>
+        <div style={{marginLeft:"auto",color:C.textMuted,fontSize:13,fontWeight:600}}>{acts.length} actividad{acts.length!==1?"es":""}</div>
+      </div>
+
+      {acts.length===0 && <div style={{color:C.textMuted,fontSize:14,padding:20,textAlign:"center"}}>No hay actividades QR en este filtro.</div>}
+
+      {acts.map(a=>{
+        const fotos=fotosDe(a.id); const antes=fotos.filter(f=>f.tipo==='antes'); const desp=fotos.filter(f=>f.tipo==='despues');
+        const tareas=(a.tareas_cumplidas||[]); const abierto=expand===a.id;
+        const evVinc=(data.evidencias||[]).filter(e=>e.actividad_id===a.id).length;
+        return (
+          <div key={a.id} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,marginBottom:10,overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",flexWrap:"wrap"}}>
+              <EstadoBadge e={a.estado}/>
+              <div style={{minWidth:160}}>
+                <div style={{color:C.text,fontSize:14,fontWeight:600}}>{nombreTrab(a.trabajador_id)}</div>
+                <div style={{color:C.textMuted,fontSize:12}}>{nombreDep(a.dependencia_id)} · {cliente(a.contrato_id)}</div>
+              </div>
+              <div style={{fontSize:12,color:C.textMuted}}>Inicio: <b style={{color:C.text}}>{fmt(a.fecha_hora_inicio)}</b></div>
+              <div style={{fontSize:12,color:C.textMuted}}>Cierre: <b style={{color:C.text}}>{fmt(a.fecha_hora_cierre)}</b></div>
+              <div style={{fontSize:12,color:C.textMuted}}>Duración: <b style={{color:C.text}}>{dur(a)}</b></div>
+              <div style={{fontSize:12,color:C.textMuted}}>Tareas: <b style={{color:C.text}}>{tareas.length}</b></div>
+              <div style={{fontSize:12,color:C.textMuted}}>Fotos: <b style={{color:C.text}}>{antes.length}↑ / {desp.length}↓</b></div>
+              <div style={{display:"flex",gap:6}}>{gpsBadge(a.gps_inicio_obtenido)}{gpsBadge(a.gps_cierre_obtenido)}</div>
+              <button onClick={()=>setExpand(abierto?null:a.id)} style={{marginLeft:"auto",background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 12px",fontSize:12,fontWeight:600,color:C.accent,cursor:"pointer"}}>{abierto?"Cerrar":"Ver detalle"}</button>
+            </div>
+
+            {abierto && (
+              <div style={{borderTop:`1px solid ${C.border}`,padding:"14px 16px",background:C.surfaceAlt||"#f8fafc"}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",marginBottom:6}}>Fotos ANTES ({antes.length})</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {antes.length===0&&<span style={{color:C.textMuted,fontSize:12}}>—</span>}
+                      {antes.map((f,i)=><img key={i} src={f.public_url} alt="antes" onClick={()=>setLb(f.public_url)} style={{width:70,height:70,objectFit:"cover",borderRadius:6,cursor:"pointer",border:`1px solid ${C.border}`}}/>)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",marginBottom:6}}>Fotos DESPUÉS ({desp.length})</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {desp.length===0&&<span style={{color:C.textMuted,fontSize:12}}>—</span>}
+                      {desp.map((f,i)=><img key={i} src={f.public_url} alt="despues" onClick={()=>setLb(f.public_url)} style={{width:70,height:70,objectFit:"cover",borderRadius:6,cursor:"pointer",border:`1px solid ${C.border}`}}/>)}
+                    </div>
+                  </div>
+                </div>
+                <div style={{marginTop:14}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",marginBottom:6}}>Tareas cumplidas ({tareas.length})</div>
+                  {tareas.length===0&&<span style={{color:C.textMuted,fontSize:12}}>—</span>}
+                  {tareas.map((tid,i)=><div key={i} style={{fontSize:13,color:C.text,padding:"2px 0"}}>✓ {tareaTxt(tid)}</div>)}
+                </div>
+                {a.observacion && <div style={{marginTop:12,fontSize:13,color:C.text}}><b style={{color:C.textMuted}}>Observación:</b> {a.observacion}</div>}
+                <div style={{marginTop:12,display:"flex",flexWrap:"wrap",gap:18,fontSize:12,color:C.textMuted}}>
+                  <span>GPS inicio: {a.gps_inicio_obtenido?`${a.lat_inicio}, ${a.lng_inicio}${a.precision_inicio?` (±${a.precision_inicio}m)`:''}`:"sin GPS"}</span>
+                  <span>GPS cierre: {a.gps_cierre_obtenido?`${a.lat_cierre}, ${a.lng_cierre}${a.precision_cierre?` (±${a.precision_cierre}m)`:''}`:"sin GPS"}</span>
+                </div>
+                <div style={{marginTop:10,fontSize:12,color:C.textMuted}}>🔗 {evVinc} tarea{evVinc!==1?"s":""} registrada{evVinc!==1?"s":""} en el <b>Registro de Evidencias</b> (enlazadas a esta actividad).</div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TabEvidencias({ data, contratoId }) {
   const hoy = new Date().toLocaleDateString("en-CA", {timeZone:"America/Santiago"});
   const hace7 = new Date(Date.now()-7*86400000).toLocaleDateString("en-CA", {timeZone:"America/Santiago"});
@@ -3965,6 +4075,7 @@ function TabEvidencias({ data, contratoId }) {
   const [filtroC, setFiltroC] = useState(contratoId||"");
   const [soloFoto, setSoloFoto] = useState(false);
   const [lightbox, setLightbox] = useState(null);
+  const [subtab, setSubtab] = useState('evidencias');
 
   const evidencias = (data.evidencias||[])
     .filter(e => {
@@ -4044,8 +4155,18 @@ function TabEvidencias({ data, contratoId }) {
     setTimeout(()=>w.print(),1000);
   };
 
+  const subtabBar = (
+    <div style={{display:"flex",gap:8,marginBottom:16,borderBottom:`1px solid ${C.border}`}}>
+      {[['evidencias','📋 Registro de Evidencias'],['actividades','📲 Actividades QR']].map(([k,l])=>(
+        <button key={k} onClick={()=>setSubtab(k)} style={{background:"none",border:"none",borderBottom:`2px solid ${subtab===k?C.accent:"transparent"}`,color:subtab===k?C.accent:C.textMuted,fontSize:13,fontWeight:600,padding:"8px 4px",cursor:"pointer"}}>{l}</button>
+      ))}
+    </div>
+  );
+  if(subtab==='actividades') return (<div>{subtabBar}<ActividadesQR data={data} contratoId={contratoId}/></div>);
+
   return (
     <div>
+      {subtabBar}
       {lightbox&&<Lightbox url={lightbox} onClose={()=>setLightbox(null)}/>}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:8}}>
         <div>
