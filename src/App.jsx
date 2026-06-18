@@ -5,6 +5,7 @@ import Login from "./components/Login.jsx";
 import PortalTrabajador from "./components/PortalTrabajador.jsx";
 import { UserMenu } from "./components/ProtectedRoute.jsx";
 import { construirCondicionLaboral, calcularImpactoLaboral } from "./utils/motorImpacto.js";
+import { plantillasDisponibles, getPlantilla } from "./config/plantillasOperacionales.js";
 
 /* ─── Paleta ERP corporativa ────────────────────────────────── */
 const C = {
@@ -3651,8 +3652,11 @@ function Lightbox({ url, onClose }) {
 /* ─── QR Components ──────────────────────────────────────────── */
 
 /* Modo QR — interfaz trabajador cuando escanea el QR */
-function ModoQR({ depId, loading }) {
-  const [fase, setFase] = useState('cargando'); // cargando|error|acreditar|antes|despues|listo
+function MotorOperacional({ contexto = {}, loading }) {
+  const depId = contexto.depId;
+  const canalOrigen = contexto.canal_origen || 'qr';
+  const solicitante = contexto.solicitante || 'trabajador';
+  const [fase, setFase] = useState('cargando'); // cargando|error|acreditar|tipo|datos|antes|despues|listo
   const [errorMsg, setErrorMsg] = useState('');
   const [depInfo, setDepInfo] = useState(null);   // {dependencia, contrato, checklist}
   const [codigo, setCodigo] = useState('');
@@ -3667,6 +3671,13 @@ function ModoQR({ depId, loading }) {
   const [marcadas, setMarcadas] = useState(new Set());
   const [obs, setObs] = useState('');
   const [enviando, setEnviando] = useState(false);
+  // ── Plantilla operacional seleccionada + datos declarados por ella ──
+  const [tipoSel, setTipoSel] = useState(null);
+  const [titulo, setTitulo] = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [prioridad, setPrioridad] = useState('normal');
+  const plantilla = tipoSel ? getPlantilla(tipoSel) : null;
+  const req = plantilla?.requiere || {};
 
   const mS   = {minHeight:"100vh",background:"#0f172a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",padding:"24px 16px",fontFamily:"Arial,sans-serif"};
   const card = {background:"#1e293b",borderRadius:12,padding:"20px",width:"100%",maxWidth:420,marginBottom:16};
@@ -3735,10 +3746,32 @@ function ModoQR({ depId, loading }) {
       if(!val||!val.valido){ setAcredError('Código/RUT no válido para esta dependencia. Verifica o contacta al supervisor.'); setAcreditando(false); return; }
       setTrabajador({id:val.trabajador_id,nombre:val.nombre});
       const {data:pend}=await supabase.rpc('qr_actividad_pendiente',{p_dep:depId,p_codigo:codigo.trim()});
-      if(pend&&pend.pendiente){ setActividadId(pend.actividad_id); capturarGPS(setGpsCierre); setFase('despues'); }
-      else { capturarGPS(setGpsInicio); setFase('antes'); }
+      if(pend&&pend.pendiente){
+        setActividadId(pend.actividad_id);
+        setTipoSel(pend.tipo_actividad||'programada');
+        if(pend.titulo) setTitulo(pend.titulo);
+        if(pend.descripcion) setDescripcion(pend.descripcion);
+        if(pend.prioridad) setPrioridad(pend.prioridad);
+        const pl=getPlantilla(pend.tipo_actividad||'programada');
+        if(pl?.requiere?.gpsFin!==false) capturarGPS(setGpsCierre);
+        setFase('despues');
+      }
+      else { setFase('tipo'); }
     }catch{ setAcredError('Error de conexión. Intenta de nuevo.'); }
     setAcreditando(false);
+  };
+
+  // ── Selección de plantilla operacional (flujo determinado por su config) ──
+  const seleccionarPlantilla = (p)=>{
+    setTipoSel(p.id);
+    setPrioridad(p.prioridad_default||'normal');
+    if(p.requiere?.titulo){ setFase('datos'); }
+    else { if(p.requiere?.gpsInicio!==false) capturarGPS(setGpsInicio); setFase('antes'); }
+  };
+  const continuarDatos = ()=>{
+    if(req.titulo && !titulo.trim()) return;
+    if(plantilla?.requiere?.gpsInicio!==false) capturarGPS(setGpsInicio);
+    setFase('antes');
   };
 
   const iniciar = async ()=>{
@@ -3748,7 +3781,11 @@ function ModoQR({ depId, loading }) {
       const {data:res}=await supabase.rpc('qr_iniciar_evidencia',{
         p_dep:depId,p_codigo:codigo.trim(),
         p_lat:gpsInicio?.lat??null,p_lng:gpsInicio?.lng??null,p_precision:gpsInicio?.precision??null,
-        p_gps_ok:!!gpsInicio?.obtenido,p_fotos:fotos
+        p_gps_ok:!!gpsInicio?.obtenido,p_fotos:fotos,
+        p_tipo:tipoSel||'programada', p_canal:canalOrigen, p_solicitante:solicitante,
+        p_titulo:titulo.trim()||null, p_descripcion:descripcion.trim()||null,
+        p_prioridad:prioridad||plantilla?.prioridad_default||'normal',
+        p_plantilla_id:plantilla?.id||tipoSel||'programada', p_plantilla_version:plantilla?.version||null
       });
       if(!res||!res.ok){ alert('No se pudo iniciar la actividad.'); setEnviando(false); return; }
       setActividadId(res.actividad_id);
@@ -3760,14 +3797,14 @@ function ModoQR({ depId, loading }) {
   };
 
   const cerrar = async ()=>{
-    if(marcadas.size===0){ alert('Marca al menos una tarea realizada.'); return; }
+    if(req.checklist && marcadas.size===0){ alert('Marca al menos una tarea realizada.'); return; }
     if(fotosDespues.length<1){ alert('Toma al menos 1 foto del resultado.'); return; }
     setEnviando(true);
     try{
       const fotos=await subirFotos(fotosDespues,`${actividadId}_despues`);
       const {data:res}=await supabase.rpc('qr_cerrar_evidencia',{
         p_actividad:actividadId,p_dep:depId,p_codigo:codigo.trim(),
-        p_tareas:[...marcadas],p_obs:obs||null,
+        p_tareas: req.checklist ? [...marcadas] : [], p_obs:obs||null,
         p_lat:gpsCierre?.lat??null,p_lng:gpsCierre?.lng??null,p_precision:gpsCierre?.precision??null,
         p_gps_ok:!!gpsCierre?.obtenido,p_fotos:fotos
       });
@@ -3854,12 +3891,13 @@ function ModoQR({ depId, loading }) {
           <div style={{color:"#fff",fontSize:16,marginBottom:4}}>{trabajador?.nombre||"—"}</div>
           <div style={{color:"#94a3b8",fontSize:14,marginBottom:4}}>{dep.nombre} · {contrato.cliente}</div>
           <div style={{color:"#4ade80",fontSize:15,fontWeight:600,marginBottom:4}}>{ahora.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})} hrs — {ahora.toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div>
-          <div style={{color:"#94a3b8",fontSize:13}}>{marcadas.size} tarea{marcadas.size!==1?"s":""} · evidencia ANTES/DESPUÉS registrada</div>
+          <div style={{color:"#94a3b8",fontSize:13}}>{req.checklist?`${marcadas.size} tarea${marcadas.size!==1?"s":""} · `:''}evidencia ANTES/DESPUÉS registrada</div>
         </div>
         <button style={{...btnG,maxWidth:420}} onClick={()=>{
           setFase('acreditar'); setCodigo(''); setTrabajador(null); setActividadId(null);
           setGpsInicio(null); setGpsCierre(null); setFotosAntes([]); setFotosDespues([]);
           setMarcadas(new Set()); setObs(''); setAcredError('');
+          setTipoSel(null); setTitulo(''); setDescripcion(''); setPrioridad('normal');
         }}>+ Nueva actividad</button>
       </div>
     );
@@ -3882,6 +3920,56 @@ function ModoQR({ depId, loading }) {
             <button style={codigo.trim()&&!acreditando?btnG:btnD} disabled={!codigo.trim()||acreditando} onClick={acreditar}>
               {acreditando?"Validando…":"Continuar"}
             </button>
+          </div>
+        </>
+      )}
+
+      {fase==='tipo' && (()=>{
+        const lista = plantillasDisponibles({canal_origen:canalOrigen, solicitante, repasoPendiente:contexto.repasoPendiente});
+        return (
+        <>
+          <div style={card}>
+            <div style={lbl}>¿Qué vas a registrar?</div>
+            <div style={{color:"#cbd5e1",fontSize:14}}>Hola <b>{trabajador?.nombre}</b>. Elige el tipo de actividad.</div>
+          </div>
+          {lista.map(p=>(
+            <button key={p.id} onClick={()=>seleccionarPlantilla(p)}
+              style={{...card,textAlign:"left",cursor:"pointer",border:"1px solid #334155"}}>
+              <div style={{color:"#fff",fontSize:17,fontWeight:700,marginBottom:2}}>{p.nombre}</div>
+              <div style={{color:"#94a3b8",fontSize:13}}>{p.descripcion}</div>
+            </button>
+          ))}
+          <button onClick={()=>{ setFase('acreditar'); setCodigo(''); setTrabajador(null); setTipoSel(null); }}
+            style={{background:"#334155",color:"#cbd5e1",border:"none",borderRadius:10,padding:"14px 24px",fontSize:16,fontWeight:600,width:"100%",maxWidth:420,cursor:"pointer"}}>Salir</button>
+        </>
+        );
+      })()}
+
+      {fase==='datos' && (
+        <>
+          <div style={{...card,border:"1px solid #1e3a8a"}}>
+            <div style={{color:"#93c5fd",fontSize:15,fontWeight:700,marginBottom:4}}>{plantilla?.nombre}</div>
+            <div style={{color:"#cbd5e1",fontSize:14}}>Describe la actividad antes de comenzar.</div>
+          </div>
+          <div style={card}>
+            <div style={lbl}>Título</div>
+            <input style={inputS} value={titulo} onChange={e=>setTitulo(e.target.value)} placeholder="Ej: Limpieza extraordinaria salón principal"/>
+            {req.descripcion && (<>
+              <div style={{...lbl,marginTop:12}}>Descripción</div>
+              <textarea style={{...inputS,minHeight:70,resize:"vertical"}} value={descripcion} onChange={e=>setDescripcion(e.target.value)} placeholder="Detalle de lo solicitado…"/>
+            </>)}
+            {plantilla?.permite_elegir_prioridad && (<>
+              <div style={{...lbl,marginTop:12}}>Prioridad</div>
+              <div style={{display:"flex",gap:8}}>
+                {['normal','alta','critica'].map(pr=>(
+                  <button key={pr} onClick={()=>setPrioridad(pr)}
+                    style={{flex:1,padding:"10px",borderRadius:8,border:`1px solid ${prioridad===pr?'#3b82f6':'#374151'}`,background:prioridad===pr?'#1e3a8a':'#0f172a',color:'#fff',fontSize:13,fontWeight:600,cursor:"pointer",textTransform:"capitalize"}}>{pr}</button>
+                ))}
+              </div>
+            </>)}
+          </div>
+          <div style={{width:"100%",maxWidth:420}}>
+            <button style={titulo.trim()?btnG:btnD} disabled={!titulo.trim()} onClick={continuarDatos}>Continuar</button>
           </div>
         </>
       )}
@@ -3909,10 +3997,10 @@ function ModoQR({ depId, loading }) {
           {Stepper('despues')}
           <div style={{...card,border:"1px solid #166534"}}>
             <div style={{color:"#4ade80",fontSize:15,fontWeight:700,marginBottom:4}}>Paso 2 · DESPUÉS</div>
-            <div style={{color:"#cbd5e1",fontSize:14}}>{trabajador?.nombre} · marca las tareas realizadas y toma hasta 3 fotos del resultado.</div>
+            <div style={{color:"#cbd5e1",fontSize:14}}>{trabajador?.nombre} · {req.checklist?'marca las tareas realizadas y toma':'toma'} hasta 3 fotos del resultado.</div>
           </div>
 
-          <div style={card}>
+          {req.checklist && (<div style={card}>
             <div style={lbl}>Tareas realizadas ({checklist.length} en esta área)</div>
             {checklist.length===0&&<div style={{color:"#64748b",fontSize:14}}>No hay tareas activas para esta área.</div>}
             {checklist.map(t=>(
@@ -3926,7 +4014,7 @@ function ModoQR({ depId, loading }) {
                 </div>
               </div>
             ))}
-          </div>
+          </div>)}
 
           {BloqueFotos("Resultado del trabajo", fotosDespues, setFotosDespues)}
 
@@ -3937,14 +4025,23 @@ function ModoQR({ depId, loading }) {
           </div>
 
           <div style={{width:"100%",maxWidth:420}}>
-            <button style={marcadas.size>0&&fotosDespues.length>=1&&!enviando?btnG:btnD} disabled={enviando||marcadas.size===0||fotosDespues.length<1} onClick={cerrar}>
-              {enviando?"Cerrando…":marcadas.size<1?"Marca al menos una tarea":fotosDespues.length<1?"Toma al menos 1 foto":`✓ Cerrar actividad (${marcadas.size} tarea${marcadas.size!==1?"s":""})`}
+            <button style={(!req.checklist||marcadas.size>0)&&fotosDespues.length>=1&&!enviando?btnG:btnD} disabled={enviando||(req.checklist&&marcadas.size===0)||fotosDespues.length<1} onClick={cerrar}>
+              {enviando?"Cerrando…":(req.checklist&&marcadas.size<1)?"Marca al menos una tarea":fotosDespues.length<1?"Toma al menos 1 foto":`✓ Cerrar actividad${req.checklist?` (${marcadas.size} tarea${marcadas.size!==1?"s":""})`:''}`}
             </button>
           </div>
         </>
       )}
     </div>
   );
+}
+
+/* ─── Adaptador de canal: QR ───────────────────────────────────
+   El QR es un CANAL que invoca el Motor Operacional: arma el
+   contexto y delega. El motor no depende del QR. Mañana existirán
+   CanalPortalTrabajador, CanalSupervisor, etc. (no se crean aún;
+   nacen cuando exista su canal real). */
+function CanalQR({ depId, loading }) {
+  return <MotorOperacional contexto={{ canal_origen:'qr', solicitante:'trabajador', depId }} loading={loading} />;
 }
 
 /* Tab QR — panel administrador */
@@ -6804,7 +6901,7 @@ if(user && !perfil) return <Spinner/>;
 if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
 
   if(loading||!data)return<Spinner/>;
-  if(depQR)return<ModoQR depId={depQR} data={data} insert={insert} loading={loading}/>;
+  if(depQR)return<CanalQR depId={depQR} loading={loading}/>;
 
   const contratos=data.contratos||[];
   const incAb=(contratoId?data.incidencias?.filter(i=>i.contrato_id===contratoId&&i.estado==="Abierta"):data.incidencias?.filter(i=>i.estado==="Abierta"))?.length||0;
