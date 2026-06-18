@@ -3960,6 +3960,7 @@ function parseFotos(foto) {
 function ActividadesQR({ data, contratoId }) {
   const [filtroC, setFiltroC] = useState(contratoId||"");
   const [filtroE, setFiltroE] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState("");
   const [expand, setExpand] = useState(null);
   const [lb, setLb] = useState(null);
 
@@ -3972,7 +3973,7 @@ function ActividadesQR({ data, contratoId }) {
   const fotosDe = (id)=> (data.qr_actividad_fotos||[]).filter(f=>f.actividad_id===id);
 
   const acts = (data.qr_actividades||[])
-    .filter(a => (!filtroC || a.contrato_id===filtroC) && (!filtroE || a.estado===filtroE))
+    .filter(a => (!filtroC || a.contrato_id===filtroC) && (!filtroE || a.estado===filtroE) && (!filtroTipo || (a.tipo_actividad||'programada').toLowerCase()===filtroTipo))
     .sort((a,b)=> (b.fecha_hora_inicio||"").localeCompare(a.fecha_hora_inicio||""));
 
   const contratos = (data.contratos||[]);
@@ -3982,13 +3983,26 @@ function ActividadesQR({ data, contratoId }) {
   const gpsBadge = (ok)=> ok
     ? <span style={{color:"#16a34a",fontSize:11}}>📍 sí</span>
     : <span style={{color:"#b45309",fontSize:11}}>⚠ no</span>;
+  const fechaTxt = (s)=> s ? new Date(s).toLocaleDateString("es-CL",{timeZone:"America/Santiago",day:"2-digit",month:"2-digit",year:"numeric"}) : "—";
+  const horaTxt = (s)=> s ? new Date(s).toLocaleTimeString("es-CL",{timeZone:"America/Santiago",hour:"2-digit",minute:"2-digit"}) : "—";
+  const folioTxt = (a)=> a.folio
+    ? `ACT-${a.created_at?new Date(a.created_at).getFullYear():new Date().getFullYear()}-${String(a.folio).padStart(6,"0")}`
+    : `ACT-${(a.id||"").slice(0,8).toUpperCase()}`;
+  const TIPOS = { programada:{l:"PROGRAMADA",bg:"#dbeafe",c:"#1e40af"}, extraordinaria:{l:"EXTRAORDINARIA",bg:"#ffedd5",c:"#9a3412"}, supervision:{l:"SUPERVISIÓN",bg:"#ede9fe",c:"#5b21b6"}, auditoria:{l:"AUDITORÍA",bg:"#e0e7ff",c:"#3730a3"}, emergencia:{l:"EMERGENCIA",bg:"#fee2e2",c:"#991b1b"} };
+  const tipoDe = (t)=> TIPOS[(t||"programada").toLowerCase()] || TIPOS.programada;
+  const TipoBadge = ({t})=>{ const x=tipoDe(t); return <span style={{background:x.bg,color:x.c,borderRadius:5,padding:"2px 8px",fontSize:11,fontWeight:700}}>{x.l}</span>; };
+  const gpsResumen = (a)=> (a.gps_inicio_obtenido||a.gps_cierre_obtenido)
+    ? <span style={{color:"#16a34a",fontSize:12,fontWeight:600}}>GPS ✔</span>
+    : <span style={{color:"#b45309",fontSize:12}}>Sin georreferenciación</span>;
+  const Sec = ({t})=> <div style={{fontSize:11,fontWeight:800,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${C.border}`,paddingBottom:4,margin:"16px 0 8px"}}>{t}</div>;
+  const Campo = ({k,v})=> <div style={{display:"flex",gap:10,fontSize:13,padding:"3px 0"}}><span style={{color:C.textMuted,minWidth:130}}>{k}</span><span style={{color:C.text,fontWeight:500}}>{v}</span></div>;
 
   return (
     <div>
       {lb&&<Lightbox url={lb} onClose={()=>setLb(null)}/>}
       <div style={{marginBottom:14}}>
         <h1 style={{color:C.text,fontSize:18,fontWeight:600,margin:"0 0 3px"}}>📲 Actividades QR</h1>
-        <p style={{color:C.textMuted,fontSize:12,margin:0}}>Una fila por actividad operacional · ANTES/DESPUÉS · evidencia georreferenciada</p>
+        <p style={{color:C.textMuted,fontSize:12,margin:0}}>Libro de Actividades Operacionales · expediente con folio, evidencia ANTES/DESPUÉS y trazabilidad</p>
       </div>
 
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",marginBottom:14,display:"flex",flexWrap:"wrap",gap:12,alignItems:"flex-end"}}>
@@ -4002,6 +4016,11 @@ function ActividadesQR({ data, contratoId }) {
             <option value="">Todos</option><option value="en_proceso">En proceso</option><option value="completado">Completado</option>
           </select>
         </div>
+        <div><div style={{fontSize:11,color:C.textMuted,marginBottom:4,fontWeight:600}}>TIPO</div>
+          <select value={filtroTipo} onChange={e=>setFiltroTipo(e.target.value)} style={{padding:"8px",borderRadius:6,border:`1px solid ${C.border}`,fontSize:13}}>
+            <option value="">Todos</option><option value="programada">Programada</option><option value="extraordinaria">Extraordinaria</option><option value="supervision">Supervisión</option><option value="auditoria">Auditoría</option><option value="emergencia">Emergencia</option>
+          </select>
+        </div>
         <div style={{marginLeft:"auto",color:C.textMuted,fontSize:13,fontWeight:600}}>{acts.length} actividad{acts.length!==1?"es":""}</div>
       </div>
 
@@ -4013,50 +4032,68 @@ function ActividadesQR({ data, contratoId }) {
         const evVinc=(data.evidencias||[]).filter(e=>e.actividad_id===a.id).length;
         return (
           <div key={a.id} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,marginBottom:10,overflow:"hidden"}}>
-            <div style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",flexWrap:"wrap"}}>
-              <EstadoBadge e={a.estado}/>
-              <div style={{minWidth:160}}>
+            <div style={{display:"flex",alignItems:"center",gap:16,padding:"12px 16px",flexWrap:"wrap"}}>
+              <div style={{display:"flex",flexDirection:"column",gap:5,minWidth:130}}>
+                <span style={{fontFamily:"monospace",fontSize:12,color:C.accent,fontWeight:700}}>{folioTxt(a)}</span>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><EstadoBadge e={a.estado}/><TipoBadge t={a.tipo_actividad}/></div>
+              </div>
+              <div style={{minWidth:150}}>
                 <div style={{color:C.text,fontSize:14,fontWeight:600}}>{nombreTrab(a.trabajador_id)}</div>
                 <div style={{color:C.textMuted,fontSize:12}}>{nombreDep(a.dependencia_id)} · {cliente(a.contrato_id)}</div>
               </div>
-              <div style={{fontSize:12,color:C.textMuted}}>Inicio: <b style={{color:C.text}}>{fmt(a.fecha_hora_inicio)}</b></div>
-              <div style={{fontSize:12,color:C.textMuted}}>Cierre: <b style={{color:C.text}}>{fmt(a.fecha_hora_cierre)}</b></div>
-              <div style={{fontSize:12,color:C.textMuted}}>Duración: <b style={{color:C.text}}>{dur(a)}</b></div>
-              <div style={{fontSize:12,color:C.textMuted}}>Tareas: <b style={{color:C.text}}>{tareas.length}</b></div>
-              <div style={{fontSize:12,color:C.textMuted}}>Fotos: <b style={{color:C.text}}>{antes.length}↑ / {desp.length}↓</b></div>
-              <div style={{display:"flex",gap:6}}>{gpsBadge(a.gps_inicio_obtenido)}{gpsBadge(a.gps_cierre_obtenido)}</div>
-              <button onClick={()=>setExpand(abierto?null:a.id)} style={{marginLeft:"auto",background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 12px",fontSize:12,fontWeight:600,color:C.accent,cursor:"pointer"}}>{abierto?"Cerrar":"Ver detalle"}</button>
+              <div style={{fontSize:12,color:C.textMuted}}>{fechaTxt(a.fecha_hora_inicio)}<div style={{color:C.text,fontWeight:600,marginTop:2}}>{horaTxt(a.fecha_hora_inicio)} → {horaTxt(a.fecha_hora_cierre)}</div></div>
+              <div style={{fontSize:12,color:C.textMuted}}>Duración<div style={{color:C.text,fontWeight:600,marginTop:2}}>{dur(a)}</div></div>
+              <div style={{fontSize:12,color:C.textMuted}}>Tareas<div style={{color:C.text,fontWeight:600,marginTop:2}}>{tareas.length}</div></div>
+              <div style={{fontSize:12,color:C.textMuted}}>Evidencia<div style={{color:C.text,fontWeight:600,marginTop:2}}>{antes.length} Antes · {desp.length} Después</div></div>
+              {gpsResumen(a)}
+              <button onClick={()=>setExpand(abierto?null:a.id)} style={{marginLeft:"auto",background:abierto?C.accent:"none",border:`1px solid ${C.accent}`,borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:600,color:abierto?"#fff":C.accent,cursor:"pointer"}}>{abierto?"Cerrar":"Ver expediente"}</button>
             </div>
 
             {abierto && (
-              <div style={{borderTop:`1px solid ${C.border}`,padding:"14px 16px",background:C.surfaceAlt||"#f8fafc"}}>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-                  <div>
-                    <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",marginBottom:6}}>Fotos ANTES ({antes.length})</div>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                      {antes.length===0&&<span style={{color:C.textMuted,fontSize:12}}>—</span>}
-                      {antes.map((f,i)=><img key={i} src={f.public_url} alt="antes" onClick={()=>setLb(f.public_url)} style={{width:70,height:70,objectFit:"cover",borderRadius:6,cursor:"pointer",border:`1px solid ${C.border}`}}/>)}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",marginBottom:6}}>Fotos DESPUÉS ({desp.length})</div>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                      {desp.length===0&&<span style={{color:C.textMuted,fontSize:12}}>—</span>}
-                      {desp.map((f,i)=><img key={i} src={f.public_url} alt="despues" onClick={()=>setLb(f.public_url)} style={{width:70,height:70,objectFit:"cover",borderRadius:6,cursor:"pointer",border:`1px solid ${C.border}`}}/>)}
-                    </div>
-                  </div>
+              <div style={{borderTop:`1px solid ${C.border}`,padding:"18px 20px",background:C.surfaceAlt||"#f8fafc"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:2}}>
+                  <span style={{fontFamily:"monospace",fontSize:15,fontWeight:700,color:C.text}}>{folioTxt(a)}</span>
+                  <div style={{display:"flex",gap:6}}><EstadoBadge e={a.estado}/><TipoBadge t={a.tipo_actividad}/></div>
                 </div>
-                <div style={{marginTop:14}}>
-                  <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",marginBottom:6}}>Tareas cumplidas ({tareas.length})</div>
-                  {tareas.length===0&&<span style={{color:C.textMuted,fontSize:12}}>—</span>}
-                  {tareas.map((tid,i)=><div key={i} style={{fontSize:13,color:C.text,padding:"2px 0"}}>✓ {tareaTxt(tid)}</div>)}
+
+                <Sec t="Actividad"/>
+                <Campo k="Tipo" v={tipoDe(a.tipo_actividad).l}/>
+                <Campo k="Contrato" v={cliente(a.contrato_id)}/>
+                <Campo k="Dependencia" v={nombreDep(a.dependencia_id)}/>
+
+                <Sec t="Trabajador"/>
+                <Campo k="Nombre" v={nombreTrab(a.trabajador_id)}/>
+
+                <Sec t="Tiempos"/>
+                <Campo k="Inicio" v={fmt(a.fecha_hora_inicio)}/>
+                <Campo k="Término" v={fmt(a.fecha_hora_cierre)}/>
+                <Campo k="Duración" v={dur(a)}/>
+
+                <Sec t="Evidencia Antes"/>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {antes.length===0&&<span style={{color:C.textMuted,fontSize:13}}>Sin fotografías</span>}
+                  {antes.map((f,i)=><img key={i} src={f.public_url} alt="antes" onClick={()=>setLb(f.public_url)} style={{width:90,height:90,objectFit:"cover",borderRadius:6,cursor:"pointer",border:`1px solid ${C.border}`}}/>)}
                 </div>
-                {a.observacion && <div style={{marginTop:12,fontSize:13,color:C.text}}><b style={{color:C.textMuted}}>Observación:</b> {a.observacion}</div>}
-                <div style={{marginTop:12,display:"flex",flexWrap:"wrap",gap:18,fontSize:12,color:C.textMuted}}>
-                  <span>GPS inicio: {a.gps_inicio_obtenido?`${a.lat_inicio}, ${a.lng_inicio}${a.precision_inicio?` (±${a.precision_inicio}m)`:''}`:"sin GPS"}</span>
-                  <span>GPS cierre: {a.gps_cierre_obtenido?`${a.lat_cierre}, ${a.lng_cierre}${a.precision_cierre?` (±${a.precision_cierre}m)`:''}`:"sin GPS"}</span>
+
+                <Sec t="Evidencia Después"/>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {desp.length===0&&<span style={{color:C.textMuted,fontSize:13}}>Sin fotografías</span>}
+                  {desp.map((f,i)=><img key={i} src={f.public_url} alt="despues" onClick={()=>setLb(f.public_url)} style={{width:90,height:90,objectFit:"cover",borderRadius:6,cursor:"pointer",border:`1px solid ${C.border}`}}/>)}
                 </div>
-                <div style={{marginTop:10,fontSize:12,color:C.textMuted}}>🔗 {evVinc} tarea{evVinc!==1?"s":""} registrada{evVinc!==1?"s":""} en el <b>Registro de Evidencias</b> (enlazadas a esta actividad).</div>
+
+                <Sec t="Actividades ejecutadas"/>
+                {tareas.length===0&&<span style={{color:C.textMuted,fontSize:13}}>—</span>}
+                {tareas.map((tid,i)=><div key={i} style={{fontSize:13,color:C.text,padding:"2px 0"}}>✓ {tareaTxt(tid)}</div>)}
+
+                <Sec t="Observaciones"/>
+                <div style={{fontSize:13,color:a.observacion?C.text:C.textMuted}}>{a.observacion||"Sin observaciones"}</div>
+
+                <Sec t="Trazabilidad"/>
+                <Campo k="GPS inicio" v={a.gps_inicio_obtenido?`${a.lat_inicio}, ${a.lng_inicio}${a.precision_inicio?` (±${a.precision_inicio}m)`:''}`:"Sin georreferenciación"}/>
+                <Campo k="GPS término" v={a.gps_cierre_obtenido?`${a.lat_cierre}, ${a.lng_cierre}${a.precision_cierre?` (±${a.precision_cierre}m)`:''}`:"Sin georreferenciación"}/>
+                <Campo k="Acceso" v={a.via_qr===false?"Manual":"QR escaneado"}/>
+                <Campo k="N° actividad" v={folioTxt(a)}/>
+                <Campo k="Registro Evidencias" v={`${evVinc} tarea${evVinc!==1?"s":""} enlazada${evVinc!==1?"s":""}`}/>
               </div>
             )}
           </div>
