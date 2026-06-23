@@ -3664,6 +3664,7 @@ function MotorOperacional({ contexto = {}, loading }) {
   const [acredError, setAcredError] = useState('');
   const [trabajador, setTrabajador] = useState(null); // {id, nombre}
   const [actividadId, setActividadId] = useState(null);
+  const [pasada, setPasada] = useState(null);   // {n,m} numero/objetivo de pasada (se muestra solo si m>1)
   const [gpsInicio, setGpsInicio] = useState(null);   // {lat,lng,precision,obtenido}
   const [gpsCierre, setGpsCierre] = useState(null);
   const [fotosAntes, setFotosAntes] = useState([]);
@@ -3789,6 +3790,7 @@ function MotorOperacional({ contexto = {}, loading }) {
       });
       if(!res||!res.ok){ alert('No se pudo iniciar la actividad.'); setEnviando(false); return; }
       setActividadId(res.actividad_id);
+      if(res.pasadas_objetivo){ setPasada({n:res.numero_pasada,m:res.pasadas_objetivo}); }
       try{ localStorage.setItem(`qr_act_${depId}`,res.actividad_id); }catch{}
       capturarGPS(setGpsCierre);
       setFase('despues');
@@ -3891,12 +3893,13 @@ function MotorOperacional({ contexto = {}, loading }) {
           <div style={{color:"#fff",fontSize:16,marginBottom:4}}>{trabajador?.nombre||"—"}</div>
           <div style={{color:"#94a3b8",fontSize:14,marginBottom:4}}>{dep.nombre} · {contrato.cliente}</div>
           <div style={{color:"#4ade80",fontSize:15,fontWeight:600,marginBottom:4}}>{ahora.toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"})} hrs — {ahora.toLocaleDateString("es-CL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div>
+          {pasada&&pasada.m>1&&<div style={{color:"#93c5fd",fontSize:14,fontWeight:700,marginBottom:4}}>Control {pasada.n} de {pasada.m}</div>}
           <div style={{color:"#94a3b8",fontSize:13}}>{req.checklist?`${marcadas.size} tarea${marcadas.size!==1?"s":""} · `:''}evidencia ANTES/DESPUÉS registrada</div>
         </div>
         <button style={{...btnG,maxWidth:420}} onClick={()=>{
           setFase('acreditar'); setCodigo(''); setTrabajador(null); setActividadId(null);
           setGpsInicio(null); setGpsCierre(null); setFotosAntes([]); setFotosDespues([]);
-          setMarcadas(new Set()); setObs(''); setAcredError('');
+          setMarcadas(new Set()); setObs(''); setAcredError(''); setPasada(null);
           setTipoSel(null); setTitulo(''); setDescripcion(''); setPrioridad('normal');
         }}>+ Nueva actividad</button>
       </div>
@@ -3982,6 +3985,21 @@ function MotorOperacional({ contexto = {}, loading }) {
             <div style={{color:"#cbd5e1",fontSize:14}}>Hola <b>{trabajador?.nombre}</b>. Toma de 1 a 3 fotos del estado <b>antes</b> de trabajar e inicia la actividad.</div>
             {BloqueGPS(gpsInicio,"inicio")}
           </div>
+          {req.checklist && checklist.length>0 && (
+            <div style={card}>
+              <div style={lbl}>Tareas de esta área ({checklist.length}) — revísalas antes de fotografiar</div>
+              {checklist.map(t=>(
+                <div key={t.id} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"7px 0",borderBottom:"1px solid #334155"}}>
+                  <span style={{color:"#64748b",fontSize:15,marginTop:1}}>•</span>
+                  <div style={{flex:1}}>
+                    <div style={{color:"#e2e8f0",fontSize:14,lineHeight:1.4}}>{t.tarea}</div>
+                    {t.periodicidad&&<div style={{color:"#64748b",fontSize:12,marginTop:2}}>{t.periodicidad}</div>}
+                  </div>
+                </div>
+              ))}
+              <div style={{color:"#475569",fontSize:12,marginTop:8}}>Marcarás las que ejecutaste en el paso Después.</div>
+            </div>
+          )}
           {BloqueFotos("Estado inicial del área", fotosAntes, setFotosAntes)}
           <div style={{width:"100%",maxWidth:420}}>
             <button style={fotosAntes.length>=1&&!enviando?btnG:btnD} disabled={enviando||fotosAntes.length<1} onClick={iniciar}>
@@ -3998,6 +4016,7 @@ function MotorOperacional({ contexto = {}, loading }) {
           <div style={{...card,border:"1px solid #166534"}}>
             <div style={{color:"#4ade80",fontSize:15,fontWeight:700,marginBottom:4}}>Paso 2 · DESPUÉS</div>
             <div style={{color:"#cbd5e1",fontSize:14}}>{trabajador?.nombre} · {req.checklist?'marca las tareas realizadas y toma':'toma'} hasta 3 fotos del resultado.</div>
+            {pasada&&pasada.m>1&&<div style={{marginTop:8,display:"inline-block",background:"#1e3a8a",color:"#dbeafe",fontSize:13,fontWeight:700,padding:"3px 10px",borderRadius:6}}>Control {pasada.n} de {pasada.m}</div>}
           </div>
 
           {req.checklist && (<div style={card}>
@@ -4132,7 +4151,7 @@ function ActividadesQR({ data, contratoId }) {
             <div style={{display:"flex",alignItems:"center",gap:16,padding:"12px 16px",flexWrap:"wrap"}}>
               <div style={{display:"flex",flexDirection:"column",gap:5,minWidth:130}}>
                 <span style={{fontFamily:"monospace",fontSize:12,color:C.accent,fontWeight:700}}>{folioTxt(a)}</span>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><EstadoBadge e={a.estado}/><TipoBadge t={a.tipo_actividad}/></div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><EstadoBadge e={a.estado}/><TipoBadge t={a.tipo_actividad}/>{a.pasadas_objetivo>1&&<span style={{fontSize:11,fontWeight:700,color:C.accent,background:C.surfaceAlt||"#f8fafc",border:`1px solid ${C.accent}`,borderRadius:5,padding:"1px 7px"}}>Control {a.numero_pasada||1}/{a.pasadas_objetivo}</span>}</div>
               </div>
               <div style={{minWidth:150}}>
                 <div style={{color:C.text,fontSize:14,fontWeight:600}}>{nombreTrab(a.trabajador_id)}</div>
@@ -4157,6 +4176,7 @@ function ActividadesQR({ data, contratoId }) {
                 <Campo k="Tipo" v={tipoDe(a.tipo_actividad).l}/>
                 <Campo k="Contrato" v={cliente(a.contrato_id)}/>
                 <Campo k="Dependencia" v={nombreDep(a.dependencia_id)}/>
+                {a.pasadas_objetivo>1 && <Campo k="Control" v={`${a.numero_pasada||1} de ${a.pasadas_objetivo}`}/>}
 
                 <Sec t="Trabajador"/>
                 <Campo k="Nombre" v={nombreTrab(a.trabajador_id)}/>
@@ -4839,7 +4859,7 @@ function Checklist({data,contratoId,insert}){
               </div>;
             }},
             {key:"ev",label:"Marcar",render:r=>{
-              const n=data.evidencias.filter(e=>e.checklist_id===r.id&&e.fecha_hora?.startsWith(hoy)).length;
+              const n=data.evidencias.filter(e=>e.checklist_id===r.id&&e.fecha_hora&&new Date(e.fecha_hora).toLocaleDateString("en-CA",{timeZone:"America/Santiago"})===hoyChile).length;
               return n>0
                 ?<Tag text="✓ Hecho hoy" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>
                 :<button onClick={()=>marcar(r.id,r.contrato_id)} style={{background:C.accentBg,color:C.accent,border:"1px solid #bfdbfe",borderRadius:5,padding:"3px 10px",fontSize:11,cursor:"pointer",fontWeight:600}}>Marcar ✓</button>;
