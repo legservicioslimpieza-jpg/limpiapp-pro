@@ -1562,6 +1562,21 @@ const EMPRESA = {
   repRut:"12.083.247-6",
   repCargo:"Representante Legal",
 };
+// Mapea empresa_config (getEmpresaConfig) a los campos que usan los documentos.
+// getEmpresaConfig es la FUENTE; EMPRESA queda solo como respaldo si un campo viene vacio.
+function empresaParaDoc(emp){
+  emp = emp || {};
+  return {
+    razon:     emp.razon_social || EMPRESA.razon,
+    rut:       emp.rut || EMPRESA.rut,
+    giro:      emp.giro || EMPRESA.giro,
+    domicilio: [emp.domicilio, emp.ciudad, emp.region].filter(Boolean).join(', ') || EMPRESA.domicilio,
+    ciudad:    emp.ciudad_emision || emp.ciudad || EMPRESA.ciudad,
+    repNombre: emp.rep_nombre || EMPRESA.repNombre,
+    repRut:    emp.rep_rut || EMPRESA.repRut,
+    repCargo:  emp.rep_cargo || EMPRESA.repCargo,
+  };
+}
 
 // Catálogo EPP típico para empresa de aseo (editable al entregar)
 const CATALOGO_EPP = [
@@ -1666,7 +1681,8 @@ function funcionesPorCargo(cargo){
   return "realizando labores de aseo, limpieza, sanitización y mantención de las dependencias que el empleador le asigne, así como toda otra función afín a su cargo que se le encomiende";
 }
 
-function imprimirContratoTrabajo(trabajador, data, overrides={}){
+function imprimirContratoTrabajo(trabajador, data, overrides={}, emp=null){
+  const E = empresaParaDoc(emp);
   const lj = lugaresYJornada(trabajador, data);
   const lugar = (overrides.lugar!=null && String(overrides.lugar).trim()) ? overrides.lugar : lj.lugares;
   const funciones = (overrides.funciones!=null && String(overrides.funciones).trim()) ? overrides.funciones : funcionesPorCargo(trabajador.cargo);
@@ -1674,12 +1690,14 @@ function imprimirContratoTrabajo(trabajador, data, overrides={}){
   const esIndef = tipo.includes("INDEF");
   const duracion = esIndef
     ? "El presente contrato es de carácter <b>indefinido</b>."
-    : "El presente contrato es de carácter <b>plazo fijo</b>, rigiendo desde la fecha de ingreso hasta el plazo que las partes acuerden por escrito, pudiendo transformarse en indefinido conforme al Art. 159 N°4 del Código del Trabajo.";
+    : (trabajador.fecha_termino_plazo
+        ? `El presente contrato es de carácter <b>plazo fijo</b>, rigiendo desde la fecha de ingreso hasta el <b>${fechaLargaCL(trabajador.fecha_termino_plazo)}</b>, pudiendo transformarse en indefinido conforme al Art. 159 N°4 del Código del Trabajo.`
+        : "El presente contrato es de carácter <b>plazo fijo</b>, rigiendo desde la fecha de ingreso hasta el plazo que las partes acuerden por escrito, pudiendo transformarse en indefinido conforme al Art. 159 N°4 del Código del Trabajo.");
   const jornadasHtml = lj.jornadas.map(j=>`<li>${j}</li>`).join("");
   const cuerpo = `
     <h1>Contrato Individual de Trabajo</h1>
-    <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut} · ${EMPRESA.domicilio}</div>
-    <p>En Arica, a ${fechaLargaCL()}, entre <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, giro ${EMPRESA.giro}, con domicilio en ${EMPRESA.domicilio}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, cédula de identidad N° ${EMPRESA.repRut}, en adelante "el empleador"; y don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}, en adelante "el trabajador", se ha convenido el siguiente contrato individual de trabajo:</p>
+    <div class="empresa"><b>${E.razon}</b> · RUT ${E.rut} · ${E.domicilio}</div>
+    <p>En ${E.ciudad}, a ${fechaLargaCL()}, entre <b>${E.razon}</b>, RUT ${E.rut}, giro ${E.giro}, con domicilio en ${E.domicilio}, representada legalmente por doña <b>${E.repNombre}</b>, cédula de identidad N° ${E.repRut}, en adelante "el empleador"; y don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}${trabajador.nacionalidad?`, de nacionalidad ${trabajador.nacionalidad}`:""}${trabajador.fecha_nacimiento?`, nacido(a) el ${fechaLargaCL(trabajador.fecha_nacimiento)}`:""}${trabajador.estado_civil?`, estado civil ${trabajador.estado_civil}`:""}, en adelante "el trabajador", se ha convenido el siguiente contrato individual de trabajo:</p>
 
     <div class="clausula"><b>PRIMERO: Naturaleza de los servicios.</b> El trabajador se obliga a desempeñar el cargo de <b>${trabajador.cargo||"Auxiliar de Aseo"}</b>, ${funciones}.</div>
 
@@ -1701,11 +1719,11 @@ function imprimirContratoTrabajo(trabajador, data, overrides={}){
 
     <div class="clausula"><b>NOVENO: Obligaciones del trabajador.</b> El trabajador se obliga a cumplir el Reglamento Interno de Orden, Higiene y Seguridad de la empresa, a usar correctamente los elementos de protección personal (EPP) entregados, y a observar las instrucciones de prevención de riesgos informadas mediante la Obligación de Informar (ODI).</div>
 
-    <div class="clausula"><b>DÉCIMO: Domicilio y ejemplares.</b> Para todos los efectos legales las partes fijan domicilio en la ciudad de Arica, sometiéndose a la competencia de sus tribunales. El presente contrato se firma en dos ejemplares de igual tenor, quedando uno en poder de cada parte, declarando el trabajador haber recibido el suyo en este acto.</div>
+    <div class="clausula"><b>DÉCIMO: Domicilio y ejemplares.</b> Para todos los efectos legales las partes fijan domicilio en la ciudad de ${E.ciudad}, sometiéndose a la competencia de sus tribunales. El presente contrato se firma en dos ejemplares de igual tenor, quedando uno en poder de cada parte, declarando el trabajador haber recibido el suyo en este acto.</div>
 
     <div class="firmas">
       <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Trabajador</b></div>
-      <div class="firma">${EMPRESA.repNombre}<br/>RUT ${EMPRESA.repRut}<br/><b>p.p. ${EMPRESA.razon}</b></div>
+      <div class="firma">${E.repNombre}<br/>RUT ${E.repRut}<br/><b>p.p. ${E.razon}</b></div>
     </div>`;
   htmlDocImprimir(`Contrato ${trabajador.nombre||""}`, cuerpo);
 }
@@ -2113,7 +2131,8 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
   };
   const generarContrato=async(crearFila)=>{
     const ov={lugar:contratoModal.lugar, funciones:contratoModal.funciones};
-    imprimirContratoTrabajo(trabajador, data, ov);
+    const emp=await getEmpresaConfig();
+    imprimirContratoTrabajo(trabajador, data, ov, emp);
     if(crearFila) await insertarGenerado('contrato', proximaVersion('contrato'));
     setContratoModal(null);
   };
@@ -2756,9 +2775,9 @@ function TabExpediente({trabajador, data, update}){
   const ultLiq=[...R.liqs][0];
 
   // Reimpresión de documentos generados por el ERP (no crea fila)
-  const reimprimir=(d)=>{
+  const reimprimir=async (d)=>{
+    if(d.tipo_documento==='contrato'){ const emp=await getEmpresaConfig(); imprimirContratoTrabajo(trabajador,data,{},emp); return; }
     switch(d.tipo_documento){
-      case 'contrato':   imprimirContratoTrabajo(trabajador,data); break;
       case 'odi':        imprimirODI(trabajador,data); break;
       case 'reglamento': imprimirActaReglamento(trabajador,data); break;
       case 'epp':        imprimirActaEPP(trabajador,R.epp); break;
