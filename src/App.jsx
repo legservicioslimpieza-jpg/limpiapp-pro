@@ -1725,7 +1725,7 @@ function imprimirContratoTrabajo(trabajador, data, overrides={}, emp=null){
       <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Trabajador</b></div>
       <div class="firma">${E.repNombre}<br/>RUT ${E.repRut}<br/><b>p.p. ${E.razon}</b></div>
     </div>`;
-  htmlDocImprimir(`Contrato ${trabajador.nombre||""}`, cuerpo);
+  htmlDocImprimir(`Contrato ${trabajador.nombre||""}`, cuerpo, E.razon);
 }
 
 function imprimirODI(trabajador, data, emp=null){
