@@ -3656,7 +3656,7 @@ function MotorOperacional({ contexto = {}, loading }) {
   const depId = contexto.depId;
   const canalOrigen = contexto.canal_origen || 'qr';
   const solicitante = contexto.solicitante || 'trabajador';
-  const [fase, setFase] = useState('cargando'); // cargando|error|acreditar|tipo|datos|antes|despues|listo
+  const [fase, setFase] = useState('cargando'); // cargando|error|estado|acreditar|tipo|datos|antes|despues|listo
   const [errorMsg, setErrorMsg] = useState('');
   const [depInfo, setDepInfo] = useState(null);   // {dependencia, contrato, checklist}
   const [codigo, setCodigo] = useState('');
@@ -3677,6 +3677,8 @@ function MotorOperacional({ contexto = {}, loading }) {
   const [titulo, setTitulo] = useState('');
   const [descripcion, setDescripcion] = useState('');
   const [prioridad, setPrioridad] = useState('normal');
+  const [cumplimiento, setCumplimiento] = useState(null); // {frecuencia_objetivo, completadas, en_proceso} de ESTA dependencia (qr_cumplimiento_dia)
+  const [tipoSugerido, setTipoSugerido] = useState(null); // 'programada'|'extraordinaria' inferido del estado del dia
   const plantilla = tipoSel ? getPlantilla(tipoSel) : null;
   const req = plantilla?.requiere || {};
 
@@ -3687,6 +3689,15 @@ function MotorOperacional({ contexto = {}, loading }) {
   const inputS = {width:"100%",background:"#0f172a",color:"#fff",border:"1px solid #374151",borderRadius:8,padding:"12px",fontSize:16,boxSizing:"border-box"};
   const lbl  = {color:"#94a3b8",fontSize:13,marginBottom:8,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5};
 
+  // Estado del dia de ESTA dependencia (lado lectura; no escribe nada).
+  const cargarCumplimiento = async (contratoId, miDepId)=>{
+    try{
+      const {data:cum}=await supabase.rpc('qr_cumplimiento_dia',{p_contrato:contratoId});
+      if(cum && cum.valido) return (cum.dependencias||[]).find(d=>d.dependencia_id===miDepId)||null;
+    }catch{}
+    return null;
+  };
+
   // ---- Carga inicial: qr_dependencia (sin depender de loadAll) ----
   useEffect(()=>{
     let vivo=true;
@@ -3695,7 +3706,9 @@ function MotorOperacional({ contexto = {}, loading }) {
         const {data,error}=await supabase.rpc('qr_dependencia',{p_dep:depId});
         if(!vivo)return;
         if(error||!data||!data.valido){ setErrorMsg('QR inválido o dependencia no encontrada.'); setFase('error'); return; }
-        setDepInfo(data); setFase('acreditar');
+        setDepInfo(data);
+        const mi = await cargarCumplimiento(data.dependencia.contrato_id, data.dependencia.id);
+        if(vivo){ setCumplimiento(mi); setFase('estado'); }
       }catch{ if(vivo){ setErrorMsg('No se pudo cargar la dependencia. Revisa tu conexión.'); setFase('error'); } }
     })();
     return ()=>{vivo=false;};
@@ -3756,6 +3769,12 @@ function MotorOperacional({ contexto = {}, loading }) {
         const pl=getPlantilla(pend.tipo_actividad||'programada');
         if(pl?.requiere?.gpsFin!==false) capturarGPS(setGpsCierre);
         setFase('despues');
+      }
+      else if(tipoSugerido){
+        // El tipo viene inferido del estado de la dependencia (pantalla de estado). El trabajador no clasifica.
+        const lista = plantillasDisponibles({canal_origen:canalOrigen, solicitante, repasoPendiente:contexto.repasoPendiente});
+        const p = lista.find(x=>x.id===tipoSugerido);
+        if(p){ seleccionarPlantilla(p); } else { setFase('tipo'); }
       }
       else { setFase('tipo'); }
     }catch{ setAcredError('Error de conexión. Intenta de nuevo.'); }
@@ -3896,12 +3915,13 @@ function MotorOperacional({ contexto = {}, loading }) {
           {pasada&&pasada.m>1&&<div style={{color:"#93c5fd",fontSize:14,fontWeight:700,marginBottom:4}}>Control {pasada.n} de {pasada.m}</div>}
           <div style={{color:"#94a3b8",fontSize:13}}>{req.checklist?`${marcadas.size} tarea${marcadas.size!==1?"s":""} · `:''}evidencia ANTES/DESPUÉS registrada</div>
         </div>
-        <button style={{...btnG,maxWidth:420}} onClick={()=>{
-          setFase('acreditar'); setCodigo(''); setTrabajador(null); setActividadId(null);
+        <button style={{...btnG,maxWidth:420}} onClick={async ()=>{
+          setCodigo(''); setTrabajador(null); setActividadId(null);
           setGpsInicio(null); setGpsCierre(null); setFotosAntes([]); setFotosDespues([]);
           setMarcadas(new Set()); setObs(''); setAcredError(''); setPasada(null);
-          setTipoSel(null); setTitulo(''); setDescripcion(''); setPrioridad('normal');
-        }}>+ Nueva actividad</button>
+          setTipoSel(null); setTitulo(''); setDescripcion(''); setPrioridad('normal'); setTipoSugerido(null);
+          const mi = await cargarCumplimiento(dep.contrato_id, dep.id); setCumplimiento(mi); setFase('estado');
+        }}>+ Nuevo control</button>
       </div>
     );
   }
@@ -3909,6 +3929,40 @@ function MotorOperacional({ contexto = {}, loading }) {
   return(
     <div style={mS}>
       {Header}
+
+      {fase==='estado' && (()=>{
+        const obj = cumplimiento?.frecuencia_objetivo ?? 1;
+        const hechos = cumplimiento?.completadas ?? 0;
+        const enCurso = cumplimiento?.en_proceso ?? 0;
+        const cumplida = hechos >= obj;
+        const estadoTxt = cumplida ? 'Completo' : (enCurso>0 ? 'En curso' : 'Pendiente');
+        const estadoColor = cumplida ? '#4ade80' : (enCurso>0 ? '#fbbf24' : '#94a3b8');
+        const pct = obj>0 ? Math.min(100, Math.round((hechos/obj)*100)) : 0;
+        return (
+        <>
+          <div style={card}>
+            <div style={lbl}>Estado de la dependencia</div>
+            <div style={{color:"#fff",fontSize:22,fontWeight:700,marginBottom:2}}>{dep.nombre}</div>
+            <div style={{color:"#94a3b8",fontSize:14,marginBottom:16}}>{contrato.cliente}</div>
+            <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:7}}>
+              <div style={{color:"#e2e8f0",fontSize:17,fontWeight:600}}>{hechos} de {obj} {obj===1?'control':'controles'} hoy</div>
+              <div style={{color:estadoColor,fontSize:14,fontWeight:700}}>{estadoTxt}</div>
+            </div>
+            <div style={{height:10,background:"#1e293b",borderRadius:6,overflow:"hidden"}}>
+              <div style={{height:"100%",width:`${pct}%`,background:estadoColor,transition:"width .3s"}}/>
+            </div>
+            {enCurso>0 && !cumplida && <div style={{color:"#fbbf24",fontSize:13,marginTop:10}}>{enCurso} control{enCurso!==1?'es':''} en curso ahora.</div>}
+            {cumplida && <div style={{color:"#4ade80",fontSize:13,marginTop:12}}>Obligación del día cumplida.</div>}
+          </div>
+          <div style={{width:"100%",maxWidth:420}}>
+            <button style={btnG} onClick={()=>{ setTipoSugerido(cumplida?'extraordinaria':'programada'); setFase('acreditar'); }}>
+              {cumplida ? 'Registrar control extraordinario' : 'Registrar control'}
+            </button>
+            {cumplida && <div style={{color:"#64748b",fontSize:12,textAlign:"center",marginTop:10}}>Ya se cumplieron los controles del día. Este quedará registrado como control extraordinario.</div>}
+          </div>
+        </>
+        );
+      })()}
 
       {fase==='acreditar' && (
         <>
