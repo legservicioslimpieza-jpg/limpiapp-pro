@@ -1607,7 +1607,7 @@ const RIESGOS_ODI = [
   {riesgo:"Contacto eléctrico (enceradoras, aspiradoras)", consec:"Quemaduras, electrocución", medidas:"Revisar cables, no operar equipos con manos mojadas, desconectar antes de limpiar."},
 ];
 
-function htmlDocImprimir(titulo, cuerpoHtml){
+function htmlDocImprimir(titulo, cuerpoHtml, empresaRazon){
   const w = window.open("","_blank");
   if(!w){alert("Habilita las ventanas emergentes para generar el documento.");return;}
   w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${titulo}</title>
@@ -1631,7 +1631,7 @@ function htmlDocImprimir(titulo, cuerpoHtml){
     .lugar{margin-top:14px;font-size:11.5px}
     @media print{@page{size:A4;margin:16mm}body{padding:0}}
   </style></head><body>${cuerpoHtml}
-  <p class="nota">Documento generado por LimpiApp Pro · ${EMPRESA.razon} · ${new Date().toLocaleString("es-CL",{timeZone:"America/Santiago"})}</p>
+  <p class="nota">Documento generado por LimpiApp Pro · ${empresaRazon||EMPRESA.razon} · ${new Date().toLocaleString("es-CL",{timeZone:"America/Santiago"})}</p>
   </body></html>`);
   w.document.close();
   setTimeout(()=>w.print(),700);
@@ -1728,12 +1728,13 @@ function imprimirContratoTrabajo(trabajador, data, overrides={}, emp=null){
   htmlDocImprimir(`Contrato ${trabajador.nombre||""}`, cuerpo);
 }
 
-function imprimirODI(trabajador, data){
+function imprimirODI(trabajador, data, emp=null){
+  const E = empresaParaDoc(emp || _empresaCfgCache);
   const lj = lugaresYJornada(trabajador, data);
   const filas = RIESGOS_ODI.map(r=>`<tr><td><b>${r.riesgo}</b></td><td>${r.consec}</td><td>${r.medidas}</td></tr>`).join("");
   const cuerpo = `
     <h1>Obligación de Informar los Riesgos Laborales (ODI)</h1>
-    <div class="empresa">D.S. N°40 de 1969, Art. 21 · Ley N°16.744 — Derecho a Saber<br/><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
+    <div class="empresa">D.S. N°40 de 1969, Art. 21 · Ley N°16.744 — Derecho a Saber<br/><b>${E.razon}</b> · RUT ${E.rut}</div>
     <p>En cumplimiento del Art. 21 del D.S. N°40 y de la Ley N°16.744, el empleador deja constancia de haber informado al trabajador individualizado de los riesgos que entrañan sus labores, las medidas preventivas y los métodos de trabajo correctos.</p>
     <h2>Identificación del trabajador</h2>
     <p><b>Nombre:</b> ${trabajador.nombre||"—"} &nbsp;·&nbsp; <b>RUT:</b> ${trabajador.rut||"—"} &nbsp;·&nbsp; <b>Cargo:</b> ${trabajador.cargo||"Auxiliar de Aseo"}<br/>
@@ -1745,16 +1746,17 @@ function imprimirODI(trabajador, data){
     <p style="margin-top:14px">El trabajador declara haber recibido esta información de manera clara y comprensible, comprometiéndose a respetar las instrucciones de prevención y a reportar todo accidente o condición insegura a su jefatura.</p>
     <div class="firmas">
       <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Trabajador — Recibí conforme</b></div>
-      <div class="firma">${EMPRESA.repNombre}<br/><b>p.p. ${EMPRESA.razon}</b></div>
+      <div class="firma">${E.repNombre}<br/><b>p.p. ${E.razon}</b></div>
     </div>
-    <p class="lugar">Arica, ${fechaLargaCL()}.</p>`;
-  htmlDocImprimir(`ODI ${trabajador.nombre||""}`, cuerpo);
+    <p class="lugar">${E.ciudad}, ${fechaLargaCL()}.</p>`;
+  htmlDocImprimir(`ODI ${trabajador.nombre||""}`, cuerpo, E.razon);
 }
 
-function imprimirActaReglamento(trabajador, data){
+function imprimirActaReglamento(trabajador, data, emp=null){
+  const E = empresaParaDoc(emp || _empresaCfgCache);
   const cuerpo = `
     <h1>Acta de Entrega del Reglamento Interno</h1>
-    <div class="empresa">Reglamento Interno de Orden, Higiene y Seguridad — Art. 156 Código del Trabajo<br/><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
+    <div class="empresa">Reglamento Interno de Orden, Higiene y Seguridad — Art. 156 Código del Trabajo<br/><b>${E.razon}</b> · RUT ${E.rut}</div>
     <p>Conforme al Art. 156 del Código del Trabajo, el empleador deja constancia de haber entregado en forma gratuita al trabajador individualizado una copia del Reglamento Interno de Orden, Higiene y Seguridad vigente en la empresa.</p>
     <h2>Identificación del trabajador</h2>
     <p><b>Nombre:</b> ${trabajador.nombre||"—"} &nbsp;·&nbsp; <b>RUT:</b> ${trabajador.rut||"—"} &nbsp;·&nbsp; <b>Cargo:</b> ${trabajador.cargo||"Auxiliar de Aseo"}<br/>
@@ -1762,20 +1764,21 @@ function imprimirActaReglamento(trabajador, data){
     <p>El trabajador declara haber recibido el Reglamento Interno, haber tomado conocimiento de su contenido —en especial de las normas de orden, higiene y seguridad, del procedimiento de la Ley N°21.643 (Ley Karin) sobre acoso laboral, sexual y violencia en el trabajo— y se obliga a darle estricto cumplimiento.</p>
     <div class="firmas">
       <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Recibí conforme</b></div>
-      <div class="firma">${EMPRESA.repNombre}<br/><b>p.p. ${EMPRESA.razon}</b></div>
+      <div class="firma">${E.repNombre}<br/><b>p.p. ${E.razon}</b></div>
     </div>
-    <p class="lugar">Arica, ${fechaLargaCL()}.</p>`;
-  htmlDocImprimir(`Acta Reglamento ${trabajador.nombre||""}`, cuerpo);
+    <p class="lugar">${E.ciudad}, ${fechaLargaCL()}.</p>`;
+  htmlDocImprimir(`Acta Reglamento ${trabajador.nombre||""}`, cuerpo, E.razon);
 }
 
-function imprimirActaEPP(trabajador, entregas){
+function imprimirActaEPP(trabajador, entregas, emp=null){
+  const E = empresaParaDoc(emp || _empresaCfgCache);
   const orden=[...entregas].sort((a,b)=>new Date(a.fecha_entrega||0)-new Date(b.fecha_entrega||0));
   const filas = orden.length
     ? orden.map(e=>`<tr><td>${dateOnly(e.fecha_entrega)||"—"}</td><td>${e.articulo||"—"}</td><td style="text-align:center">${e.cantidad||1}</td><td style="text-align:center">${e.talla||"—"}</td><td style="text-align:center">${e.estado==='devuelto'?'Devuelto':'Entregado'}</td><td>${e.observaciones||""}</td></tr>`).join("")
     : `<tr><td colspan="6" style="text-align:center;color:#888">Sin entregas registradas</td></tr>`;
   const cuerpo = `
     <h1>Registro de Entrega de Elementos de Protección Personal</h1>
-    <div class="empresa">Art. 53 D.S. N°594 · Ley N°16.744<br/><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
+    <div class="empresa">Art. 53 D.S. N°594 · Ley N°16.744<br/><b>${E.razon}</b> · RUT ${E.rut}</div>
     <p>El empleador deja constancia de haber proporcionado gratuitamente al trabajador los elementos de protección personal (EPP) que se detallan, conforme al Art. 53 del D.S. N°594. El trabajador se obliga a usarlos correctamente y a mantenerlos en buen estado.</p>
     <h2>Identificación del trabajador</h2>
     <p><b>Nombre:</b> ${trabajador.nombre||"—"} &nbsp;·&nbsp; <b>RUT:</b> ${trabajador.rut||"—"} &nbsp;·&nbsp; <b>Cargo:</b> ${trabajador.cargo||"Auxiliar de Aseo"}</p>
@@ -1784,10 +1787,10 @@ function imprimirActaEPP(trabajador, entregas){
     <p style="margin-top:14px">El trabajador declara haber recibido los EPP detallados en buen estado, comprometiéndose a su uso obligatorio y permanente durante la jornada, y a su devolución al término de la relación laboral.</p>
     <div class="firmas">
       <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Recibí conforme</b></div>
-      <div class="firma">${EMPRESA.repNombre}<br/><b>p.p. ${EMPRESA.razon}</b></div>
+      <div class="firma">${E.repNombre}<br/><b>p.p. ${E.razon}</b></div>
     </div>
-    <p class="lugar">Arica, ${fechaLargaCL()}.</p>`;
-  htmlDocImprimir(`Acta EPP ${trabajador.nombre||""}`, cuerpo);
+    <p class="lugar">${E.ciudad}, ${fechaLargaCL()}.</p>`;
+  htmlDocImprimir(`Acta EPP ${trabajador.nombre||""}`, cuerpo, E.razon);
 }
 
 // Mapea la etiqueta de motivo_termino guardada (8B) al código de causal para el cálculo.
@@ -1802,7 +1805,8 @@ function motivoCodeFromLabel(label){
 }
 
 // Finiquito formal y completo (modelo LEG). Montos referenciales editables; resto formal listo para firma/ratificación.
-function imprimirFiniquito(trabajador, data, opts={}){
+function imprimirFiniquito(trabajador, data, opts={}, emp=null){
+  const E = empresaParaDoc(emp || _empresaCfgCache);
   const fechaSep = opts.fechaSep || dateOnly(trabajador.fecha_separacion);
   const motivoCode = opts.motivoCode || motivoCodeFromLabel(trabajador.motivo_termino);
   const cartaAviso = !!opts.cartaAviso;
@@ -1835,8 +1839,8 @@ function imprimirFiniquito(trabajador, data, opts={}){
 
   const cuerpo = `
     <h1>Finiquito de Contrato de Trabajo</h1>
-    <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
-    <p>En ${EMPRESA.ciudad}, a ${fechaLargaCL()}, entre <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, cédula de identidad N° ${EMPRESA.repRut}, ambos domiciliados en ${EMPRESA.domicilioCompleto}, en adelante "el empleador"; y por la otra parte don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}, en adelante "el trabajador", se acuerda el siguiente finiquito:</p>
+    <div class="empresa"><b>${E.razon}</b> · RUT ${E.rut}</div>
+    <p>En ${E.ciudad}, a ${fechaLargaCL()}, entre <b>${E.razon}</b>, RUT ${E.rut}, representada legalmente por doña <b>${E.repNombre}</b>, cédula de identidad N° ${E.repRut}, ambos domiciliados en ${E.domicilio}, en adelante "el empleador"; y por la otra parte don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}, en adelante "el trabajador", se acuerda el siguiente finiquito:</p>
 
     <div class="clausula"><b>PRIMERO: Término de la relación laboral.</b> El trabajador declara haber prestado servicios de <b>${trabajador.cargo||"Auxiliar de Aseo"}</b> en ${lugar}, desde el <b>${fechaLargaCL(trabajador.fecha_inicio)}</b> hasta el <b>${fechaLargaCL(fechaSep)}</b>, ambas fechas inclusive, terminando el contrato de trabajo por la causal: <b>${trabajador.motivo_termino||"—"}</b>. Antigüedad: ${calc.mesesServicio} meses (${calc.diasTotales} días).</div>
 
@@ -1855,13 +1859,13 @@ function imprimirFiniquito(trabajador, data, opts={}){
 
     <div class="firmas">
       <div class="firma">${trabajador.nombre||"—"}<br/>RUT ${trabajador.rut||"—"}<br/><b>Trabajador</b></div>
-      <div class="firma">${EMPRESA.repNombre}<br/>RUT ${EMPRESA.repRut}<br/><b>p.p. ${EMPRESA.razon}</b></div>
+      <div class="firma">${E.repNombre}<br/>RUT ${E.repRut}<br/><b>p.p. ${E.razon}</b></div>
     </div>
     <div class="firmas" style="margin-top:40px">
       <div class="firma" style="max-width:60%;margin:0 auto"><b>Ministro de fe</b><br/>Ratificación conforme al Art. 177 del Código del Trabajo</div>
     </div>
     <p class="nota" style="margin-top:18px">Montos calculados por el ERP. Revisar antes de firma y ratificación.</p>`;
-  htmlDocImprimir(`Finiquito ${trabajador.nombre||""}`, cuerpo);
+  htmlDocImprimir(`Finiquito ${trabajador.nombre||""}`, cuerpo, E.razon);
 }
 
 // Clasifica la causal para la Carta de Aviso (Art. 162): nombre legal, plazo, si requiere estado de cotizaciones y si aplica carta de despido.
@@ -1883,7 +1887,8 @@ function causalCarta(label){
 }
 
 // Carta de Aviso de Término de Contrato (Art. 162). Causal-aware. opts: {fechaSep, hechos, modalidad, indemnizaciones, sustitutiva}
-function imprimirCartaAviso(trabajador, data, opts={}){
+function imprimirCartaAviso(trabajador, data, opts={}, emp=null){
+  const E = empresaParaDoc(emp || _empresaCfgCache);
   // Construye un "snapshot" (fotografía congelada) con todo lo necesario para reimprimir
   // exactamente la misma carta. Si opts._snapshot viene dado, reimprime desde él.
   let snap;
@@ -1951,13 +1956,13 @@ function imprimirCartaAviso(trabajador, data, opts={}){
 
   const cuerpo = `
     <h1>Carta de Aviso de Término de Contrato de Trabajo</h1>
-    <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut}</div>
-    <p style="text-align:right;margin-top:6px">${EMPRESA.ciudad}, ${fechaLargaCL(snap.fechaCartaISO)}</p>
+    <div class="empresa"><b>${E.razon}</b> · RUT ${E.rut}</div>
+    <p style="text-align:right;margin-top:6px">${E.ciudad}, ${fechaLargaCL(snap.fechaCartaISO)}</p>
     <p style="margin:0"><b>Señor(a):</b> ${snap.nombre}<br/>
        <b>Cédula de identidad:</b> ${snap.rut}<br/>
        <b>Domicilio:</b> ${snap.domicilio}</p>
     <p>De mi consideración:</p>
-    <p>Por medio de la presente, y en cumplimiento de lo dispuesto en el <b>artículo 162 del Código del Trabajo</b>, comunico a usted que <b>${EMPRESA.razon}</b>, RUT ${EMPRESA.rut}, representada legalmente por doña <b>${EMPRESA.repNombre}</b>, ha resuelto poner término a su contrato de trabajo a contar del <b>${fechaLargaCL(snap.fechaSepISO)}</b>, invocando la causal contemplada en el <b>${snap.nombreCausal}</b>.</p>
+    <p>Por medio de la presente, y en cumplimiento de lo dispuesto en el <b>artículo 162 del Código del Trabajo</b>, comunico a usted que <b>${E.razon}</b>, RUT ${E.rut}, representada legalmente por doña <b>${E.repNombre}</b>, ha resuelto poner término a su contrato de trabajo a contar del <b>${fechaLargaCL(snap.fechaSepISO)}</b>, invocando la causal contemplada en el <b>${snap.nombreCausal}</b>.</p>
     <div class="clausula"><b>Hechos en que se funda el término.</b><br/>${hechosHtml}</div>
     ${indemHtml}
     ${clausAviso161}
@@ -1966,11 +1971,11 @@ function imprimirCartaAviso(trabajador, data, opts={}){
     <p>Se remitirá copia de la presente comunicación a la Inspección del Trabajo respectiva, conforme a la ley.</p>
     <p>Sin otro particular, le saluda atentamente,</p>
     <div class="firmas" style="margin-top:48px">
-      <div class="firma">${EMPRESA.repNombre}<br/>RUT ${EMPRESA.repRut}<br/><b>${EMPRESA.repCargo} · p.p. ${EMPRESA.razon}</b></div>
+      <div class="firma">${E.repNombre}<br/>RUT ${E.repRut}<br/><b>${E.repCargo} · p.p. ${E.razon}</b></div>
       <div class="firma">Recibí conforme<br/>Nombre, RUT y fecha<br/><b>${snap.nombre}</b></div>
     </div>
     <p class="nota" style="margin-top:18px">Documento generado por el ERP. Notifíquese al trabajador <b>personalmente o por carta certificada</b> al <b>domicilio del trabajador</b> señalado en el contrato, conservando el <b>comprobante de envío</b>. Plazo legal de comunicación: ${snap.plazoTxt||'según la causal invocada'}. ${snap.requiereCotiz?'Adjuntar los comprobantes de pago de cotizaciones previsionales.':''}</p>`;
-  htmlDocImprimir(`Carta de Aviso ${snap.nombre||''}`, cuerpo);
+  htmlDocImprimir(`Carta de Aviso ${snap.nombre||''}`, cuerpo, E.razon);
   return snap;
 }
 
@@ -2151,7 +2156,8 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
   useEffect(()=>{ if(autoFiniquito) openFiniquito(); },[autoFiniquito]);  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(()=>{ if(autoCarta) openCartaAviso(); },[autoCarta]);  // eslint-disable-line react-hooks/exhaustive-deps
   const generarFiniquito=async(crearFila)=>{
-    imprimirFiniquito(trabajador, data, finiquitoModal);
+    const emp=await getEmpresaConfig();
+    imprimirFiniquito(trabajador, data, finiquitoModal, emp);
     if(crearFila){
       // Regla de version unica: anular los finiquitos previos PENDIENTES (los firmados se conservan como historial).
       const pendientesPrevios=docs.filter(d=>d.tipo_documento==='finiquito'&&d.estado==='pendiente');
@@ -2177,12 +2183,15 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
     });
   };
   const generarCartaAviso=async(crearFila)=>{
-    const snap=imprimirCartaAviso(trabajador, data, {...cartaModal, _generadoPor:quien});
+    const emp=await getEmpresaConfig();
+    const snap=imprimirCartaAviso(trabajador, data, {...cartaModal, _generadoPor:quien}, emp);
     if(snap&&crearFila) await insertarGenerado('carta_aviso', proximaVersion('carta_aviso'), {datos_documento: snap});
     setCartaModal(null);
   };
   // Reimpresión EXACTA de una versión guardada (fotografía congelada).
-  const reimprimirCarta=(row)=>{ if(row?.datos_documento) imprimirCartaAviso(trabajador, data, {_snapshot: row.datos_documento}); };
+  const reimprimirCarta=async(row)=>{ if(row?.datos_documento){ const emp=await getEmpresaConfig(); imprimirCartaAviso(trabajador, data, {_snapshot: row.datos_documento}, emp); } };
+  // Precarga la configuración de empresa para que todos los documentos la lean desde getEmpresaConfig().
+  useEffect(()=>{ getEmpresaConfig(); },[]);
 
   // ── Camino 1: subir documento existente escaneado (empresa en marcha) ──
   const openSubir=()=>setSubForm({
