@@ -1648,7 +1648,7 @@ function lugaresYJornada(trabajador, data){
       const dir=[ct.instalacion,ct.direccion].filter(Boolean).join(", ");
       lugares.push(`${ct.cliente||ct.id}${dir?` (${dir})`:""}`);
     }
-    const j=[a.jornada,a.horario].filter(Boolean).join(" — ");
+    const j=(a.jornada && String(a.jornada).trim()) ? a.jornada : (a.horario||"");
     if(j) jornadas.push(`${ct?(ct.cliente||ct.id):a.contrato_id}: ${j}${a.horas_semanales?` (${a.horas_semanales} hrs/sem)`:""}`);
   });
   return {
@@ -1697,7 +1697,7 @@ function imprimirContratoTrabajo(trabajador, data, overrides={}, emp=null){
   const cuerpo = `
     <h1>Contrato Individual de Trabajo</h1>
     <div class="empresa"><b>${E.razon}</b> · RUT ${E.rut} · ${E.domicilio}</div>
-    <p>En ${E.ciudad}, a ${fechaLargaCL()}, entre <b>${E.razon}</b>, RUT ${E.rut}, giro ${E.giro}, con domicilio en ${E.domicilio}, representada legalmente por doña <b>${E.repNombre}</b>, cédula de identidad N° ${E.repRut}, en adelante "el empleador"; y don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}${trabajador.nacionalidad?`, de nacionalidad ${trabajador.nacionalidad}`:""}${trabajador.fecha_nacimiento?`, nacido(a) el ${fechaLargaCL(trabajador.fecha_nacimiento)}`:""}${trabajador.estado_civil?`, estado civil ${trabajador.estado_civil}`:""}, en adelante "el trabajador", se ha convenido el siguiente contrato individual de trabajo:</p>
+    <p>En ${E.ciudad}, a ${fechaLargaCL()}, entre <b>${E.razon}</b>, RUT ${E.rut}, giro ${E.giro}, con domicilio en ${E.domicilio}, representada legalmente por doña <b>${E.repNombre}</b>, cédula de identidad N° ${E.repRut}, en adelante "el empleador"; y don(ña) <b>${trabajador.nombre||"—"}</b>, cédula de identidad N° ${trabajador.rut||"—"}${trabajador.nacionalidad?`, de nacionalidad ${trabajador.nacionalidad}`:""}${trabajador.fecha_nacimiento?`, nacido(a) el ${fechaLargaCL(trabajador.fecha_nacimiento)}`:""}${trabajador.estado_civil?`, estado civil ${trabajador.estado_civil}`:""}${(trabajador.domicilio||trabajador.ciudad||trabajador.region)?`, con domicilio en ${[trabajador.domicilio,trabajador.ciudad,trabajador.region].filter(Boolean).join(', ')}`:""}${(trabajador.afp||trabajador.salud)?`, afiliado(a) a ${trabajador.afp?`AFP ${trabajador.afp}`:""}${(trabajador.afp&&trabajador.salud)?" y ":""}${trabajador.salud||""}`:""}, en adelante "el trabajador", se ha convenido el siguiente contrato individual de trabajo:</p>
 
     <div class="clausula"><b>PRIMERO: Naturaleza de los servicios.</b> El trabajador se obliga a desempeñar el cargo de <b>${trabajador.cargo||"Auxiliar de Aseo"}</b>, ${funciones}.</div>
 
@@ -2997,7 +2997,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       .filter(p=>p.periodo)
       .sort((a,b)=>String(b.periodo).localeCompare(String(a.periodo)))[0]?.imm;
     setTab("datos");setAsigForm(null);
-    setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",domicilio:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:"",nacionalidad:"Chilena",fecha_nacimiento:"",estado_civil:"",fecha_termino_plazo:null});
+    setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",domicilio:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:"",nacionalidad:"Chilena",fecha_nacimiento:"",estado_civil:"",fecha_termino_plazo:null,ciudad:"",region:""});
   };
   const save=async()=>{if(!form.nombre.trim())return;const payload={...form,fecha_actualizacion_datos:new Date().toISOString().slice(0,10)};const ok=isNew?await insert("trabajadores",payload):await update("trabajadores",payload);if(ok){setForm(null);setAsigForm(null);}};
 
@@ -3372,8 +3372,10 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               <FL label="Teléfono"><input style={INP} value={form.telefono} onChange={e=>setForm({...form,telefono:e.target.value})} placeholder="+569XXXXXXXX"/></FL>
               <FL label="Email"><input style={INP} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="correo@empresa.cl"/></FL>
               <div style={{gridColumn:"1 / -1"}}>
-                <FL label="Domicilio (dirección del contrato — usado en la carta de aviso por carta certificada)"><input style={INP} value={form.domicilio||""} onChange={e=>setForm({...form,domicilio:e.target.value})} placeholder="Calle, número, depto/villa, comuna, ciudad"/></FL>
+                <FL label="Domicilio / dirección (calle, número, depto — usado en el contrato y la carta certificada)"><input style={INP} value={form.domicilio||""} onChange={e=>setForm({...form,domicilio:e.target.value})} placeholder="Calle, número, depto/villa"/></FL>
               </div>
+              <FL label="Ciudad / comuna"><input style={INP} value={form.ciudad||""} onChange={e=>setForm({...form,ciudad:e.target.value})} placeholder="Arica"/></FL>
+              <FL label="Región"><input style={INP} value={form.region||""} onChange={e=>setForm({...form,region:e.target.value})} placeholder="Arica y Parinacota"/></FL>
               <FL label="Correo para notificaciones laborales"><input style={INP} value={form.correo_notificaciones||""} onChange={e=>setForm({...form,correo_notificaciones:e.target.value})} placeholder="correo donde recibe avisos laborales"/></FL>
               <FL label="Autoriza comunicaciones electrónicas">
                 <select style={INP} value={form.autoriza_com_electronica?"si":"no"} onChange={e=>setForm({...form,autoriza_com_electronica:e.target.value==="si"})}>
