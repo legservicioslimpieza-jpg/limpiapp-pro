@@ -89,6 +89,7 @@ const TABS = [
   {key:"remuneraciones", label:"Remuneraciones", icon:Icon.remuneraciones},
   {key:"cumplimiento",   label:"Cumplimiento",   icon:Icon.incidencias},
   {key:"informes",       label:"Informes IA",    icon:Icon.informes},
+  {key:"configuracion",  label:"Empresa",        icon:Icon.contratos},
 ];
 
 /* ─── Componentes base ──────────────────────────────────────── */
@@ -6968,6 +6969,106 @@ function InformesIA({data,contratoId}){
   );
 }
 
+/* ─── Configuración de Empresa (cimiento administrativo) ────── */
+let _empresaCfgCache = null;
+async function getEmpresaConfig(force){
+  if(_empresaCfgCache && !force) return _empresaCfgCache;
+  try{
+    let {data}=await supabase.from('empresa_config').select('*').eq('actual',true).order('updated_at',{ascending:false}).limit(1);
+    if(!data||!data.length){ const r=await supabase.from('empresa_config').select('*').limit(1); data=r.data; }
+    if(data&&data.length){ _empresaCfgCache=data[0]; return data[0]; }
+  }catch(e){}
+  return null;
+}
+function CampoEmpresa({cfg,set,k,label,placeholder,full}){
+  return (
+    <div style={{gridColumn:full?'1 / -1':'auto'}}>
+      <label style={{display:'block',fontSize:12,color:C.textMuted,marginBottom:4,fontWeight:600}}>{label}</label>
+      <input style={INP} value={cfg[k]||''} onChange={e=>set(k,e.target.value)} placeholder={placeholder||''}/>
+    </div>
+  );
+}
+function BloqueEmpresa({titulo,children}){
+  return (
+    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:'16px 18px',marginBottom:16}}>
+      <div style={{fontSize:13,fontWeight:800,color:C.text,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>{titulo}</div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:12}}>{children}</div>
+    </div>
+  );
+}
+function ConfiguracionEmpresa(){
+  const [cfg,setCfg]=useState(null);
+  const [cargando,setCargando]=useState(true);
+  const [guardando,setGuardando]=useState(false);
+  const [msg,setMsg]=useState('');
+  useEffect(()=>{ let vivo=true; (async()=>{ const c=await getEmpresaConfig(true); if(vivo){ setCfg(c||{}); setCargando(false); } })(); return ()=>{vivo=false;}; },[]);
+  const set=(k,v)=>setCfg(p=>({...p,[k]:v}));
+  const guardar=async()=>{
+    if(!cfg||!cfg.id){ setMsg('No se encontró el registro de empresa. Ejecuta primero el SQL de empresa_config.'); return; }
+    setGuardando(true); setMsg('');
+    const {id, updated_at, ...campos}=cfg;
+    const {error}=await supabase.from('empresa_config').update({...campos,updated_at:new Date().toISOString()}).eq('id',id);
+    if(error){ setMsg('No se pudo guardar. '+(error.message||'')); }
+    else { setMsg('Cambios guardados.'); await getEmpresaConfig(true); }
+    setGuardando(false);
+  };
+  if(cargando) return <div style={{padding:24,color:C.textMuted}}>Cargando configuración…</div>;
+  const ok = msg.startsWith('Cambios');
+  return (
+    <div style={{maxWidth:980,margin:'0 auto'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:16,flexWrap:'wrap',gap:10}}>
+        <div>
+          <h2 style={{margin:0,fontSize:20,color:C.text}}>Configuración de Empresa</h2>
+          <p style={{margin:'4px 0 0',fontSize:12,color:C.textMuted,maxWidth:620}}>Datos de la empresa usuaria del ERP. Los documentos (contratos, anexos, liquidaciones, finiquitos, informes) leerán estos datos desde aquí, no desde valores fijos en el código.</p>
+        </div>
+        <button onClick={guardar} disabled={guardando} style={{background:guardando?C.border:C.accent,color:'#fff',border:'none',borderRadius:8,padding:'10px 20px',fontSize:14,fontWeight:600,cursor:guardando?'default':'pointer',whiteSpace:'nowrap'}}>{guardando?'Guardando…':'Guardar cambios'}</button>
+      </div>
+      {msg&&<div style={{marginBottom:14,fontSize:13,color:ok?C.green:C.red,background:ok?C.greenBg:C.redBg,border:`1px solid ${ok?C.greenBorder:C.redBorder}`,borderRadius:8,padding:'8px 12px'}}>{msg}</div>}
+      <BloqueEmpresa titulo="Identificación legal">
+        <CampoEmpresa cfg={cfg} set={set} k="razon_social" label="Razón social" full/>
+        <CampoEmpresa cfg={cfg} set={set} k="nombre_fantasia" label="Nombre de fantasía"/>
+        <CampoEmpresa cfg={cfg} set={set} k="rut" label="RUT"/>
+        <CampoEmpresa cfg={cfg} set={set} k="giro" label="Giro / actividad económica"/>
+        <CampoEmpresa cfg={cfg} set={set} k="domicilio" label="Domicilio legal"/>
+        <CampoEmpresa cfg={cfg} set={set} k="ciudad" label="Ciudad"/>
+        <CampoEmpresa cfg={cfg} set={set} k="region" label="Región"/>
+        <CampoEmpresa cfg={cfg} set={set} k="pais" label="País"/>
+      </BloqueEmpresa>
+      <BloqueEmpresa titulo="Representante legal">
+        <CampoEmpresa cfg={cfg} set={set} k="rep_nombre" label="Nombre"/>
+        <CampoEmpresa cfg={cfg} set={set} k="rep_rut" label="RUT"/>
+        <CampoEmpresa cfg={cfg} set={set} k="rep_cargo" label="Cargo"/>
+      </BloqueEmpresa>
+      <BloqueEmpresa titulo="Contacto institucional">
+        <CampoEmpresa cfg={cfg} set={set} k="correo_admin" label="Correo administración"/>
+        <CampoEmpresa cfg={cfg} set={set} k="correo_general" label="Correo general"/>
+        <CampoEmpresa cfg={cfg} set={set} k="telefono" label="Teléfono"/>
+        <CampoEmpresa cfg={cfg} set={set} k="sitio_web" label="Sitio web"/>
+        <CampoEmpresa cfg={cfg} set={set} k="logo_url" label="Logo (URL)" full/>
+      </BloqueEmpresa>
+      <BloqueEmpresa titulo="Datos laborales">
+        <CampoEmpresa cfg={cfg} set={set} k="mutualidad" label="Organismo administrador (Mutualidad)"/>
+        <CampoEmpresa cfg={cfg} set={set} k="caja_compensacion" label="Caja de Compensación"/>
+      </BloqueEmpresa>
+      <BloqueEmpresa titulo="Datos documentales">
+        <CampoEmpresa cfg={cfg} set={set} k="ciudad_emision" label="Ciudad de emisión"/>
+        <CampoEmpresa cfg={cfg} set={set} k="firmante_nombre" label="Firmante operativo"/>
+        <CampoEmpresa cfg={cfg} set={set} k="firmante_cargo" label="Cargo firmante"/>
+        <CampoEmpresa cfg={cfg} set={set} k="firmante_correo" label="Correo firmante"/>
+        <CampoEmpresa cfg={cfg} set={set} k="firmante_telefono" label="Teléfono firmante"/>
+      </BloqueEmpresa>
+      <BloqueEmpresa titulo="Datos bancarios">
+        <CampoEmpresa cfg={cfg} set={set} k="banco" label="Banco"/>
+        <CampoEmpresa cfg={cfg} set={set} k="tipo_cuenta" label="Tipo de cuenta"/>
+        <CampoEmpresa cfg={cfg} set={set} k="numero_cuenta" label="Número de cuenta"/>
+        <CampoEmpresa cfg={cfg} set={set} k="titular_cuenta" label="Titular de la cuenta"/>
+        <CampoEmpresa cfg={cfg} set={set} k="rut_titular" label="RUT titular"/>
+      </BloqueEmpresa>
+      <div style={{fontSize:11,color:C.textDim,marginTop:4,marginBottom:24}}>Las tasas previsionales no se editan aquí: viven en Parámetros Legales.</div>
+    </div>
+  );
+}
+
 /* ─── App principal ─────────────────────────────────────────── */
 export default function App(){
   // ── Detección modo QR (cuando trabajador escanea) ────────────
@@ -7037,6 +7138,7 @@ if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
         {tab==="remuneraciones" &&<Remuneraciones  data={data} saveRem={saveRem} insert={insert} update={update}/>}
         {tab==="cumplimiento"   &&<Cumplimiento    data={data} insert={insert} update={update}/>}
         {tab==="informes"       &&<InformesIA      data={data} contratoId={contratoId}/>}
+        {tab==="configuracion"  &&<ConfiguracionEmpresa/>}
         </div>
     </div>
   );
