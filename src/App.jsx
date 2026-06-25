@@ -2978,7 +2978,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       .filter(p=>p.periodo)
       .sort((a,b)=>String(b.periodo).localeCompare(String(a.periodo)))[0]?.imm;
     setTab("datos");setAsigForm(null);
-    setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",domicilio:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:""});
+    setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",domicilio:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:"",nacionalidad:"Chilena",fecha_nacimiento:"",estado_civil:"",fecha_termino_plazo:null});
   };
   const save=async()=>{if(!form.nombre.trim())return;const payload={...form,fecha_actualizacion_datos:new Date().toISOString().slice(0,10)};const ok=isNew?await insert("trabajadores",payload):await update("trabajadores",payload);if(ok){setForm(null);setAsigForm(null);}};
 
@@ -3345,6 +3345,10 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               <FL label="RUT"><input style={INP} value={form.rut||""} onChange={e=>setForm({...form,rut:e.target.value})} placeholder="12.345.678-9"/></FL>
               <FL label="Cargo"><select style={INP} value={form.cargo} onChange={e=>setForm({...form,cargo:e.target.value})}><option>Auxiliar Aseo</option><option>Supervisor</option><option>Supervisora</option><option>Jefe de Turno</option></select></FL>
               <FL label="Tipo contrato"><select style={INP} value={form.tipo_contrato||"PLAZO FIJO"} onChange={e=>setForm({...form,tipo_contrato:e.target.value})}><option>PLAZO FIJO</option><option>INDEFINIDO</option><option>HONORARIOS</option></select></FL>
+              {form.tipo_contrato==="PLAZO FIJO" && <FL label="Fecha término (plazo fijo)"><input type="date" style={INP} value={form.fecha_termino_plazo||""} onChange={e=>setForm({...form,fecha_termino_plazo:e.target.value||null})}/></FL>}
+              <FL label="Nacionalidad"><input style={INP} value={form.nacionalidad||""} onChange={e=>setForm({...form,nacionalidad:e.target.value})} placeholder="Chilena"/></FL>
+              <FL label="Fecha de nacimiento"><input type="date" style={INP} value={form.fecha_nacimiento||""} onChange={e=>setForm({...form,fecha_nacimiento:e.target.value||null})}/></FL>
+              <FL label="Estado civil"><select style={INP} value={form.estado_civil||""} onChange={e=>setForm({...form,estado_civil:e.target.value})}><option value="">—</option><option>Soltero(a)</option><option>Casado(a)</option><option>Viudo(a)</option><option>Divorciado(a)</option><option>Separado(a) judicialmente</option><option>Conviviente civil</option></select></FL>
               <FL label="Teléfono"><input style={INP} value={form.telefono} onChange={e=>setForm({...form,telefono:e.target.value})} placeholder="+569XXXXXXXX"/></FL>
               <FL label="Email"><input style={INP} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="correo@empresa.cl"/></FL>
               <div style={{gridColumn:"1 / -1"}}>
