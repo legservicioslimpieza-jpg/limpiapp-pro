@@ -4226,45 +4226,55 @@ function ActividadesQR({ data, contratoId }) {
                   <div style={{display:"flex",gap:6}}><EstadoBadge e={a.estado}/><TipoBadge t={a.tipo_actividad}/></div>
                 </div>
 
-                <Sec t="Actividad"/>
-                <Campo k="Tipo" v={tipoDe(a.tipo_actividad).l}/>
-                <Campo k="Contrato" v={cliente(a.contrato_id)}/>
-                <Campo k="Dependencia" v={nombreDep(a.dependencia_id)}/>
-                {a.pasadas_objetivo>1 && <Campo k="Control" v={`${a.numero_pasada||1} de ${a.pasadas_objetivo}`}/>}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:"0 28px",marginTop:6}}>
+                  <div>
+                    <Sec t="Actividad"/>
+                    <Campo k="Tipo" v={tipoDe(a.tipo_actividad).l}/>
+                    <Campo k="Contrato" v={cliente(a.contrato_id)}/>
+                    <Campo k="Dependencia" v={nombreDep(a.dependencia_id)}/>
+                    {a.pasadas_objetivo>1 && <Campo k="Control" v={`${a.numero_pasada||1} de ${a.pasadas_objetivo}`}/>}
 
-                <Sec t="Trabajador"/>
-                <Campo k="Nombre" v={nombreTrab(a.trabajador_id)}/>
+                    <Sec t="Trabajador"/>
+                    <Campo k="Nombre" v={nombreTrab(a.trabajador_id)}/>
 
-                <Sec t="Tiempos"/>
-                <Campo k="Inicio" v={fmt(a.fecha_hora_inicio)}/>
-                <Campo k="Término" v={fmt(a.fecha_hora_cierre)}/>
-                <Campo k="Duración" v={dur(a)}/>
+                    <Sec t="Tiempos"/>
+                    <Campo k="Inicio" v={fmt(a.fecha_hora_inicio)}/>
+                    <Campo k="Término" v={fmt(a.fecha_hora_cierre)}/>
+                    <Campo k="Duración" v={dur(a)}/>
 
-                <Sec t="Evidencia Antes"/>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  {antes.length===0&&<span style={{color:C.textMuted,fontSize:13}}>Sin fotografías</span>}
-                  {antes.map((f,i)=><img key={i} src={f.public_url} alt="antes" onClick={()=>setLb(f.public_url)} style={{width:90,height:90,objectFit:"cover",borderRadius:6,cursor:"pointer",border:`1px solid ${C.border}`}}/>)}
+                    <Sec t="Trazabilidad"/>
+                    <Campo k="GPS inicio" v={a.gps_inicio_obtenido?`${a.lat_inicio}, ${a.lng_inicio}${a.precision_inicio?` (±${a.precision_inicio}m)`:''}`:"Sin georreferenciación"}/>
+                    <Campo k="GPS término" v={a.gps_cierre_obtenido?`${a.lat_cierre}, ${a.lng_cierre}${a.precision_cierre?` (±${a.precision_cierre}m)`:''}`:"Sin georreferenciación"}/>
+                    <Campo k="Acceso" v={a.via_qr===false?"Manual":"QR escaneado"}/>
+                    <Campo k="N° actividad" v={folioTxt(a)}/>
+                    <Campo k="Registro Evidencias" v={`${evVinc} tarea${evVinc!==1?"s":""} enlazada${evVinc!==1?"s":""}`}/>
+                  </div>
+
+                  <div>
+                    <Sec t="Evidencia Antes"/>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {antes.length===0&&<span style={{color:C.textMuted,fontSize:13}}>Sin fotografías</span>}
+                      {antes.map((f,i)=><img key={i} src={f.public_url} alt="antes" onClick={()=>setLb(f.public_url)} style={{width:90,height:90,objectFit:"cover",borderRadius:6,cursor:"pointer",border:`1px solid ${C.border}`}}/>)}
+                    </div>
+
+                    <Sec t="Evidencia Después"/>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {desp.length===0&&<span style={{color:C.textMuted,fontSize:13}}>Sin fotografías</span>}
+                      {desp.map((f,i)=><img key={i} src={f.public_url} alt="despues" onClick={()=>setLb(f.public_url)} style={{width:90,height:90,objectFit:"cover",borderRadius:6,cursor:"pointer",border:`1px solid ${C.border}`}}/>)}
+                    </div>
+
+                    <Sec t="Actividades ejecutadas"/>
+                    {tareas.length===0&&<span style={{color:C.textMuted,fontSize:13}}>—</span>}
+                    {tareas.map((tid,i)=><div key={i} style={{fontSize:13,color:C.text,padding:"2px 0"}}>✓ {tareaTxt(tid)}</div>)}
+
+                    {(a.titulo||a.descripcion) && <Sec t="Motivo y solicitud inicial"/>}
+                    {a.titulo && <><div style={{fontSize:12,color:C.textMuted,margin:"4px 0 2px"}}>Motivo del control extraordinario</div><div style={{fontSize:13,color:C.text,marginBottom:6}}>{a.titulo}</div></>}
+                    {a.descripcion && <><div style={{fontSize:12,color:C.textMuted,margin:"4px 0 2px"}}>Solicitud / descripción inicial</div><div style={{fontSize:13,color:C.text}}>{a.descripcion}</div></>}
+
+                    <Sec t="Observación final del trabajo"/>
+                    <div style={{fontSize:13,color:a.observacion?C.text:C.textMuted}}>{a.observacion||"Sin observaciones"}</div>
+                  </div>
                 </div>
-
-                <Sec t="Evidencia Después"/>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  {desp.length===0&&<span style={{color:C.textMuted,fontSize:13}}>Sin fotografías</span>}
-                  {desp.map((f,i)=><img key={i} src={f.public_url} alt="despues" onClick={()=>setLb(f.public_url)} style={{width:90,height:90,objectFit:"cover",borderRadius:6,cursor:"pointer",border:`1px solid ${C.border}`}}/>)}
-                </div>
-
-                <Sec t="Actividades ejecutadas"/>
-                {tareas.length===0&&<span style={{color:C.textMuted,fontSize:13}}>—</span>}
-                {tareas.map((tid,i)=><div key={i} style={{fontSize:13,color:C.text,padding:"2px 0"}}>✓ {tareaTxt(tid)}</div>)}
-
-                <Sec t="Observaciones"/>
-                <div style={{fontSize:13,color:a.observacion?C.text:C.textMuted}}>{a.observacion||"Sin observaciones"}</div>
-
-                <Sec t="Trazabilidad"/>
-                <Campo k="GPS inicio" v={a.gps_inicio_obtenido?`${a.lat_inicio}, ${a.lng_inicio}${a.precision_inicio?` (±${a.precision_inicio}m)`:''}`:"Sin georreferenciación"}/>
-                <Campo k="GPS término" v={a.gps_cierre_obtenido?`${a.lat_cierre}, ${a.lng_cierre}${a.precision_cierre?` (±${a.precision_cierre}m)`:''}`:"Sin georreferenciación"}/>
-                <Campo k="Acceso" v={a.via_qr===false?"Manual":"QR escaneado"}/>
-                <Campo k="N° actividad" v={folioTxt(a)}/>
-                <Campo k="Registro Evidencias" v={`${evVinc} tarea${evVinc!==1?"s":""} enlazada${evVinc!==1?"s":""}`}/>
               </div>
             )}
           </div>
