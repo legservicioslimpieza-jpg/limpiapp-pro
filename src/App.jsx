@@ -3345,6 +3345,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               <FL label="RUT"><input style={INP} value={form.rut||""} onChange={e=>setForm({...form,rut:e.target.value})} placeholder="12.345.678-9"/></FL>
               <FL label="Cargo"><select style={INP} value={form.cargo} onChange={e=>setForm({...form,cargo:e.target.value})}><option>Auxiliar Aseo</option><option>Supervisor</option><option>Supervisora</option><option>Jefe de Turno</option></select></FL>
               <FL label="Tipo contrato"><select style={INP} value={form.tipo_contrato||"PLAZO FIJO"} onChange={e=>setForm({...form,tipo_contrato:e.target.value})}><option>PLAZO FIJO</option><option>INDEFINIDO</option><option>HONORARIOS</option></select></FL>
+              <FL label="Fecha ingreso a la empresa"><input type="date" style={INP} value={form.fecha_inicio||""} onChange={e=>setForm({...form,fecha_inicio:e.target.value})}/></FL>
               {form.tipo_contrato==="PLAZO FIJO" && <FL label="Fecha término (plazo fijo)"><input type="date" style={INP} value={form.fecha_termino_plazo||""} onChange={e=>setForm({...form,fecha_termino_plazo:e.target.value||null})}/></FL>}
               <FL label="Nacionalidad"><input style={INP} value={form.nacionalidad||""} onChange={e=>setForm({...form,nacionalidad:e.target.value})} placeholder="Chilena"/></FL>
               <FL label="Fecha de nacimiento"><input type="date" style={INP} value={form.fecha_nacimiento||""} onChange={e=>setForm({...form,fecha_nacimiento:e.target.value||null})}/></FL>
@@ -3360,49 +3361,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   <option value="no">No</option><option value="si">Sí</option>
                 </select>
               </FL>
-              <FL label="Fecha ingreso a la empresa"><input type="date" style={INP} value={form.fecha_inicio||""} onChange={e=>setForm({...form,fecha_inicio:e.target.value})}/></FL>
-              {/* Desvinculación — solo lectura mientras activo=true */}
-              {form.fecha_separacion&&(
-                <div style={{gridColumn:'1/-1',background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'6px 10px',fontSize:11,color:'#991b1b'}}>
-                  🔒 Datos de desvinculación — modificar solo desde el asistente
-                </div>
-              )}
-              <FL label="Fecha separación laboral">
-                <input type="date" style={{...INP,background:form.activo!==false&&form.fecha_separacion?'#fef2f2':undefined,cursor:form.activo!==false&&form.fecha_separacion?'not-allowed':'text'}}
-                  value={form.fecha_separacion?form.fecha_separacion.split('T')[0]:""}
-                  readOnly={form.activo!==false&&!!form.fecha_separacion}
-                  onChange={e=>(!form.fecha_separacion||form.activo===false)&&setForm({...form,fecha_separacion:e.target.value||null})}/>
-              </FL>
-              {form.fecha_separacion&&<>
-                <FL label="Motivo término">
-                  <div style={{...INP,background:'#fef2f2',cursor:'default',height:'auto',display:'flex',alignItems:'center',color:form.motivo_termino?C.text:C.textMuted}}>
-                    {form.motivo_termino || '— Sin motivo registrado —'}
-                  </div>
-                </FL>
-                <FL label="Estado del proceso de finiquito">
-                  {(()=>{
-                    const fqs=(data.documentos_trabajador||[]).filter(d=>d.trabajador_id===form.id&&d.tipo_documento==='finiquito'&&d.estado!=='anulado');
-                    const act=fqs.length?[...fqs].sort((a,b)=>Number(b.version||1)-Number(a.version||1))[0]:null;
-                    const eg=(data.cumplimiento_egreso||[]).filter(r=>r.trabajador_id===form.id);
-                    const docFirmado=act&&(act.estado==='firmado'||act.estado==='archivado');
-                    const aDispo=eg.find(r=>r.tarea==='finiquito')?.estado==='a_disposicion';
-                    const pagado=eg.find(r=>r.tarea==='pago')?.estado==='pagado';
-                    let etapa,color;
-                    if(pagado){etapa='💰 Pagado';color='#15803d';}
-                    else if(docFirmado){etapa='✍️ Firmado';color='#15803d';}
-                    else if(aDispo){etapa='✅ Disponible al trabajador';color='#1d4ed8';}
-                    else if(act){etapa='📄 Preparado';color='#a16207';}
-                    else {etapa='⏳ Pendiente';color='#a16207';}
-                    return (
-                      <div style={{...INP,background:'#f8fafc',cursor:'default',height:'auto',lineHeight:1.45}}>
-                        <div style={{fontWeight:600,color}}>{etapa}</div>
-                        <div style={{fontSize:11,color:C.textMuted}}>{act?`Finiquito v${act.version||1}`:'Sin finiquito generado'}{docFirmado&&act.fecha_firma?` · firma ${dateOnly(act.fecha_firma)}`:''}</div>
-                        <div style={{fontSize:10,color:C.textMuted}}>🔒 Derivado del expediente y de Egresos</div>
-                      </div>
-                    );
-                  })()}
-                </FL>
-              </>}
+              {/* Datos de egreso (fecha de separación, causal, finiquito) viven en el proceso de desvinculación, no en la ficha del trabajador. */}
+              {/* Resumen de finiquito/motivo: ahora se consulta en el proceso de desvinculación y el expediente de egreso. */}
               {/* Preaviso activo (Art. 161 programado) — gestión */}
               {!isNew&&form&&(()=>{
                 const pa=preavisoActivo(form.id, data);
