@@ -2727,7 +2727,8 @@ function checklistObligatorios(trabajador, data){
   return {items, completados, total:items.length, completo:completados===items.length, desvin};
 }
 
-function imprimirExpediente(trabajador, data){
+function imprimirExpediente(trabajador, data, emp=null){
+  const E = empresaParaDoc(emp || _empresaCfgCache);
   const R=expedienteResumen(trabajador,data);
   const lj=lugaresYJornada(trabajador,data);
   const filaDoc=R.docs.length
@@ -2741,7 +2742,7 @@ function imprimirExpediente(trabajador, data){
   const desvin = trabajador.estado==='DESVINCULADO' || !trabajador.activo;
   const cuerpo=`
     <h1>Expediente Digital del Trabajador</h1>
-    <div class="empresa"><b>${EMPRESA.razon}</b> · RUT ${EMPRESA.rut} · ${EMPRESA.domicilio}</div>
+    <div class="empresa"><b>${E.razon}</b> · RUT ${E.rut} · ${E.domicilio}</div>
     <h2>Identificación</h2>
     <p><b>Nombre:</b> ${trabajador.nombre||"—"} &nbsp;·&nbsp; <b>RUT:</b> ${trabajador.rut||"—"} &nbsp;·&nbsp; <b>Cargo:</b> ${trabajador.cargo||"—"}<br/>
     <b>Estado:</b> ${desvin?"DESVINCULADO":"ACTIVO"} &nbsp;·&nbsp; <b>Tipo de contrato:</b> ${(trabajador.tipo_contrato||"—")} &nbsp;·&nbsp; <b>Ingreso:</b> ${fechaLargaCL(trabajador.fecha_inicio)}<br/>
@@ -2759,7 +2760,7 @@ function imprimirExpediente(trabajador, data){
     <p>${R.liqs.length} liquidación(es)${ultLiq?` · última período ${ultLiq.periodo}: líquido ${clp(ultLiq.liquido||0)} (${ultLiq.firmado_at?"firmada":"pendiente"})`:""}.</p>
     ${desvin?`<h2>Desvinculación</h2><p><b>Motivo:</b> ${trabajador.motivo_termino||"—"} &nbsp;·&nbsp; <b>Fecha separación:</b> ${dateOnly(trabajador.fecha_separacion)||"—"} &nbsp;·&nbsp; <b>Finiquito:</b> ${trabajador.finiquito_estado||"pendiente"}.</p>`:""}
     <p class="lugar">Expediente emitido en Arica, ${fechaLargaCL()}.</p>`;
-  htmlDocImprimir(`Expediente ${trabajador.nombre||""}`, cuerpo);
+  htmlDocImprimir(`Expediente ${trabajador.nombre||""}`, cuerpo, E.razon);
 }
 
 // Categorías documentales del expediente (8D.5)
@@ -2844,7 +2845,7 @@ function TabExpediente({trabajador, data, update}){
         <div style={{background:C.accentBg,border:`1px solid #bfdbfe`,borderRadius:8,padding:"10px 14px",fontSize:12,color:C.accentText,flex:1,minWidth:240}}>
           🗂️ <b>Expediente Digital (Fase 8D.5).</b> Vista consolidada: identidad, documentos por categoría, checklist de obligatorios, anexos, EPP, liquidaciones y desvinculación.
         </div>
-        <PrimaryBtn onClick={()=>imprimirExpediente(trabajador,data)}>🖨️ Imprimir expediente</PrimaryBtn>
+        <PrimaryBtn onClick={async()=>{ const emp=await getEmpresaConfig(); imprimirExpediente(trabajador,data,emp); }}>🖨️ Imprimir expediente</PrimaryBtn>
       </div>
 
       {/* Completitud + checklist */}
@@ -6534,6 +6535,7 @@ const EST_EGRESO={
 };
 function PanelEgresos({data,insert,update}){
   const { perfil } = useAuth();
+  useEffect(()=>{ getEmpresaConfig(); },[]);  // precarga empresa para el texto de notificación
   const [saving,setSaving]=useState(false);
   const [notifTgt,setNotifTgt]=useState(null); const [notifForm,setNotifForm]=useState({});
   const [pagoTgt,setPagoTgt]=useState(null);   const [pagoForm,setPagoForm]=useState({});
@@ -6550,7 +6552,7 @@ function PanelEgresos({data,insert,update}){
   const getTarea=(tid,tarea)=>rows.find(r=>r.trabajador_id===tid&&r.tarea===tarea);
   const finiquitoFirmado=tid=>docs.filter(d=>d.trabajador_id===tid&&d.tipo_documento==='finiquito'&&d.estado!=='anulado')
                                    .some(d=>d.estado==='firmado'||d.estado==='archivado');
-  const textoNotif=t=>`Estimado/a ${t.nombre}:\n\nSe informa que su finiquito de término de contrato y el pago correspondiente se encuentran a su disposición para revisión y firma/ratificación, dentro del plazo establecido en el artículo 177 del Código del Trabajo.\n\nFavor coordinar fecha y lugar para la firma/ratificación.\n\nAtentamente,\n${EMPRESA.razon}`;
+  const textoNotif=t=>`Estimado/a ${t.nombre}:\n\nSe informa que su finiquito de término de contrato y el pago correspondiente se encuentran a su disposición para revisión y firma/ratificación, dentro del plazo establecido en el artículo 177 del Código del Trabajo.\n\nFavor coordinar fecha y lugar para la firma/ratificación.\n\nAtentamente,\n${empresaParaDoc(_empresaCfgCache).razon}`;
 
   // Plazos legales (días hábiles = lun-sáb, excluye domingo+feriados, ya verificado)
   const sepNoon=t=>t.fecha_separacion?new Date(t.fecha_separacion.split('T')[0]+'T12:00:00'):null; // evita corrimiento UTC de fechas date-only
