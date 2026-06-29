@@ -43,6 +43,139 @@ const ESTAG = {
   Cerrada:     {bg:C.greenBg,  text:C.green,  border:C.greenBorder},
 };
 
+/* ─── J1: Jornada estructurada ──────────────────────────────── */
+// Tope legal de jornada por vigencia. PARÁMETRO NORMATIVO (Estado), no cifra fija.
+// Fuente: Ley 21.561. Cuando exista tabla de parámetros normativos, migra allí.
+const TOPE_JORNADA_NORMATIVO = [
+  { desde: "2028-04-26", tope: 40 },
+  { desde: "2026-04-26", tope: 42 },
+  { desde: "2024-04-26", tope: 44 },
+  { desde: "0000-01-01", tope: 45 },
+];
+const topeLegalJornada = (vigencia_desde) => {
+  const f = (vigencia_desde && String(vigencia_desde).slice(0,10)) || new Date().toISOString().slice(0,10);
+  return (TOPE_JORNADA_NORMATIVO.find(r => f >= r.desde) || { tope: 45 }).tope;
+};
+const J1_DIAS = { lu:"Lunes", ma:"Martes", mi:"Miércoles", ju:"Jueves", vi:"Viernes", sa:"Sábado", do:"Domingo" };
+const J1_DIAS_ORDEN = ["lu","ma","mi","ju","vi","sa","do"];
+// Generador de texto (PROYECCIÓN, no fuente). Nunca contiene cifras fijas: usa el valor real.
+const jornadaATexto = (jp) => {
+  if (!jp || typeof jp !== "object") return { jornada:"", horario:"" };
+  // J1.1: jornada COMPUESTA (más de un componente activo) → listar componentes + total.
+  if (Array.isArray(jp.componentes) && jp.componentes.length > 1) {
+    const partes = jp.componentes.map((c,i) => {
+      const g = jornadaATexto({ ...c, componentes: undefined });
+      const etiqueta = c.id === "base" ? "Componente base" : `Componente adicional${jp.componentes.length>2?` ${i}`:""}`;
+      const desc = [g.jornada, g.horario].filter(Boolean).join(" ").replace(/\.\s*$/, "");
+      return `${etiqueta}: ${desc || (c.horas_semanales!=null?`${c.horas_semanales} horas semanales`:"—")}`;
+    });
+    const total = jp.componentes.reduce((s,c)=>s+(Number(c.horas_semanales)||0),0);
+    return { jornada: `Jornada compuesta. ${partes.join(". ")}. Total vigente: ${total} horas semanales.`, horario:"" };
+  }
+  const dias = (Array.isArray(jp.dias) ? jp.dias : []).slice().sort((a,b)=>J1_DIAS_ORDEN.indexOf(a)-J1_DIAS_ORDEN.indexOf(b));
+  const diasTxt = dias.length
+    ? dias.map(d=>J1_DIAS[d]||d).join(", ").replace(/, ([^,]*)$/, " y $1")
+    : "";
+  const tipoMap = { ordinaria:"ordinaria", parcial:"parcial", bisemanal:"bisemanal", otra:"" };
+  const tipoTxt = tipoMap[jp.tipo] != null ? tipoMap[jp.tipo] : "ordinaria";
+  const hs = (jp.horas_semanales != null && jp.horas_semanales !== "") ? `${jp.horas_semanales} horas semanales` : "";
+  let jornada = "";
+  if (tipoTxt && hs) jornada = `Jornada ${tipoTxt} de ${hs}.`;
+  else if (hs) jornada = `Jornada de ${hs}.`;
+  else if (tipoTxt) jornada = `Jornada ${tipoTxt}.`;
+  const colTxt = (jp.colacion_minutos != null && jp.colacion_minutos !== "")
+    ? `, con ${jp.colacion_minutos} min de colación${jp.colacion_imputable ? " (imputable)" : ""}` : "";
+  const horario = (diasTxt && jp.hora_inicio && jp.hora_termino)
+    ? `${diasTxt} de ${jp.hora_inicio} a ${jp.hora_termino}${colTxt}.` : "";
+  return { jornada, horario };
+};
+// Validación. {ok, errores[], aviso}. El tope NO es cifra fija: viene del parámetro normativo.
+const validarJornada = (jp) => {
+  const e = [];
+  if (!jp) return { ok:false, errores:["Sin datos de jornada."], aviso:"" };
+  if (!jp.vigencia_desde) e.push("Falta la fecha de vigencia (debe ser la fecha real del contrato, no la de captura).");
+  if (!Array.isArray(jp.dias) || jp.dias.length === 0) e.push("Debe indicar al menos un día.");
+  if (jp.hora_inicio && jp.hora_termino && jp.hora_inicio >= jp.hora_termino)
+    e.push("La hora de inicio debe ser anterior a la de término.");
+  if (!(Number(jp.horas_semanales) > 0)) e.push("Las horas semanales deben ser mayores a 0.");
+  const tope = topeLegalJornada(jp.vigencia_desde);
+  if (Number(jp.horas_semanales) > tope)
+    e.push(`Las horas semanales (${jp.horas_semanales}) superan el tope legal vigente: ${tope} h (parámetro normativo a la fecha ${jp.vigencia_desde || "actual"}).`);
+  let aviso = "";
+  if (jp.hora_inicio && jp.hora_termino && Array.isArray(jp.dias) && jp.dias.length) {
+    const tToMin = t => { const p = String(t).split(":").map(Number); return (p[0]||0)*60 + (p[1]||0); };
+    const colResta = jp.colacion_imputable ? 0 : (Number(jp.colacion_minutos) || 0);
+    const minDia = Math.max(0, tToMin(jp.hora_termino) - tToMin(jp.hora_inicio) - colResta);
+    const hImpl = (minDia * jp.dias.length) / 60;
+    if (Number(jp.horas_semanales) && Math.abs(hImpl - Number(jp.horas_semanales)) > 2)
+      aviso = `Las horas implícitas (~${hImpl.toFixed(1)}) no calzan con las ${jp.horas_semanales} pactadas. Puede ser una distribución irregular legítima.`;
+  }
+  return { ok: e.length === 0, errores: e, aviso };
+};
+
+// J1.1 — Jornada vigente como PROYECCIÓN de actos jurídicos (por efectos sobre componentes).
+// Recolecta cláusulas jornada del contrato laboral original (trabajador) y de los anexos aplicados.
+const recolectarClausulasJornada = (trabajador, data) => {
+  const out = [];
+  const orig = Array.isArray(trabajador && trabajador.clausulas_contrato_original) ? trabajador.clausulas_contrato_original : [];
+  orig.filter(c => c && c.clausula === "jornada").forEach(c => out.push({ ...c, _firma:"", _actoId:(c.acto_id||"") }));
+  const anexos = (data && (data.anexos_contrato || data.anexos)) || [];
+  anexos.filter(a => a && a.trabajador_id === (trabajador && trabajador.id)
+                  && (a.estado === "aplicado" || a.estado === "firmado"))
+    .forEach(a => {
+      (Array.isArray(a.clausulas) ? a.clausulas : [])
+        .filter(c => c && c.clausula === "jornada")
+        .forEach(c => out.push({ ...c, acto_id: c.acto_id || a.id, _firma:String(a.fecha_firma||a.created_at||""), _actoId:String(c.acto_id||a.id||"") }));
+    });
+  return out;
+};
+// Orden determinístico: vigencia_desde → fecha_firma/created_at → acto_id → orden_efecto.
+const _ordenClausulas = (a,b) =>
+  String(a.vigencia_desde||"").localeCompare(String(b.vigencia_desde||""))
+  || String(a._firma||"").localeCompare(String(b._firma||""))
+  || String(a._actoId||"").localeCompare(String(b._actoId||""))
+  || ((Number(a.orden_efecto)||0) - (Number(b.orden_efecto)||0));
+// Devuelve SIEMPRE un resultado tipado. NUNCA texto legacy como jornada calculable.
+// {estructurada:true, jornada:{...,componentes:[...]}} | {estructurada:false, motivo}
+const jornadaVigente = (trabajador, fecha, data) => {
+  if (!trabajador) return { estructurada:false, motivo:"sin_trabajador" };
+  const f = String(fecha || new Date().toISOString().slice(0,10)).slice(0,10);
+  const clausulas = recolectarClausulasJornada(trabajador, data || {})
+    .filter(c => (!c.vigencia_desde || String(c.vigencia_desde).slice(0,10) <= f)
+              && (!c.vigencia_hasta  || String(c.vigencia_hasta).slice(0,10)  >= f))
+    .sort(_ordenClausulas);
+  if (clausulas.length === 0) return { estructurada:false, motivo:"no_estructurada" };
+  let comps = {}, base = null;
+  clausulas.forEach(c => {
+    const cid = c.componente_id || "base";
+    const cont = c.contenido || {};
+    switch (c.efecto) {
+      case "establece_total": case "reemplaza_total": case "consolida_total":
+        comps = { [cid]: cont }; base = cont; break;
+      case "agrega_componente":
+        comps[cid] = cont; break;
+      case "modifica_componente":
+        comps[cid] = { ...(comps[cid]||{}), ...cont }; if (cid === "base") base = { ...(base||{}), ...cont }; break;
+      case "reduce_componente":
+        comps[cid] = { ...(comps[cid]||{}), horas_semanales: Math.max(0, (Number((comps[cid]||{}).horas_semanales)||0) - (Number(cont.horas_semanales)||0)) }; break;
+      case "cierra_componente":
+        delete comps[cid]; break;
+      default:
+        comps = { [cid]: cont }; base = cont;
+    }
+  });
+  const activos = Object.entries(comps).map(([id,j]) => ({ id, ...j }));
+  if (activos.length === 0) return { estructurada:false, motivo:"sin_componentes_activos" };
+  const horas = activos.reduce((s,c) => s + (Number(c.horas_semanales)||0), 0);
+  const principal = base || activos[0];
+  return { estructurada:true, jornada: { ...principal, horas_semanales: horas, componentes: activos } };
+};
+// Visual legacy SEPARADO — solo para mostrar info no estructurada, NUNCA para cálculo legal.
+const jornadaVisualLegacy = (trabajador) => {
+  const t = [trabajador && trabajador.jornada, trabajador && trabajador.horario].filter(Boolean).join(" ");
+  return t ? `${t} (no estructurado)` : "";
+};
+
 /* ─── Formatters ────────────────────────────────────────────── */
 const clp = n => `$${Math.round(n||0).toLocaleString("es-CL")}`;
 const pct = n => `${((n||0)*100).toFixed(2)}%`;
@@ -989,8 +1122,20 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
     const cambiosTrab={};
     if(anexo.sueldo_nuevo!=null && anexo.sueldo_nuevo!==anexo.sueldo_anterior)
       cambiosTrab.sueldo_base=anexo.sueldo_nuevo;
+    // J1.1: protección de doble verdad. Si el trabajador YA tiene jornada estructurada (cláusula del
+    //       contrato original), un anexo legacy NO puede modificar jornada/horario por campos de texto.
+    //       Esos cambios deben ir por anexo estructurado (J1.2). Otros campos del anexo (sueldo, centro) sí proceden.
+    const _tieneJornadaEstructurada=Array.isArray(trabajador.clausulas_contrato_original)
+      && trabajador.clausulas_contrato_original.some(c=>c&&c.clausula==="jornada");
+    if(_tieneJornadaEstructurada && (anexo.jornada_nueva || anexo.horario_nuevo)){
+      alert("Este trabajador tiene jornada estructurada. Los cambios de jornada deben realizarse mediante anexo estructurado (J1.2). No se permite aplicar jornada legacy.");
+      return;
+    }
     if(anexo.jornada_nueva) cambiosTrab.jornada=anexo.jornada_nueva;
     if(anexo.horario_nuevo) cambiosTrab.horario=anexo.horario_nuevo;
+    // J1.1 captura SOLO el contrato laboral original. El anexo estructurado (poblar
+    // anexos_contrato.clausulas con su efecto y vigencia) es J1.2 — fuera de esta entrega.
+    // Por ahora el anexo mantiene su flujo de texto legacy (jornada_nueva/horario_nuevo) sin tocar cláusulas.
     if(Object.keys(cambiosTrab).length>0)
       await update('trabajadores',{...trabajador,...cambiosTrab});
     // 2. Actualizar asignación si hay cambio de porcentaje/sueldo en un centro
@@ -1232,7 +1377,7 @@ function calcularFiniquitoPreview(trabajador, asignaciones, fechaSep, motivo, ca
     a.afecta_remuneracion !== false &&
     a.estado_asig === 'activa'
   );
-  const refFinanciera = asigActivas.reduce((s,a) => s+(a.sueldo_asignado||0), 0);
+  const refFinanciera = asigActivas.reduce((s,a) => s+Math.round((trabajador.sueldo_base||0)*(Number(a.porcentaje_costo)||0)/100), 0);
 
   return { diasTotales, mesesServicio:Math.round(mesesServicio*10)/10,
     sueldoBase, sueldoDiario, diasVacProp, vacacionesProp,
@@ -1499,7 +1644,7 @@ function DesvinculacionModal({trabajador, data, update, insert, terminarAsignaci
             </div>
             {preview.refFinanciera>0&&(
               <p style={{fontSize:10,color:C.textMuted,background:C.surfaceAlt,borderRadius:4,padding:'4px 8px',marginBottom:8}}>
-                📊 Referencia financiera: suma sueldo_asignado activo = {clp(preview.refFinanciera)} (solo para control de costos, no es base legal)
+                📊 Costo imputado (derivado): sueldo base × % de imputación = {clp(preview.refFinanciera)} (solo control de costos, no es base legal)
               </p>
             )}
             <div style={{background:'#fef2f2',border:'1px solid #fca5a5',borderRadius:6,padding:'8px 12px',fontSize:11,color:'#991b1b',marginBottom:12}}>
@@ -1651,10 +1796,18 @@ function lugaresYJornada(trabajador, data){
     const j=(a.jornada && String(a.jornada).trim()) ? a.jornada : (a.horario||"");
     if(j) jornadas.push(`${ct?(ct.cliente||ct.id):a.contrato_id}: ${j}${a.horas_semanales?` (${a.horas_semanales} hrs/sem)`:""}`);
   });
+  // J1.1: la jornada del contrato se DERIVA de los actos a la FECHA REAL del contrato (fecha_inicio).
+  //       Si no hay fecha real, NO se proyecta con hoy: se trata como no estructurada (cae a texto legacy visual).
+  const _fc=dateOnly(trabajador.fecha_inicio);
+  const jvC = _fc ? jornadaVigente(trabajador, _fc, data) : {estructurada:false, motivo:"sin_fecha_inicio"};
   return {
     lugares: lugares.length?lugares.join("; "):"dependencias asignadas por el empleador en la ciudad de Arica",
-    jornadas: jornadas.length?jornadas:["Según distribución horaria informada por el empleador, respetando el máximo legal semanal del Código del Trabajo."],
-    totalHoras: asigs.reduce((s,a)=>s+Number(a.horas_semanales||0),0),
+    jornadas: jvC.estructurada
+      ? (()=>{ const g=jornadaATexto(jvC.jornada); return [[g.jornada,g.horario].filter(Boolean).join(" ")].filter(Boolean); })()
+      : (jornadas.length?jornadas:["Según distribución horaria informada por el empleador, respetando el máximo legal semanal del Código del Trabajo."]),
+    totalHoras: jvC.estructurada
+      ? Number(jvC.jornada.horas_semanales)||0
+      : asigs.reduce((s,a)=>s+Number(a.horas_semanales||0),0),
   };
 }
 
@@ -3009,12 +3162,14 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     setTab("datos");setAsigForm(null);
     setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",domicilio:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:"",nacionalidad:"Chilena",fecha_nacimiento:"",estado_civil:"",fecha_termino_plazo:null,ciudad:"",region:""});
   };
-  const save=async()=>{if(!form.nombre.trim())return;const payload={...form,fecha_actualizacion_datos:new Date().toISOString().slice(0,10)};const ok=isNew?await insert("trabajadores",payload):await update("trabajadores",payload);if(ok){setForm(null);setAsigForm(null);}};
+  const save=async()=>{if(!form.nombre.trim())return;const _cj=(Array.isArray(form.clausulas_contrato_original)?form.clausulas_contrato_original:[]).find(c=>c&&c.clausula==="jornada");const vj=_cj?validarJornada({...(_cj.contenido||{}),vigencia_desde:_cj.vigencia_desde}):{ok:true,errores:[]};if(!vj.ok){alert("No se puede guardar la jornada:\n\n• "+vj.errores.join("\n• "));return;}const payload={...form,fecha_actualizacion_datos:new Date().toISOString().slice(0,10)};const ok=isNew?await insert("trabajadores",payload):await update("trabajadores",payload);if(ok){setForm(null);setAsigForm(null);}};
 
   const asignacionesTrab=form?(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id):[];
   const asignacionesActivas=asignacionesTrab.filter(isAsignacionVigenteHoy);
   const asignacionesOperacionalesActivas=asignacionesTrab.filter(a=>isAsignacionOperacional(a)&&a.estado_asig==="activa"&&a.activo!==false);
   const pctTotal=asignacionesActivas.reduce((sum,a)=>sum+Number(a.porcentaje_costo||0),0);
+  const pctRemunActivas=asignacionesActivas.filter(isAsignacionRemuneracional).reduce((sum,a)=>sum+Number(a.porcentaje_costo||0),0);
+  const hayRemunActivas=asignacionesActivas.some(isAsignacionRemuneracional);
   const estadoPct=pctTotal===100?{txt:"✅ 100% financiado",col:C.green,bg:C.greenBg,border:C.greenBorder}:pctTotal>100?{txt:`❌ Exceso ${pctTotal-100}%`,col:C.red,bg:C.redBg,border:C.redBorder}:{txt:`⚠ Déficit ${100-pctTotal}%`,col:C.yellow,bg:C.yellowBg,border:C.yellowBorder};
   const contratoNombre=id=>{const c=data.contratos.find(ct=>ct.id===id);return c?`${c.id} — ${c.cliente}`:id;};
   const openNuevaAsignacion=()=>{
@@ -3212,7 +3367,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
 
               <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.4,margin:'14px 0 6px'}}>Condiciones en el destino</div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                <FL label="Sueldo asignado"><input type="number" style={INP} value={d.sueldo_asignado} onChange={e=>setD({sueldo_asignado:Number(e.target.value)})}/></FL>
+                <FL label="Costo imputado (calculado)"><input type="text" style={{...INP,background:'#f9fafb',cursor:'not-allowed',color:C.textMuted}} value={clp(Math.round((form.sueldo_base||0)*(Number(d.porcentaje_costo)||0)/100))} readOnly title="Se calcula: sueldo base × porcentaje de imputación. No editable."/></FL>
                 <FL label="% costo"><input type="number" min={0} max={500} style={INP} value={d.porcentaje_costo} onChange={e=>setD({porcentaje_costo:Number(e.target.value)})}/></FL>
                 <FL label="Horas semanales"><input type="number" style={INP} value={d.horas_semanales} onChange={e=>setD({horas_semanales:Number(e.target.value)})}/></FL>
                 <FL label="Días semana"><input style={INP} value={d.dias_semana} onChange={e=>setD({dias_semana:e.target.value})}/></FL>
@@ -3344,7 +3499,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               return `${c.id}${tipoL?` — ${tipoL}`:''}${cli}`;
             }).join(' + '):'Sin asignación activa';
             const pctFin=asigs.reduce((s,a)=>s+(Number(a.porcentaje_costo)||0),0);
-            const costoImputado=asigs.filter(isAsignacionRemuneracional).reduce((s,a)=>s+(Number(a.sueldo_asignado)||0),0);
+            const costoImputado=asigs.filter(isAsignacionRemuneracional).reduce((s,a)=>s+Math.round((form.sueldo_base||0)*(Number(a.porcentaje_costo)||0)/100),0);
             const tabLabel={datos:'Datos personales',remuneracion:'Remuneración',asignaciones:'Asignaciones',anexos:'Anexos',documentos:'Documentos',expediente:'Expediente'}[tab]||'';
             return (
               <div style={{marginBottom:14}}>
@@ -3473,6 +3628,72 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   <option value="pensionado">Pensionado (exento AFP y CES)</option>
                 </select>
               </FL>
+            {(()=>{
+              const today=new Date().toISOString().slice(0,10);
+              const fechaContrato=dateOnly(form.fecha_inicio)||""; // NUNCA cae a hoy: la vigencia jurídica exige fecha real.
+              // J1.1: la fuente es la cláusula jornada del CONTRATO LABORAL ORIGINAL (acto), no una columna.
+              const clausulas=Array.isArray(form.clausulas_contrato_original)?form.clausulas_contrato_original:[];
+              const cJor=clausulas.find(c=>c&&c.clausula==="jornada")||null;
+              const jp=cJor?cJor.contenido:null;
+              // vigencia_desde = la del acto si ya existe, o la fecha real del contrato. JAMÁS hoy.
+              const vigDesde=(cJor&&cJor.vigencia_desde)||fechaContrato;
+              // Sin fecha de inicio real no se permite estructurar (evita guardar la fecha de captura como vigencia jurídica).
+              if(!fechaContrato && !cJor){
+                return (
+                  <div style={{gridColumn:"1 / -1",marginTop:14,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:0.4,marginBottom:6}}>Jornada del contrato laboral original</div>
+                    <div style={{fontSize:12,color:"#b45309"}}>Ingrese la fecha de inicio del contrato antes de estructurar la jornada. La vigencia jurídica de la jornada debe ser la fecha real del contrato, no la fecha de captura.</div>
+                  </div>
+                );
+              }
+              const base=jp?{...jp,vigencia_desde:vigDesde}:{tipo:"ordinaria",dias:[],hora_inicio:"",hora_termino:"",colacion_minutos:60,colacion_imputable:false,horas_semanales:"",vigencia_desde:vigDesde,observaciones:""};
+              const upd=(patch)=>{ const njp={...base,...patch}; const g=jornadaATexto(njp);
+                // Cláusula del contrato original: captura técnica de un acto que ya existía (NO crea acto nuevo).
+                const clausula={clausula:"jornada",acto_tipo:"contrato_original",acto_id:form.id||null,
+                  vigencia_desde:(njp.vigencia_desde||fechaContrato||null),vigencia_hasta:null,
+                  efecto:"establece_total",componente_id:"base",regla_legal:"jornada_ordinaria",
+                  contenido:njp,captura_tecnica:new Date().toISOString()};
+                const otras=clausulas.filter(c=>!(c&&c.clausula==="jornada"));
+                setForm({...form,clausulas_contrato_original:[clausula,...otras],
+                  jornada:[g.jornada,g.horario].filter(Boolean).join(" ")||form.jornada,horario:g.horario||form.horario}); };
+              const toggleDia=(d)=>{ const ds=new Set(base.dias||[]); ds.has(d)?ds.delete(d):ds.add(d); upd({dias:[...ds]}); };
+              const val=jp?validarJornada({...base}):{ok:true,errores:[],aviso:""};
+              const prev=jornadaATexto(base);
+              const tope=topeLegalJornada(base.vigencia_desde);
+              return (
+                <div style={{gridColumn:"1 / -1",marginTop:14,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Jornada del contrato laboral original (estructurada)</div>
+                  {!jp&&<div style={{fontSize:12,color:C.textMuted,marginBottom:8}}>Jornada sin estructurar. Capture la cláusula del contrato original ya existente (no crea un acto nuevo; la vigencia es la fecha real del contrato). El cálculo legal exige esta estructura. Tope legal vigente: {tope} h/sem.</div>}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <FL label="Tipo"><select style={INP} value={base.tipo} onChange={e=>upd({tipo:e.target.value})}>
+                      <option value="ordinaria">Ordinaria</option><option value="parcial">Parcial</option>
+                      <option value="bisemanal">Bisemanal</option><option value="otra">Otra</option>
+                    </select></FL>
+                    <FL label={`Horas semanales (tope ${tope})`}><input type="number" min={0} style={INP} value={base.horas_semanales} onChange={e=>upd({horas_semanales:e.target.value===""?"":Number(e.target.value)})}/></FL>
+                    <FL label="Hora inicio"><input type="time" style={INP} value={base.hora_inicio||""} onChange={e=>upd({hora_inicio:e.target.value})}/></FL>
+                    <FL label="Hora término"><input type="time" style={INP} value={base.hora_termino||""} onChange={e=>upd({hora_termino:e.target.value})}/></FL>
+                    <FL label="Colación (min)"><input type="number" min={0} style={INP} value={base.colacion_minutos} onChange={e=>upd({colacion_minutos:e.target.value===""?"":Number(e.target.value)})}/></FL>
+                    <FL label="Vigencia desde (fecha real del contrato)"><input type="date" style={INP} value={base.vigencia_desde||""} onChange={e=>upd({vigencia_desde:e.target.value})}/></FL>
+                  </div>
+                  <div style={{marginTop:8,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
+                    <span style={{fontSize:11,color:C.textMuted}}>Días:</span>
+                    {J1_DIAS_ORDEN.map(d=>(
+                      <button key={d} type="button" onClick={()=>toggleDia(d)} style={{padding:"3px 9px",borderRadius:6,fontSize:11,cursor:"pointer",border:`1px solid ${C.border}`,background:(base.dias||[]).includes(d)?C.accent:C.surface,color:(base.dias||[]).includes(d)?C.accentText:C.text}}>{J1_DIAS[d].slice(0,3)}</button>
+                    ))}
+                    <label style={{fontSize:11,color:C.textMuted,marginLeft:10,display:"flex",alignItems:"center",gap:4,cursor:"pointer"}}>
+                      <input type="checkbox" checked={!!base.colacion_imputable} onChange={e=>upd({colacion_imputable:e.target.checked})}/>Colación imputable
+                    </label>
+                  </div>
+                  <div style={{marginTop:8}}><FL label="Observaciones"><input style={INP} value={base.observaciones||""} onChange={e=>upd({observaciones:e.target.value})}/></FL></div>
+                  <div style={{marginTop:8,padding:"8px 10px",background:C.surface,border:`1px dashed ${C.border}`,borderRadius:6}}>
+                    <div style={{fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase",marginBottom:3}}>Vista previa · texto generado para el contrato</div>
+                    <div style={{fontSize:12,color:C.text}}>{[prev.jornada,prev.horario].filter(Boolean).join(" ")||"—"}</div>
+                  </div>
+                  {jp&&!val.ok&&val.errores.map((er,i)=>(<div key={i} style={{marginTop:6,fontSize:11,color:C.red}}>⚠ {er}</div>))}
+                  {jp&&val.ok&&val.aviso&&<div style={{marginTop:6,fontSize:11,color:"#b45309"}}>ℹ {val.aviso}</div>}
+                </div>
+              );
+            })()}
             </div>
           )}
           {tab==="asignaciones"&&(
@@ -3505,7 +3726,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                       </select>
                     </FL>
                     <FL label="Estado asignación"><select style={INP} value={asigForm.estado_asig||"activa"} onChange={e=>setAsigForm({...asigForm,estado_asig:e.target.value,activo:e.target.value!=="terminada"})}><option value="activa">Activa</option><option value="terminada">Terminada</option><option value="suspendida">Suspendida</option></select></FL>
-                    <FL label="Sueldo asignado / costo imputable ($)"><input type="number" style={INP} value={asigForm.sueldo_asignado||0} onChange={e=>setAsigForm({...asigForm,sueldo_asignado:Number(e.target.value)})}/></FL>
+                    <FL label="Costo imputado (calculado)"><input type="text" style={{...INP,background:'#f9fafb',cursor:'not-allowed',color:C.textMuted}} value={clp(Math.round((form.sueldo_base||0)*(Number(asigForm.porcentaje_costo)||0)/100))} readOnly title="Se calcula automáticamente: sueldo base del trabajador × porcentaje de imputación. No editable."/></FL>
                     <FL label="Porcentaje costo (%)"><input type="number" min={0} max={500} style={INP} value={asigForm.porcentaje_costo||0} onChange={e=>setAsigForm({...asigForm,porcentaje_costo:Number(e.target.value)})}/></FL>
                     <FL label="Movilización ($)"><input type="number" style={INP} value={asigForm.bono_movilizacion||0} onChange={e=>setAsigForm({...asigForm,bono_movilizacion:Number(e.target.value)})}/></FL>
                     <FL label="Colación ($)"><input type="number" style={INP} value={asigForm.bono_colacion||0} onChange={e=>setAsigForm({...asigForm,bono_colacion:Number(e.target.value)})}/></FL>
@@ -3526,12 +3747,19 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   </div>
                 </div>)}
 
+                {hayRemunActivas && pctRemunActivas!==100 && (
+                  <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:'10px 12px',marginBottom:10,fontSize:12,color:'#92400e'}}>
+                    ⚠ La imputación de costo de las asignaciones remuneracionales activas suma <b>{pctRemunActivas}%</b>, no 100%.
+                    {pctRemunActivas>100 ? ` Hay un exceso de ${pctRemunActivas-100}%.` : ` Falta asignar ${100-pctRemunActivas}%.`} Revisa el porcentaje de cada centro de costo — el costo imputado se calcula sobre estos porcentajes.
+                  </div>
+                )}
+
                 <DataTable
                   cols={[
                     {key:"centro",label:"Centro",render:r=><span style={{fontWeight:600}}>{contratoNombre(r.contrato_id)}</span>},
                     {key:"estado",label:"Estado",render:r=><Tag text={r.estado_asig||"activa"} scheme={(r.estado_asig==="terminada"||r.activo===false)?{bg:"#f9fafb",text:C.textMuted,border:C.border}:{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>},
                     {key:"tipo",label:"Tipo",render:r=>isAsignacionRemuneracional(r)?<Tag text="💰 Remuneracional" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>:<Tag text="👁 Operacional" scheme={{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
-                    {key:"sueldo",label:"Sueldo asignado",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:isAsignacionRemuneracional(r)?C.text:C.textMuted}}>{isAsignacionRemuneracional(r)?clp(r.sueldo_asignado):"—"}</span>},
+                    {key:"sueldo",label:"Costo imputado",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:isAsignacionRemuneracional(r)?C.text:C.textMuted}}>{isAsignacionRemuneracional(r)?clp(Math.round((form.sueldo_base||0)*(Number(r.porcentaje_costo)||0)/100)):"—"}</span>},
                     {key:"pct",label:"% costo",render:r=>isAsignacionRemuneracional(r)?<span style={{fontWeight:700,color:Number(r.porcentaje_costo||0)===100?C.green:C.yellow}}>{Number(r.porcentaje_costo||0)}%</span>:<span style={{fontSize:11,color:C.textMuted}}>No aplica</span>},
                     {key:"bonos",label:"Bonos",render:r=><span style={{fontSize:12,color:C.textMuted}}>Mov {clp(r.bono_movilizacion)} · Col {clp(r.bono_colacion)}</span>},
                     {key:"fechas",label:"Vigencia",render:r=><span style={{fontSize:12,color:C.textMuted}}>{dateOnly(r.fecha_inicio_asig)||"—"}<br/>{r.fecha_termino_asig?`hasta ${dateOnly(r.fecha_termino_asig)}`:"vigente"}</span>},
@@ -3553,7 +3781,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   })}
                   empty="Este trabajador aún no tiene asignaciones"
                 />
-                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Nota legal: <b>sueldo_asignado</b> es costo imputable al centro de costo solo en asignaciones remuneracionales. Las asignaciones operacionales sirven para supervisión, checklist, evidencias y control; no reemplazan ni incrementan el sueldo legal.</p>
+                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Nota: el <b>costo imputado</b> se calcula automáticamente desde el sueldo base del trabajador × porcentaje de imputación; no es un valor editable ni una base legal. Aplica solo a asignaciones remuneracionales. Las asignaciones operacionales sirven para supervisión, checklist, evidencias y control; no reemplazan ni incrementan el sueldo legal.</p>
               </>}
             </div>
           )}
