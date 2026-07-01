@@ -240,6 +240,8 @@ const limpiarPayloadTrabajador = (obj) => {
 /* ─── Formatters ────────────────────────────────────────────── */
 const clp = n => `$${Math.round(n||0).toLocaleString("es-CL")}`;
 const pct = n => `${((n||0)*100).toFixed(2)}%`;
+// J2-lite: formatea un porcentaje ya en escala 0-100 con máximo 2 decimales (coma decimal es-CL). 133.3299… -> "133,33%".
+const fmtPct = n => `${(Math.round((Number(n)||0)*100)/100).toLocaleString("es-CL",{maximumFractionDigits:2})}%`;
 const dateOnly = v => v ? String(v).split("T")[0] : "";
 const dateNoon = v => { const d=dateOnly(v); return d ? `${d}T12:00:00` : null; };
 const parseNoon = v => v ? new Date(`${dateOnly(v)}T12:00:00`) : null;
@@ -3228,7 +3230,10 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const pctTotal=asignacionesActivas.reduce((sum,a)=>sum+Number(a.porcentaje_costo||0),0);
   const pctRemunActivas=asignacionesActivas.filter(isAsignacionRemuneracional).reduce((sum,a)=>sum+Number(a.porcentaje_costo||0),0);
   const hayRemunActivas=asignacionesActivas.some(isAsignacionRemuneracional);
-  const estadoPct=pctTotal===100?{txt:"✅ 100% financiado",col:C.green,bg:C.greenBg,border:C.greenBorder}:pctTotal>100?{txt:`❌ Exceso ${pctTotal-100}%`,col:C.red,bg:C.redBg,border:C.redBorder}:{txt:`⚠ Déficit ${100-pctTotal}%`,col:C.yellow,bg:C.yellowBg,border:C.yellowBorder};
+  const pctRemunOk=Math.abs(pctRemunActivas-100)<0.01;
+  const pctOk=Math.abs(pctTotal-100)<0.01;
+  const estadoPct=pctOk?{txt:"✅ 100% financiado",col:C.green,bg:C.greenBg,border:C.greenBorder}:pctTotal>100?{txt:`❌ Exceso ${fmtPct(pctTotal-100)}`,col:C.red,bg:C.redBg,border:C.redBorder}:{txt:`⚠ Déficit ${fmtPct(100-pctTotal)}`,col:C.yellow,bg:C.yellowBg,border:C.yellowBorder};
+
   const contratoNombre=id=>{const c=data.contratos.find(ct=>ct.id===id);return c?`${c.id} — ${c.cliente}`:id;};
   const openNuevaAsignacion=()=>{
     if(!form||isNew)return;
@@ -3579,7 +3584,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               return `${c.id}${tipoL?` — ${tipoL}`:''}${cli}`;
             }).join(' + '):'Sin asignación activa';
             const pctFin=asigs.reduce((s,a)=>s+(Number(a.porcentaje_costo)||0),0);
-            const costoImputado=asigs.filter(isAsignacionRemuneracional).reduce((s,a)=>s+Math.round((form.sueldo_base||0)*(Number(a.porcentaje_costo)||0)/100),0);
+            const costoImputado=asigs.filter(isAsignacionRemuneracional).reduce((s,a)=>s+(Number(a.sueldo_asignado)>0?Number(a.sueldo_asignado):Math.round((form.sueldo_base||0)*(Number(a.porcentaje_costo)||0)/100)),0);
             const tabLabel={datos:'Datos personales',remuneracion:'Remuneración',asignaciones:'Asignaciones',anexos:'Anexos',documentos:'Documentos',expediente:'Expediente'}[tab]||'';
             return (
               <div style={{marginBottom:14}}>
@@ -3593,8 +3598,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {form.rut&&<span style={{fontSize:12,color:C.textMuted}}>{form.rut}</span>}
                     <span style={{background:estado.bg,color:estado.c,border:`1px solid ${estado.c}33`,borderRadius:5,padding:'2px 8px',fontSize:11,fontWeight:600}}>{estado.t}</span>
                     <span style={{fontSize:12,color:C.textMuted}}>📋 {contratosTxt}</span>
-                    {asigs.length>0&&<span style={{fontSize:12,fontWeight:600,color:pctFin>=100?'#166534':pctFin>0?'#9a3412':'#991b1b'}}>{pctFin}% financiado</span>}
-                    {costoImputado>0&&<span style={{fontSize:12,color:C.textMuted}}>💰 Costo imputado: <b style={{color:C.text}}>{clp(costoImputado)}</b></span>}
+                    {asigs.length>0&&<span style={{fontSize:12,fontWeight:600,color:pctFin>=100?'#166534':pctFin>0?'#9a3412':'#991b1b'}}>{fmtPct(pctFin)} financiado</span>}
+                    {costoImputado>0&&<span style={{fontSize:12,color:C.textMuted}}>💰 Financiamiento remuneracional: <b style={{color:C.text}}>{clp(costoImputado)}</b></span>}
                   </div>
                 )}
               </div>
@@ -3845,10 +3850,11 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   </div>
                 </div>)}
 
-                {hayRemunActivas && pctRemunActivas!==100 && (
+
+                {hayRemunActivas && !pctRemunOk && (
                   <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:'10px 12px',marginBottom:10,fontSize:12,color:'#92400e'}}>
-                    ⚠ La imputación de costo de las asignaciones remuneracionales activas suma <b>{pctRemunActivas}%</b>, no 100%.
-                    {pctRemunActivas>100 ? ` Hay un exceso de ${pctRemunActivas-100}%.` : ` Falta asignar ${100-pctRemunActivas}%.`} Revisa el porcentaje de cada centro de costo — el costo imputado se calcula sobre estos porcentajes.
+                    ⚠ El financiamiento remuneracional activo suma <b>{fmtPct(pctRemunActivas)}</b>, no 100%.
+                    {pctRemunActivas>100 ? ` Hay un exceso de ${fmtPct(pctRemunActivas-100)}.` : ` Hay un déficit de ${fmtPct(100-pctRemunActivas)}.`} Revisa el monto financiado por cada asignación.
                   </div>
                 )}
 
@@ -3857,8 +3863,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {key:"centro",label:"Centro",render:r=><span style={{fontWeight:600}}>{contratoNombre(r.contrato_id)}</span>},
                     {key:"estado",label:"Estado",render:r=><Tag text={r.estado_asig||"activa"} scheme={(r.estado_asig==="terminada"||r.activo===false)?{bg:"#f9fafb",text:C.textMuted,border:C.border}:{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>},
                     {key:"tipo",label:"Tipo",render:r=>isAsignacionRemuneracional(r)?<Tag text="💰 Remuneracional" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>:<Tag text="👁 Operacional" scheme={{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
-                    {key:"sueldo",label:"Costo imputado",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:isAsignacionRemuneracional(r)?C.text:C.textMuted}}>{isAsignacionRemuneracional(r)?clp(Math.round((form.sueldo_base||0)*(Number(r.porcentaje_costo)||0)/100)):"—"}</span>},
-                    {key:"pct",label:"% costo",render:r=>isAsignacionRemuneracional(r)?<span style={{fontWeight:700,color:Number(r.porcentaje_costo||0)===100?C.green:C.yellow}}>{Number(r.porcentaje_costo||0)}%</span>:<span style={{fontSize:11,color:C.textMuted}}>No aplica</span>},
+                    {key:"sueldo",label:"Financiamiento remuneracional ($)",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:isAsignacionRemuneracional(r)?C.text:C.textMuted}}>{isAsignacionRemuneracional(r)?clp(Number(r.sueldo_asignado)>0?Number(r.sueldo_asignado):Math.round((form.sueldo_base||0)*(Number(r.porcentaje_costo)||0)/100)):"—"}</span>},
+                    {key:"pct",label:"% financiamiento",render:r=>isAsignacionRemuneracional(r)?<span style={{fontWeight:700,color:Number(r.porcentaje_costo||0)===100?C.green:C.yellow}}>{fmtPct(r.porcentaje_costo||0)}</span>:<span style={{fontSize:11,color:C.textMuted}}>No aplica</span>},
                     {key:"bonos",label:"Bonos",render:r=><span style={{fontSize:12,color:C.textMuted}}>Mov {clp(r.bono_movilizacion)} · Col {clp(r.bono_colacion)}</span>},
                     {key:"fechas",label:"Vigencia",render:r=><span style={{fontSize:12,color:C.textMuted}}>{dateOnly(r.fecha_inicio_asig)||"—"}<br/>{r.fecha_termino_asig?`hasta ${dateOnly(r.fecha_termino_asig)}`:"vigente"}</span>},
                     {key:"jornada",label:"Jornada",render:r=><span style={{fontSize:12,color:C.textMuted}}>{r.jornada||r.horario||"—"}</span>},
@@ -3879,7 +3885,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   })}
                   empty="Este trabajador aún no tiene asignaciones"
                 />
-                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Nota: el <b>costo imputado</b> se calcula automáticamente desde el sueldo base del trabajador × porcentaje de imputación; no es un valor editable ni una base legal. Aplica solo a asignaciones remuneracionales. Las asignaciones operacionales sirven para supervisión, checklist, evidencias y control; no reemplazan ni incrementan el sueldo legal.</p>
+                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Nota: el <b>financiamiento remuneracional ($)</b> es el monto que cada asignación aporta al sueldo base del trabajador; el <b>% de financiamiento</b> se deriva de ese monto ÷ la remuneración base imputable esperada. Aplica solo a asignaciones remuneracionales. Las asignaciones operacionales sirven para supervisión, checklist, evidencias y control; no reemplazan ni incrementan el sueldo legal. Este dato no es una base legal: el costo empresa real se calcula aparte.</p>
               </>}
             </div>
           )}
