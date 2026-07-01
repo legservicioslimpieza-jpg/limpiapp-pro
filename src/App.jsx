@@ -175,6 +175,59 @@ const jornadaVisualLegacy = (trabajador) => {
   const t = [trabajador && trabajador.jornada, trabajador && trabajador.horario].filter(Boolean).join(" ");
   return t ? `${t} (no estructurado)` : "";
 };
+// J2-lite: normaliza una hora al formato HH:mm. Pensada para aplicarse al confirmar (blur).
+//  "0730"->"07:30", "730"->"07:30", "7:30"->"07:30", "1430"->"14:30", "7"->"07:00".
+const fmtHoraOperativa = (v) => {
+  const s = String(v || "").trim();
+  if (s === "") return "";
+  if (s.includes(":")) {
+    const [h, m=""] = s.split(":");
+    const hh = h.replace(/\D/g, "").slice(0, 2);
+    const mm = m.replace(/\D/g, "").slice(0, 2);
+    if (hh === "") return "";
+    return hh.padStart(2, "0") + ":" + (mm === "" ? "00" : mm.padEnd(2, "0"));
+  }
+  const d = s.replace(/\D/g, "");
+  if (d.length === 0) return "";
+  if (d.length <= 2) return d.padStart(2, "0") + ":00";          // "7" -> 07:00
+  if (d.length === 3) return "0" + d[0] + ":" + d.slice(1);       // 730 -> 07:30
+  return d.slice(0, 2) + ":" + d.slice(2, 4);                     // 0730 -> 07:30 ; 1430 -> 14:30
+};
+const horaOperativaValida = (h) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(h || ""));
+// Rango "HH:mm-HH:mm" válido (ambos extremos válidos e inicio < término). "" se considera "no informado" (válido).
+const horarioRangoValido = (r) => {
+  if (!r) return true;
+  const m = String(r).split("-");
+  return m.length === 2 && horaOperativaValida(m[0]) && horaOperativaValida(m[1]) && m[0] < m[1];
+};
+const J2_DIAS = [["lu","Lun"],["ma","Mar"],["mi","Mié"],["ju","Jue"],["vi","Vie"],["sa","Sáb"],["do","Dom"]];
+// Genera texto de días compacto desde un set: contiguos -> "Lun-Vie"; con huecos -> "Lun, Mié, Vie".
+const diasATextoOperativo = (sel) => {
+  const orden = J2_DIAS.map(d => d[0]);
+  const idx = orden.map((k,i)=> (sel.includes(k)?i:-1)).filter(i=>i>=0);
+  if (idx.length === 0) return "";
+  const contiguo = idx.every((v,i,a)=> i===0 || v===a[i-1]+1);
+  const lbl = k => (J2_DIAS.find(d=>d[0]===k)||[])[1];
+  if (contiguo && idx.length > 2) return `${lbl(orden[idx[0]])}-${lbl(orden[idx[idx.length-1]])}`;
+  return idx.map(i=>lbl(orden[i])).join(", ");
+};
+// Parsea un dias_semana existente (texto) a un set de claves, para precargar los chips.
+// Soporta: "Lun-Vie", "Lun-Sáb", "Lun, Mié, Vie", "Lunes a viernes", con o sin acentos.
+const textoADiasOperativo = (txt) => {
+  const s = String(txt||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // sin acentos
+  const orden = J2_DIAS.map(d=>d[0]);                 // ["lu","ma","mi","ju","vi","sa","do"]
+  const ab = { lun:"lu", mar:"ma", mie:"mi", jue:"ju", vie:"vi", sab:"sa", dom:"do" };
+  const keyOf = tok => { const a = Object.keys(ab).find(x => tok.startsWith(x)); return a ? ab[a] : null; };
+  const dayRe = "(lun\\w*|mar\\w*|mie\\w*|jue\\w*|vie\\w*|sab\\w*|dom\\w*)";
+  const rango = s.match(new RegExp(dayRe + "\\s*(?:-|\\ba\\b)\\s*" + dayRe)); // "lun-vie" o "lunes a viernes"
+  if (rango) {
+    const a = orden.indexOf(keyOf(rango[1])), b = orden.indexOf(keyOf(rango[2]));
+    if (a>=0 && b>=a) { const out=[]; for (let i=a;i<=b;i++) out.push(orden[i]); return out; }
+  }
+  const out = [];
+  (s.match(new RegExp(dayRe, "g")) || []).forEach(tok => { const k = keyOf(tok); if (k && !out.includes(k)) out.push(k); });
+  return orden.filter(k => out.includes(k));
+};
 // J1.1: limpia el payload antes de escribir en `trabajadores`. Quita columnas legacy de jornada
 // (la jornada vive en clausulas_contrato_original) y sanitiza fechas vacías ("" rompe columnas date).
 const limpiarPayloadTrabajador = (obj) => {
@@ -3179,12 +3232,34 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const contratoNombre=id=>{const c=data.contratos.find(ct=>ct.id===id);return c?`${c.id} — ${c.cliente}`:id;};
   const openNuevaAsignacion=()=>{
     if(!form||isNew)return;
-    const restante=Math.max(0,100-pctTotal);
-    setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,sueldo_asignado:form.sueldo_base||0,bono_asistencia:form.bono_asistencia||0,bono_movilizacion:form.bono_movilizacion||0,bono_colacion:form.bono_colacion||0,gratificacion_monto:form.gratificacion_monto||0,porcentaje_costo:asignacionesActivas.length?restante:100,fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,horas_semanales:45,dias_semana:"Lun-Vie",horario:"",jornada:"",descripcion:""});
+    // Financiamiento remuneracional: la 1ª asignación remuneracional activa financia el 100% (monto = sueldo base).
+    // Las siguientes arrancan con el monto restante por financiar; el usuario lo ajusta.
+    const montoOtrasRemun=asignacionesActivas.filter(isAsignacionRemuneracional).reduce((s,a)=>s+(Number(a.sueldo_asignado)||0),0);
+    const esPrimeraRemun=!asignacionesActivas.some(isAsignacionRemuneracional);
+    const montoInicial=esPrimeraRemun?(form.sueldo_base||0):Math.max(0,(form.sueldo_base||0)-montoOtrasRemun);
+    const pctInicial=(form.sueldo_base>0)?Math.round(montoInicial/form.sueldo_base*10000)/100:0;
+    setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,sueldo_asignado:montoInicial,bono_asistencia:form.bono_asistencia||0,bono_movilizacion:form.bono_movilizacion||0,bono_colacion:form.bono_colacion||0,gratificacion_monto:form.gratificacion_monto||0,porcentaje_costo:pctInicial,fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,horas_semanales:0,dias_semana:"Lun-Vie",horario:"",jornada:"",descripcion:""});
   };
   const guardarAsignacion=async()=>{
-    if(!asigForm?.contrato_id){alert("Selecciona un centro de costo");return;}
-    const registro={...asigForm,activo:asigForm.estado_asig!=="terminada",afecta_remuneracion:asigForm.afecta_remuneracion!==false,sueldo_asignado:Number(asigForm.sueldo_asignado||0),bono_asistencia:Number(asigForm.bono_asistencia||0),bono_movilizacion:Number(asigForm.bono_movilizacion||0),bono_colacion:Number(asigForm.bono_colacion||0),gratificacion_monto:Number(asigForm.gratificacion_monto||0),porcentaje_costo:Number(asigForm.porcentaje_costo||0),horas_semanales:Number(asigForm.horas_semanales||0)};
+    // Validaciones J2-lite (bloquean el guardado con mensaje).
+    const errs=[];
+    if(!asigForm?.contrato_id) errs.push("Selecciona un centro de costo.");
+    if(!asigForm?.estado_asig) errs.push("Indica el estado de la asignación.");
+    if(!asigForm?.fecha_inicio_asig) errs.push("La fecha de inicio es obligatoria.");
+    if(asigForm?.fecha_inicio_asig && asigForm?.fecha_termino_asig && dateOnly(asigForm.fecha_termino_asig) < dateOnly(asigForm.fecha_inicio_asig))
+      errs.push("La fecha de término no puede ser anterior a la fecha de inicio.");
+    const _remun=asigForm.afecta_remuneracion!==false;
+    const _monto=Number(asigForm.sueldo_asignado||0);
+    if(_remun && !(_monto>0)) errs.push("Si la asignación es remuneracional, el financiamiento ($) debe ser mayor a 0.");
+    // Normalizar horario por si no se disparó el blur (usuario tecleó y guardó directo).
+    let _horario=asigForm.horario||"";
+    if(_horario){ const p=String(_horario).split("-"); const ini=fmtHoraOperativa(p[0]||""), fin=fmtHoraOperativa(p[1]||""); _horario=(ini||fin)?`${ini}-${fin}`:""; }
+    if(_horario && !horarioRangoValido(_horario))
+      errs.push("El horario operativo debe tener formato HH:mm-HH:mm válido (inicio antes que término).");
+    if(errs.length){ alert("No se puede guardar la asignación:\n\n• "+errs.join("\n• ")); return; }
+    // El % de financiamiento SIEMPRE se deriva del monto ÷ remuneración base imputable (hoy sueldo_base).
+    const _pct=(_remun && (form.sueldo_base||0)>0)?Math.round(_monto/form.sueldo_base*10000)/100:(_remun?0:Number(asigForm.porcentaje_costo||0));
+    const registro={...asigForm,activo:asigForm.estado_asig!=="terminada",afecta_remuneracion:_remun,sueldo_asignado:_monto,bono_asistencia:Number(asigForm.bono_asistencia||0),bono_movilizacion:Number(asigForm.bono_movilizacion||0),bono_colacion:Number(asigForm.bono_colacion||0),gratificacion_monto:Number(asigForm.gratificacion_monto||0),porcentaje_costo:_pct,horas_semanales:Number(asigForm.horas_semanales||0),horario:_horario,jornada:[asigForm.dias_semana||"",_horario].filter(Boolean).join(" ")};
     if(!registro.fecha_termino_asig) registro.fecha_termino_asig=null;
     const ok=await saveAsignacion(registro);
     if(ok)setAsigForm(null);
@@ -3731,18 +3806,36 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                       </select>
                     </FL>
                     <FL label="Estado asignación"><select style={INP} value={asigForm.estado_asig||"activa"} onChange={e=>setAsigForm({...asigForm,estado_asig:e.target.value,activo:e.target.value!=="terminada"})}><option value="activa">Activa</option><option value="terminada">Terminada</option><option value="suspendida">Suspendida</option></select></FL>
-                    <FL label="Costo imputado (calculado)"><input type="text" style={{...INP,background:'#f9fafb',cursor:'not-allowed',color:C.textMuted}} value={clp(Math.round((form.sueldo_base||0)*(Number(asigForm.porcentaje_costo)||0)/100))} readOnly title="Se calcula automáticamente: sueldo base del trabajador × porcentaje de imputación. No editable."/></FL>
-                    <FL label="Porcentaje costo (%)"><input type="number" min={0} max={500} style={INP} value={asigForm.porcentaje_costo||0} onChange={e=>setAsigForm({...asigForm,porcentaje_costo:Number(e.target.value)})}/></FL>
+                    <FL label="Financiamiento remuneracional ($)"><input type="number" min={0} style={INP} value={asigForm.sueldo_asignado||0} onChange={e=>{const m=Number(e.target.value)||0;setAsigForm({...asigForm,sueldo_asignado:m,porcentaje_costo:(form.sueldo_base>0?Math.round(m/form.sueldo_base*10000)/100:0)});}} title="Monto de la remuneración base del trabajador que financia esta asignación. El porcentaje se calcula solo."/></FL>
+                    <FL label="% de financiamiento (calculado)"><input type="text" style={{...INP,background:'#f9fafb',cursor:'not-allowed',color:C.textMuted}} value={`${form.sueldo_base>0?Math.round((Number(asigForm.sueldo_asignado)||0)/form.sueldo_base*10000)/100:0}%`} readOnly title="Se calcula automáticamente: monto financiado ÷ sueldo base del trabajador. Es qué parte de la remuneración financia esta asignación, NO el costo empresa total."/></FL>
                     <FL label="Movilización ($)"><input type="number" style={INP} value={asigForm.bono_movilizacion||0} onChange={e=>setAsigForm({...asigForm,bono_movilizacion:Number(e.target.value)})}/></FL>
                     <FL label="Colación ($)"><input type="number" style={INP} value={asigForm.bono_colacion||0} onChange={e=>setAsigForm({...asigForm,bono_colacion:Number(e.target.value)})}/></FL>
                     <FL label="Bono asistencia ($)"><input type="number" style={INP} value={asigForm.bono_asistencia||0} onChange={e=>setAsigForm({...asigForm,bono_asistencia:Number(e.target.value)})}/></FL>
                     <FL label="Gratificación monto ($)"><input type="number" style={INP} value={asigForm.gratificacion_monto||0} onChange={e=>setAsigForm({...asigForm,gratificacion_monto:Number(e.target.value)})}/></FL>
-                    <FL label="Fecha inicio"><input type="date" style={INP} value={dateOnly(asigForm.fecha_inicio_asig)} onChange={e=>setAsigForm({...asigForm,fecha_inicio_asig:e.target.value||null})}/></FL>
-                    <FL label="Fecha término"><input type="date" style={INP} value={dateOnly(asigForm.fecha_termino_asig)} onChange={e=>setAsigForm({...asigForm,fecha_termino_asig:e.target.value||null})}/></FL>
-                    <FL label="Horas semanales"><input type="number" style={INP} value={asigForm.horas_semanales||0} onChange={e=>setAsigForm({...asigForm,horas_semanales:Number(e.target.value)})}/></FL>
-                    <FL label="Días semana"><input style={INP} value={asigForm.dias_semana||""} onChange={e=>setAsigForm({...asigForm,dias_semana:e.target.value})} placeholder="Ej: Lun-Vie"/></FL>
-                    <FL label="Horario"><input style={INP} value={asigForm.horario||""} onChange={e=>setAsigForm({...asigForm,horario:e.target.value})} placeholder="08:00-17:00"/></FL>
-                    <FL label="Jornada"><input style={INP} value={asigForm.jornada||""} onChange={e=>setAsigForm({...asigForm,jornada:e.target.value})} placeholder="Lun-Vie 08:00-17:00 (1h colación)"/></FL>
+                    <FL label="Fecha inicio"><FechaInput value={dateOnly(asigForm.fecha_inicio_asig)} onChange={v=>setAsigForm({...asigForm,fecha_inicio_asig:v||null})}/></FL>
+                    <FL label="Fecha término"><FechaInput value={dateOnly(asigForm.fecha_termino_asig)} onChange={v=>setAsigForm({...asigForm,fecha_termino_asig:v||null})}/></FL>
+                    <FL label="Horas de asignación para costeo operativo"><input type="number" style={INP} value={asigForm.horas_semanales||0} onChange={e=>setAsigForm({...asigForm,horas_semanales:Number(e.target.value)})} title="Dato operativo/imputable para costeo. NO es la jornada legal: esa se toma del contrato laboral estructurado."/></FL>
+                    {(()=>{
+                      const hParts=String(asigForm.horario||"").split("-");
+                      const hIni=hParts[0]||""; const hFin=hParts[1]||"";
+                      const setHorario=(ini,fin)=>{const nh=(ini||fin)?`${ini}-${fin}`:"";setAsigForm({...asigForm,horario:nh,jornada:[asigForm.dias_semana||"",nh].filter(Boolean).join(" ")});};
+                      const diasSel=textoADiasOperativo(asigForm.dias_semana);
+                      const toggleDia=(k)=>{const s=diasSel.includes(k)?diasSel.filter(x=>x!==k):[...diasSel,k];const txt=diasATextoOperativo(s);setAsigForm({...asigForm,dias_semana:txt,jornada:[txt,asigForm.horario||""].filter(Boolean).join(" ")});};
+                      const jornadaGen=[asigForm.dias_semana||"",asigForm.horario||""].filter(Boolean).join(" ");
+                      return (<>
+                        <FL label="Días de asignación (operativo)" span>
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                            {J2_DIAS.map(([k,lbl])=>(<button key={k} type="button" onClick={()=>toggleDia(k)} style={{padding:"5px 11px",borderRadius:6,fontSize:12,cursor:"pointer",border:`1px solid ${C.border}`,background:diasSel.includes(k)?C.accent:C.surface,color:diasSel.includes(k)?C.accentText:C.text}}>{lbl}</button>))}
+                          </div>
+                        </FL>
+                        <FL label="Hora inicio (operativa)"><input style={INP} value={hIni} inputMode="numeric" placeholder="escribe 0730 → 07:30" onChange={e=>setHorario(e.target.value.replace(/[^\d:]/g,"").slice(0,5),hFin)} onBlur={e=>setHorario(fmtHoraOperativa(e.target.value),hFin)}/></FL>
+                        <FL label="Hora término (operativa)"><input style={INP} value={hFin} inputMode="numeric" placeholder="escribe 1700 → 17:00" onChange={e=>setHorario(hIni,e.target.value.replace(/[^\d:]/g,"").slice(0,5))} onBlur={e=>setHorario(hIni,fmtHoraOperativa(e.target.value))}/></FL>
+                        <FL label="Jornada (visual · generada)" span>
+                          <input style={{...INP,background:'#f9fafb',cursor:'not-allowed',color:C.textMuted}} value={jornadaGen||"—"} readOnly/>
+                          <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>La jornada legal vigente se toma desde el contrato laboral estructurado. Este dato se usa solo para asignación/costeo operativo.</div>
+                        </FL>
+                      </>);
+                    })()}
                     <FL label="Tipo de asignación"><select style={INP} value={asigForm.afecta_remuneracion===false?"no":"si"} onChange={e=>setAsigForm({...asigForm,afecta_remuneracion:e.target.value==="si"})}><option value="si">💰 Remuneracional: suma a liquidación</option><option value="no">👁 Operacional: supervisión/control, no suma</option></select></FL>
                     <FL label="Descripción" span><input style={INP} value={asigForm.descripcion||""} onChange={e=>setAsigForm({...asigForm,descripcion:e.target.value})} placeholder="Ej: Anexo reducción jornada / apoyo domingos / servicio eventual"/></FL>
                   </div>
