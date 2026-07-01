@@ -175,6 +175,14 @@ const jornadaVisualLegacy = (trabajador) => {
   const t = [trabajador && trabajador.jornada, trabajador && trabajador.horario].filter(Boolean).join(" ");
   return t ? `${t} (no estructurado)` : "";
 };
+// J1.1: limpia el payload antes de escribir en `trabajadores`. Quita columnas legacy de jornada
+// (la jornada vive en clausulas_contrato_original) y sanitiza fechas vacías ("" rompe columnas date).
+const limpiarPayloadTrabajador = (obj) => {
+  const clean = { ...obj };
+  delete clean.jornada; delete clean.horario; delete clean.jornada_pactada;
+  Object.keys(clean).forEach(k => { if (/^fecha/.test(k) && clean[k] === "") clean[k] = null; });
+  return clean;
+};
 
 /* ─── Formatters ────────────────────────────────────────────── */
 const clp = n => `$${Math.round(n||0).toLocaleString("es-CL")}`;
@@ -1122,22 +1130,18 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
     const cambiosTrab={};
     if(anexo.sueldo_nuevo!=null && anexo.sueldo_nuevo!==anexo.sueldo_anterior)
       cambiosTrab.sueldo_base=anexo.sueldo_nuevo;
-    // J1.1: protección de doble verdad. Si el trabajador YA tiene jornada estructurada (cláusula del
-    //       contrato original), un anexo legacy NO puede modificar jornada/horario por campos de texto.
-    //       Esos cambios deben ir por anexo estructurado (J1.2). Otros campos del anexo (sueldo, centro) sí proceden.
-    const _tieneJornadaEstructurada=Array.isArray(trabajador.clausulas_contrato_original)
-      && trabajador.clausulas_contrato_original.some(c=>c&&c.clausula==="jornada");
-    if(_tieneJornadaEstructurada && (anexo.jornada_nueva || anexo.horario_nuevo)){
-      alert("Este trabajador tiene jornada estructurada. Los cambios de jornada deben realizarse mediante anexo estructurado (J1.2). No se permite aplicar jornada legacy.");
+    // J1.1: la jornada NO se modifica por anexo legacy bajo ninguna circunstancia (esté o no estructurado).
+    //       Cierra la doble puerta y espera al anexo estructurado de J1.2. Otros campos (sueldo, centro) sí proceden.
+    if(anexo.jornada_nueva || anexo.horario_nuevo){
+      alert("En esta versión (J1.1) la jornada no puede modificarse por anexo. Los cambios de jornada se realizarán mediante anexo estructurado (J1.2). El resto del anexo no incluye jornada/horario.");
       return;
     }
-    if(anexo.jornada_nueva) cambiosTrab.jornada=anexo.jornada_nueva;
-    if(anexo.horario_nuevo) cambiosTrab.horario=anexo.horario_nuevo;
     // J1.1 captura SOLO el contrato laboral original. El anexo estructurado (poblar
     // anexos_contrato.clausulas con su efecto y vigencia) es J1.2 — fuera de esta entrega.
-    // Por ahora el anexo mantiene su flujo de texto legacy (jornada_nueva/horario_nuevo) sin tocar cláusulas.
+    // jornada/horario por anexo legacy ya quedó bloqueado arriba; aquí se limpia el payload
+    // para no arrastrar columnas legacy (jornada/horario/jornada_pactada) del spread {...trabajador}.
     if(Object.keys(cambiosTrab).length>0)
-      await update('trabajadores',{...trabajador,...cambiosTrab});
+      await update('trabajadores',limpiarPayloadTrabajador({...trabajador,...cambiosTrab}));
     // 2. Actualizar asignación si hay cambio de porcentaje/sueldo en un centro
     if(saveAsignacion && anexo.centro_nuevo && anexo.porcentaje_nuevo>0){
       const asigExistente=(data.asignaciones||[]).find(
@@ -3162,7 +3166,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     setTab("datos");setAsigForm(null);
     setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",domicilio:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:"",nacionalidad:"Chilena",fecha_nacimiento:"",estado_civil:"",fecha_termino_plazo:null,ciudad:"",region:""});
   };
-  const save=async()=>{if(!form.nombre.trim())return;const _cj=(Array.isArray(form.clausulas_contrato_original)?form.clausulas_contrato_original:[]).find(c=>c&&c.clausula==="jornada");const vj=_cj?validarJornada({...(_cj.contenido||{}),vigencia_desde:_cj.vigencia_desde}):{ok:true,errores:[]};if(!vj.ok){alert("No se puede guardar la jornada:\n\n• "+vj.errores.join("\n• "));return;}const payload={...form,fecha_actualizacion_datos:new Date().toISOString().slice(0,10)};const ok=isNew?await insert("trabajadores",payload):await update("trabajadores",payload);if(ok){setForm(null);setAsigForm(null);}};
+  const save=async()=>{if(!form.nombre.trim())return;const _cj=(Array.isArray(form.clausulas_contrato_original)?form.clausulas_contrato_original:[]).find(c=>c&&c.clausula==="jornada");const vj=_cj?validarJornada({...(_cj.contenido||{}),vigencia_desde:_cj.vigencia_desde}):{ok:true,errores:[]};if(!vj.ok){alert("No se puede guardar la jornada:\n\n• "+vj.errores.join("\n• "));return;}const clean=limpiarPayloadTrabajador({...form,fecha_actualizacion_datos:new Date().toISOString().slice(0,10)});
+    const ok=isNew?await insert("trabajadores",clean):await update("trabajadores",clean);if(ok){setForm(null);setAsigForm(null);}};
 
   const asignacionesTrab=form?(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id):[];
   const asignacionesActivas=asignacionesTrab.filter(isAsignacionVigenteHoy);
@@ -3211,7 +3216,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       motivo_cancelacion: acc.motivo, responsable_cancelacion: acc.responsable||responsableDefault,
       fecha_cancelacion: new Date().toISOString().slice(0,10),
     });
-    await update('trabajadores', { ...form, activo:true, estado:'ACTIVO', fecha_separacion:null, motivo_termino:null });
+    await update('trabajadores', limpiarPayloadTrabajador({ ...form, activo:true, estado:'ACTIVO', fecha_separacion:null, motivo_termino:null }));
     setForm(f=>f?{...f, activo:true, estado:'ACTIVO', fecha_separacion:null, motivo_termino:null}:f);
     setPreavisoAccion(null);
   };
@@ -3229,7 +3234,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       observaciones: acc.observaciones || pa.observaciones || null,
     });
     const desv = { activo:false, estado:'DESVINCULADO', fecha_separacion: dateNoon(fechaSep), motivo_termino: form.motivo_termino||'Art. 161 — Necesidades de la empresa', finiquito_estado:'pendiente' };
-    await update('trabajadores', { ...form, ...desv });
+    await update('trabajadores', limpiarPayloadTrabajador({ ...form, ...desv }));
     const asigActivas = (data.asignaciones||[]).filter(a=>a.trabajador_id===form.id && (a.estado_asig==='activa'||a.activo!==false));
     for (const a of asigActivas) { await terminarAsignacion(a, fechaSep); }
     setForm(f=>f?{...f, ...desv}:f);
