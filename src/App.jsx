@@ -198,7 +198,8 @@ const horaOperativaValida = (h) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(h || 
 const horarioRangoValido = (r) => {
   if (!r) return true;
   const m = String(r).split("-");
-  return m.length === 2 && horaOperativaValida(m[0]) && horaOperativaValida(m[1]) && m[0] < m[1];
+  // Ambas horas válidas. Se permite término < inicio (cruce de medianoche, ej. 23:30-00:30).
+  return m.length === 2 && horaOperativaValida(m[0]) && horaOperativaValida(m[1]);
 };
 const J2_DIAS = [["lu","Lun"],["ma","Mar"],["mi","Mié"],["ju","Jue"],["vi","Vie"],["sa","Sáb"],["do","Dom"]];
 // Genera texto de días compacto desde un set: contiguos -> "Lun-Vie"; con huecos -> "Lun, Mié, Vie".
@@ -249,13 +250,45 @@ const montoInputProps = (val, onNum) => ({
   onChange:e=>{ const r=e.target.value; onNum(r===""?"":Math.max(0,Number(r))); },
 });
 // A.2: props para input de HORAS (acepta decimales con coma o punto: 0,5 / 1.25). type text para permitir la coma.
-const horasInputProps = (val, onStr) => ({
-  type:"text", inputMode:"decimal", placeholder:"Ej: 0.5",
-  value:(val===null||val===undefined)?"":String(val),
-  onChange:e=>{ const r=e.target.value.replace(/[^\d.,]/g,""); onStr(r); },
-});
 // A.2: normaliza horas a número (coma->punto) al guardar; "" o inválido -> 0; nunca negativo.
 const horasANumero = (v) => { const n=Number(String(v??"").replace(",",".")); return (isFinite(n)&&n>=0)?n:0; };
+// A (mejora): parsea duración flexible -> horas decimales. "01:15"->1.25, "1:15"->1.25, "0:30"->0.5,
+//  "1 h 15 min"->1.25, "75 min"->1.25, "1,25"->1.25, "1h30"->1.5, "2h05"->2.083.
+const parseDuracion = (v) => {
+  const s = String(v??"").trim().toLowerCase();
+  if(s==="") return 0;
+  let m = s.match(/^(\d{1,2}):(\d{1,2})$/);                              // HH:MM
+  if(m) return Math.max(0, Number(m[1]) + Number(m[2])/60);
+  m = s.match(/^(\d+(?:[.,]\d+)?)\s*h\s*(\d+)?\s*(?:m|min|minutos)?$/);   // "1h30", "1 h 15 min", "2h05", "1h"
+  if(m){ const h=Number(m[1].replace(",",".")); const mn=m[2]?Number(m[2]):0; return Math.max(0, h + mn/60); }
+  m = s.match(/^(\d+)\s*(?:m|min|minutos)$/);                            // "75 min", "90 minutos"
+  if(m) return Math.max(0, Number(m[1])/60);
+  const n = Number(s.replace(",","."));                                  // decimal puro (1,25 / 1.25)
+  return (isFinite(n) && n>=0) ? n : 0;
+};
+
+// horas decimales -> "HH:MM" (vacío si <=0).
+const duracionATexto = (dec) => {
+  const n = Number(dec)||0; if(n<=0) return "";
+  let h = Math.floor(n), mn = Math.round((n-h)*60);
+  if(mn===60){ h+=1; mn=0; }
+  return `${String(h).padStart(2,"0")}:${String(mn).padStart(2,"0")}`;
+};
+// "HH:MM" + horas decimales -> "HH:MM" término (envuelve medianoche).
+const sumaHoraFin = (iniHHMM, decHoras) => {
+  const p = String(iniHHMM||"").split(":"); if(p.length<2) return "";
+  const start=(Number(p[0])||0)*60+(Number(p[1])||0);
+  const end=(start + Math.round((Number(decHoras)||0)*60))%1440;
+  return `${String(Math.floor(end/60)).padStart(2,"0")}:${String(end%60).padStart(2,"0")}`;
+};
+// diferencia entre "HH:MM" inicio y término -> horas decimales (cruce de medianoche permitido).
+const difHorasDec = (iniHHMM, finHHMM) => {
+  const pi=String(iniHHMM||"").split(":"), pf=String(finHHMM||"").split(":");
+  if(pi.length<2||pf.length<2) return 0;
+  let d = ((Number(pf[0])||0)*60+(Number(pf[1])||0)) - ((Number(pi[0])||0)*60+(Number(pi[1])||0));
+  if(d<0) d+=1440;
+  return Math.round(d/60*100)/100;
+};
 const dateOnly = v => v ? String(v).split("T")[0] : "";
 const dateNoon = v => { const d=dateOnly(v); return d ? `${d}T12:00:00` : null; };
 const parseNoon = v => v ? new Date(`${dateOnly(v)}T12:00:00`) : null;
@@ -3267,14 +3300,20 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     const _monto=Number(asigForm.sueldo_asignado||0);
     if(_remun && !(_monto>0)) errs.push("Si la asignación es remuneracional, el monto asociado al trabajador ($) debe ser mayor a 0.");
     // Normalizar horario por si no se disparó el blur (usuario tecleó y guardó directo).
+    // Reconciliar duración/horario por si no se disparó el blur (usuario tecleó y guardó directo).
+    const _horasFinal=(asigForm._durRaw!==undefined)?parseDuracion(asigForm._durRaw):horasANumero(asigForm.horas_semanales);
     let _horario=asigForm.horario||"";
-    if(_horario){ const p=String(_horario).split("-"); const ini=fmtHoraOperativa(p[0]||""), fin=fmtHoraOperativa(p[1]||""); _horario=(ini||fin)?`${ini}-${fin}`:""; }
+    { const p=String(_horario).split("-"); let ini=fmtHoraOperativa(p[0]||""), fin=fmtHoraOperativa(p[1]||"");
+      // si se escribió duración sin blur y hay inicio, recomponer término desde inicio+duración
+      if(asigForm._durRaw!==undefined && ini && _horasFinal>0) fin=sumaHoraFin(ini,_horasFinal);
+      _horario=(ini||fin)?`${ini}-${fin}`:""; }
     if(_horario && !horarioRangoValido(_horario))
-      errs.push("El horario operativo debe tener formato HH:mm-HH:mm válido (inicio antes que término).");
+      errs.push("El horario operativo debe tener horas válidas en formato HH:mm-HH:mm.");
     if(errs.length){ alert("No se puede guardar la asignación:\n\n• "+errs.join("\n• ")); return; }
     // El % de financiamiento SIEMPRE se deriva del monto ÷ remuneración base imputable (hoy sueldo_base).
     const _pct=(_remun && (form.sueldo_base||0)>0)?Math.round(_monto/form.sueldo_base*10000)/100:(_remun?0:Number(asigForm.porcentaje_costo||0));
-    const registro={...asigForm,activo:asigForm.estado_asig!=="terminada",afecta_remuneracion:_remun,sueldo_asignado:_monto,bono_asistencia:Number(asigForm.bono_asistencia||0),bono_movilizacion:Number(asigForm.bono_movilizacion||0),bono_colacion:Number(asigForm.bono_colacion||0),gratificacion_monto:Number(asigForm.gratificacion_monto||0),gratificacion_porcentaje_asig:(asigForm.gratificacion_porcentaje_asig===""||asigForm.gratificacion_porcentaje_asig==null)?null:Number(asigForm.gratificacion_porcentaje_asig),porcentaje_costo:_pct,horas_semanales:horasANumero(asigForm.horas_semanales),horario:_horario,jornada:[asigForm.dias_semana||"",_horario].filter(Boolean).join(" ")};
+    const registro={...asigForm,activo:asigForm.estado_asig!=="terminada",afecta_remuneracion:_remun,sueldo_asignado:_monto,bono_asistencia:Number(asigForm.bono_asistencia||0),bono_movilizacion:Number(asigForm.bono_movilizacion||0),bono_colacion:Number(asigForm.bono_colacion||0),gratificacion_monto:Number(asigForm.gratificacion_monto||0),gratificacion_porcentaje_asig:(asigForm.gratificacion_porcentaje_asig===""||asigForm.gratificacion_porcentaje_asig==null)?null:Number(asigForm.gratificacion_porcentaje_asig),porcentaje_costo:_pct,horas_semanales:_horasFinal,horario:_horario,jornada:[asigForm.dias_semana||"",_horario].filter(Boolean).join(" ")};
+    delete registro._durRaw;
     if(!registro.fecha_termino_asig) registro.fecha_termino_asig=null;
     const ok=await saveAsignacion(registro);
     if(ok)setAsigForm(null);
@@ -3835,22 +3874,35 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {asigForm.gratificacion_metodo_asig==="ajuste_especial"&&<FL label="Gratificación — observación / respaldo" span><input style={INP} value={asigForm.gratificacion_observacion_asig||""} onChange={e=>setAsigForm({...asigForm,gratificacion_observacion_asig:e.target.value})} placeholder="Respaldo del ajuste"/></FL>}
                     <FL label="Fecha inicio"><FechaInput value={dateOnly(asigForm.fecha_inicio_asig)} onChange={v=>setAsigForm({...asigForm,fecha_inicio_asig:v||null})}/></FL>
                     <FL label="Fecha término"><FechaInput value={dateOnly(asigForm.fecha_termino_asig)} onChange={v=>setAsigForm({...asigForm,fecha_termino_asig:v||null})}/></FL>
-                    <FL label="Horas de asignación para costeo operativo"><input style={INP} {...horasInputProps(asigForm.horas_semanales, v=>setAsigForm({...asigForm,horas_semanales:v}))} title="Dato operativo/imputable para costeo, acepta decimales (0,5). NO es la jornada legal: esa se toma del contrato laboral estructurado."/></FL>
                     {(()=>{
                       const hParts=String(asigForm.horario||"").split("-");
                       const hIni=hParts[0]||""; const hFin=hParts[1]||"";
-                      const setHorario=(ini,fin)=>{const nh=(ini||fin)?`${ini}-${fin}`:"";setAsigForm({...asigForm,horario:nh,jornada:[asigForm.dias_semana||"",nh].filter(Boolean).join(" ")});};
+                      const durDec=horasANumero(asigForm.horas_semanales);
+                      const durDisplay=asigForm._durRaw!==undefined?asigForm._durRaw:duracionATexto(durDec);
+                      const jGen=(ini,fin)=>[asigForm.dias_semana||"",(ini||fin)?`${ini}-${fin}`:""].filter(Boolean).join(" ");
+                      // inicio: recompone término desde la duración vigente (mantiene duración)
+                      const onInicioBlur=(val)=>{const ini=fmtHoraOperativa(val);const fin=(ini&&durDec>0)?sumaHoraFin(ini,durDec):hFin;const nh=(ini||fin)?`${ini}-${fin}`:"";setAsigForm({...asigForm,horario:nh,jornada:jGen(ini,fin)});};
+                      const onInicioChange=(val)=>{const ini=val.replace(/[^\d:]/g,"").slice(0,5);const nh=(ini||hFin)?`${ini}-${hFin}`:"";setAsigForm({...asigForm,horario:nh,jornada:jGen(ini,hFin)});};
+                      // término: recalcula la duración
+                      const onTerminoBlur=(val)=>{const fin=fmtHoraOperativa(val);const dur=(hIni&&fin)?difHorasDec(hIni,fin):durDec;const nh=(hIni||fin)?`${hIni}-${fin}`:"";setAsigForm({...asigForm,horario:nh,horas_semanales:dur,_durRaw:duracionATexto(dur),jornada:jGen(hIni,fin)});};
+                      const onTerminoChange=(val)=>{const fin=val.replace(/[^\d:]/g,"").slice(0,5);const nh=(hIni||fin)?`${hIni}-${fin}`:"";setAsigForm({...asigForm,horario:nh,jornada:jGen(hIni,fin)});};
+                      // duración: recalcula término (mantiene inicio)
+                      const onDuracionBlur=(val)=>{const dec=parseDuracion(val);const fin=(hIni&&dec>0)?sumaHoraFin(hIni,dec):hFin;const nh=(hIni||fin)?`${hIni}-${fin}`:(asigForm.horario||"");setAsigForm({...asigForm,horas_semanales:dec,_durRaw:duracionATexto(dec),horario:nh,jornada:jGen(hIni,fin)});};
                       const diasSel=textoADiasOperativo(asigForm.dias_semana);
                       const toggleDia=(k)=>{const s=diasSel.includes(k)?diasSel.filter(x=>x!==k):[...diasSel,k];const txt=diasATextoOperativo(s);setAsigForm({...asigForm,dias_semana:txt,jornada:[txt,asigForm.horario||""].filter(Boolean).join(" ")});};
                       const jornadaGen=[asigForm.dias_semana||"",asigForm.horario||""].filter(Boolean).join(" ");
                       return (<>
+                        <FL label="Hora inicio (operativa)"><input style={INP} value={hIni} inputMode="numeric" placeholder="escribe 0730 → 07:30" onChange={e=>onInicioChange(e.target.value)} onBlur={e=>onInicioBlur(e.target.value)}/></FL>
+                        <FL label="Hora término (operativa)"><input style={INP} value={hFin} inputMode="numeric" placeholder="escribe 1700 → 17:00" onChange={e=>onTerminoChange(e.target.value)} onBlur={e=>onTerminoBlur(e.target.value)}/></FL>
+                        <FL label="Duración de asignación para costeo operativo">
+                          <input style={INP} value={durDisplay} placeholder="Ej: 01:15 ó 1,25" onChange={e=>setAsigForm({...asigForm,_durRaw:e.target.value})} onBlur={e=>onDuracionBlur(e.target.value)} title="Duración operativa para costeo. Se guarda como decimal. NO es la jornada legal (esa se toma del contrato estructurado)."/>
+                          <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>Ej: 00:30 = media hora, 01:15 = una hora y quince minutos.{durDec>0?` Se guarda como ${durDec} h.`:""}</div>
+                        </FL>
                         <FL label="Días de asignación (operativo)" span>
                           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                             {J2_DIAS.map(([k,lbl])=>(<button key={k} type="button" onClick={()=>toggleDia(k)} style={{padding:"5px 11px",borderRadius:6,fontSize:12,cursor:"pointer",border:`1px solid ${C.border}`,background:diasSel.includes(k)?C.accent:C.surface,color:diasSel.includes(k)?C.accentText:C.text}}>{lbl}</button>))}
                           </div>
                         </FL>
-                        <FL label="Hora inicio (operativa)"><input style={INP} value={hIni} inputMode="numeric" placeholder="escribe 0730 → 07:30" onChange={e=>setHorario(e.target.value.replace(/[^\d:]/g,"").slice(0,5),hFin)} onBlur={e=>setHorario(fmtHoraOperativa(e.target.value),hFin)}/></FL>
-                        <FL label="Hora término (operativa)"><input style={INP} value={hFin} inputMode="numeric" placeholder="escribe 1700 → 17:00" onChange={e=>setHorario(hIni,e.target.value.replace(/[^\d:]/g,"").slice(0,5))} onBlur={e=>setHorario(hIni,fmtHoraOperativa(e.target.value))}/></FL>
                         <FL label="Jornada (visual · generada)" span>
                           <input style={{...INP,background:'#f9fafb',cursor:'not-allowed',color:C.textMuted}} value={jornadaGen||"—"} readOnly/>
                           <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>La jornada legal vigente se toma desde el contrato laboral estructurado. Este dato se usa solo para asignación/costeo operativo.</div>
