@@ -242,6 +242,20 @@ const clp = n => `$${Math.round(n||0).toLocaleString("es-CL")}`;
 const pct = n => `${((n||0)*100).toFixed(2)}%`;
 // J2-lite: formatea un porcentaje ya en escala 0-100 con máximo 2 decimales (coma decimal es-CL). 133.3299… -> "133,33%".
 const fmtPct = n => `${(Math.round((Number(n)||0)*100)/100).toLocaleString("es-CL",{maximumFractionDigits:2})}%`;
+// A.1: props para input de MONTO (vacío editable, sin "0" pegado, no negativos, normaliza ceros a la izquierda).
+const montoInputProps = (val, onNum) => ({
+  type:"number", min:0, inputMode:"numeric", placeholder:"Ej: 10000",
+  value:(val===null||val===undefined||val==="")?"":val,
+  onChange:e=>{ const r=e.target.value; onNum(r===""?"":Math.max(0,Number(r))); },
+});
+// A.2: props para input de HORAS (acepta decimales con coma o punto: 0,5 / 1.25). type text para permitir la coma.
+const horasInputProps = (val, onStr) => ({
+  type:"text", inputMode:"decimal", placeholder:"Ej: 0.5",
+  value:(val===null||val===undefined)?"":String(val),
+  onChange:e=>{ const r=e.target.value.replace(/[^\d.,]/g,""); onStr(r); },
+});
+// A.2: normaliza horas a número (coma->punto) al guardar; "" o inválido -> 0; nunca negativo.
+const horasANumero = (v) => { const n=Number(String(v??"").replace(",",".")); return (isFinite(n)&&n>=0)?n:0; };
 const dateOnly = v => v ? String(v).split("T")[0] : "";
 const dateNoon = v => { const d=dateOnly(v); return d ? `${d}T12:00:00` : null; };
 const parseNoon = v => v ? new Date(`${dateOnly(v)}T12:00:00`) : null;
@@ -3238,8 +3252,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const contratoNombre=id=>{const c=data.contratos.find(ct=>ct.id===id);return c?`${c.id} — ${c.cliente}`:id;};
   const openNuevaAsignacion=()=>{
     if(!form||isNew)return;
-    // J2-lite: el monto asociado arranca vacío (placeholder "Ej: 100000"); no hay lógica de "primera=100%".
-    setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,sueldo_asignado:"",modalidad_cobertura:null,origen_trabajador:null,bono_asistencia:form.bono_asistencia||0,bono_movilizacion:form.bono_movilizacion||0,bono_colacion:form.bono_colacion||0,gratificacion_monto:form.gratificacion_monto||0,porcentaje_costo:0,fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,horas_semanales:0,dias_semana:"Lun-Vie",horario:"",jornada:"",descripcion:""});
+    // A.1/A.2: todos los campos numéricos arrancan vacíos (placeholder), no en 0 ni heredados.
+    setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,sueldo_asignado:"",modalidad_cobertura:null,origen_trabajador:null,gratificacion_metodo_asig:null,gratificacion_porcentaje_asig:"",gratificacion_observacion_asig:"",bono_asistencia:"",bono_movilizacion:"",bono_colacion:"",gratificacion_monto:"",porcentaje_costo:0,fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,horas_semanales:"",dias_semana:"Lun-Vie",horario:"",jornada:"",descripcion:""});
   };
   const guardarAsignacion=async()=>{
     // Validaciones J2-lite (bloquean el guardado con mensaje).
@@ -3260,7 +3274,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     if(errs.length){ alert("No se puede guardar la asignación:\n\n• "+errs.join("\n• ")); return; }
     // El % de financiamiento SIEMPRE se deriva del monto ÷ remuneración base imputable (hoy sueldo_base).
     const _pct=(_remun && (form.sueldo_base||0)>0)?Math.round(_monto/form.sueldo_base*10000)/100:(_remun?0:Number(asigForm.porcentaje_costo||0));
-    const registro={...asigForm,activo:asigForm.estado_asig!=="terminada",afecta_remuneracion:_remun,sueldo_asignado:_monto,bono_asistencia:Number(asigForm.bono_asistencia||0),bono_movilizacion:Number(asigForm.bono_movilizacion||0),bono_colacion:Number(asigForm.bono_colacion||0),gratificacion_monto:Number(asigForm.gratificacion_monto||0),porcentaje_costo:_pct,horas_semanales:Number(asigForm.horas_semanales||0),horario:_horario,jornada:[asigForm.dias_semana||"",_horario].filter(Boolean).join(" ")};
+    const registro={...asigForm,activo:asigForm.estado_asig!=="terminada",afecta_remuneracion:_remun,sueldo_asignado:_monto,bono_asistencia:Number(asigForm.bono_asistencia||0),bono_movilizacion:Number(asigForm.bono_movilizacion||0),bono_colacion:Number(asigForm.bono_colacion||0),gratificacion_monto:Number(asigForm.gratificacion_monto||0),gratificacion_porcentaje_asig:(asigForm.gratificacion_porcentaje_asig===""||asigForm.gratificacion_porcentaje_asig==null)?null:Number(asigForm.gratificacion_porcentaje_asig),porcentaje_costo:_pct,horas_semanales:horasANumero(asigForm.horas_semanales),horario:_horario,jornada:[asigForm.dias_semana||"",_horario].filter(Boolean).join(" ")};
     if(!registro.fecha_termino_asig) registro.fecha_termino_asig=null;
     const ok=await saveAsignacion(registro);
     if(ok)setAsigForm(null);
@@ -3783,7 +3797,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:12}}>
                   <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                     <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:7,padding:"8px 12px",fontSize:12,color:C.text,fontWeight:600}}>
-                      Total asociado al trabajador en asignaciones activas: {clp(montoAsociadoTotal)}
+                      Total monto base asociado en asignaciones activas: {clp(montoAsociadoTotal)}
                       <div style={{fontSize:10,fontWeight:400,color:C.textMuted,marginTop:2}}>Dato referencial. No representa liquidación final ni costo empresa.</div>
                     </div>
                     {asignacionesOperacionalesActivas.length>0&&(<div style={{background:C.accentBg,border:`1px solid #bfdbfe`,borderRadius:7,padding:"8px 12px",fontSize:12,color:C.accentText,fontWeight:600}}>
@@ -3812,13 +3826,16 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     </FL>
                     <FL label="Modalidad de cobertura (opcional)"><select style={INP} value={asigForm.modalidad_cobertura||""} onChange={e=>setAsigForm({...asigForm,modalidad_cobertura:e.target.value||null})}><option value="">— Seleccionar modalidad —</option><option value="exclusivo">Trabajador exclusivo de la asignación</option><option value="reasignacion_parcial">Reasignación parcial dentro de jornada</option><option value="holgura_remunerada">Uso de holgura horaria ya remunerada</option><option value="pago_adicional">Pago adicional por nueva asignación</option><option value="horas_extra">Horas extra autorizadas</option><option value="volante_reemplazo">Trabajador volante / reemplazo</option></select></FL>
                     <FL label="Origen del trabajador (opcional)"><select style={INP} value={asigForm.origen_trabajador||""} onChange={e=>setAsigForm({...asigForm,origen_trabajador:e.target.value||null})}><option value="">— Seleccionar origen —</option><option value="nuevo">Nuevo en la empresa (requiere contrato)</option><option value="existente_holgura">Existente con holgura (posible anexo)</option><option value="sin_holgura">Existente sin holgura (hora extra / pacto / revisión)</option></select></FL>
-                    <FL label="Movilización ($)"><input type="number" style={INP} value={asigForm.bono_movilizacion||0} onChange={e=>setAsigForm({...asigForm,bono_movilizacion:Number(e.target.value)})}/></FL>
-                    <FL label="Colación ($)"><input type="number" style={INP} value={asigForm.bono_colacion||0} onChange={e=>setAsigForm({...asigForm,bono_colacion:Number(e.target.value)})}/></FL>
-                    <FL label="Bono asistencia ($)"><input type="number" style={INP} value={asigForm.bono_asistencia||0} onChange={e=>setAsigForm({...asigForm,bono_asistencia:Number(e.target.value)})}/></FL>
-                    <FL label="Gratificación monto ($)"><input type="number" style={INP} value={asigForm.gratificacion_monto||0} onChange={e=>setAsigForm({...asigForm,gratificacion_monto:Number(e.target.value)})}/></FL>
+                    <FL label="Movilización ($)"><input style={INP} {...montoInputProps(asigForm.bono_movilizacion, v=>setAsigForm({...asigForm,bono_movilizacion:v}))}/></FL>
+                    <FL label="Colación ($)"><input style={INP} {...montoInputProps(asigForm.bono_colacion, v=>setAsigForm({...asigForm,bono_colacion:v}))}/></FL>
+                    <FL label="Bono asistencia ($)"><input style={INP} {...montoInputProps(asigForm.bono_asistencia, v=>setAsigForm({...asigForm,bono_asistencia:v}))}/></FL>
+                    <FL label="Gratificación — método"><select style={INP} value={asigForm.gratificacion_metodo_asig||""} onChange={e=>setAsigForm({...asigForm,gratificacion_metodo_asig:e.target.value||null})}><option value="">— Seleccionar método —</option><option value="heredar">Heredar desde Remuneración</option><option value="25_legal">25% legal proporcional</option><option value="anticipo_pct">Anticipo porcentaje</option><option value="anticipo_monto">Anticipo monto fijo</option><option value="monto_fijo">Monto fijo especial</option><option value="no_aplica">No aplica</option><option value="ajuste_especial">Ajuste especial con respaldo</option></select></FL>
+                    {asigForm.gratificacion_metodo_asig==="anticipo_pct"&&<FL label="Gratificación — porcentaje (%)"><input style={INP} {...montoInputProps(asigForm.gratificacion_porcentaje_asig, v=>setAsigForm({...asigForm,gratificacion_porcentaje_asig:v}))} placeholder="Ej: 25"/></FL>}
+                    {(asigForm.gratificacion_metodo_asig==="anticipo_monto"||asigForm.gratificacion_metodo_asig==="monto_fijo")&&<FL label="Gratificación — monto ($)"><input style={INP} {...montoInputProps(asigForm.gratificacion_monto, v=>setAsigForm({...asigForm,gratificacion_monto:v}))}/></FL>}
+                    {asigForm.gratificacion_metodo_asig==="ajuste_especial"&&<FL label="Gratificación — observación / respaldo" span><input style={INP} value={asigForm.gratificacion_observacion_asig||""} onChange={e=>setAsigForm({...asigForm,gratificacion_observacion_asig:e.target.value})} placeholder="Respaldo del ajuste"/></FL>}
                     <FL label="Fecha inicio"><FechaInput value={dateOnly(asigForm.fecha_inicio_asig)} onChange={v=>setAsigForm({...asigForm,fecha_inicio_asig:v||null})}/></FL>
                     <FL label="Fecha término"><FechaInput value={dateOnly(asigForm.fecha_termino_asig)} onChange={v=>setAsigForm({...asigForm,fecha_termino_asig:v||null})}/></FL>
-                    <FL label="Horas de asignación para costeo operativo"><input type="number" style={INP} value={asigForm.horas_semanales||0} onChange={e=>setAsigForm({...asigForm,horas_semanales:Number(e.target.value)})} title="Dato operativo/imputable para costeo. NO es la jornada legal: esa se toma del contrato laboral estructurado."/></FL>
+                    <FL label="Horas de asignación para costeo operativo"><input style={INP} {...horasInputProps(asigForm.horas_semanales, v=>setAsigForm({...asigForm,horas_semanales:v}))} title="Dato operativo/imputable para costeo, acepta decimales (0,5). NO es la jornada legal: esa se toma del contrato laboral estructurado."/></FL>
                     {(()=>{
                       const hParts=String(asigForm.horario||"").split("-");
                       const hIni=hParts[0]||""; const hFin=hParts[1]||"";
@@ -3859,7 +3876,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {key:"centro",label:"Centro",render:r=><span style={{fontWeight:600}}>{contratoNombre(r.contrato_id)}</span>},
                     {key:"estado",label:"Estado",render:r=><Tag text={r.estado_asig||"activa"} scheme={(r.estado_asig==="terminada"||r.activo===false)?{bg:"#f9fafb",text:C.textMuted,border:C.border}:{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>},
                     {key:"tipo",label:"Tipo",render:r=>isAsignacionRemuneracional(r)?<Tag text="💰 Remuneracional" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>:<Tag text="👁 Operacional" scheme={{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
-                    {key:"sueldo",label:"Monto asociado ($)",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:isAsignacionRemuneracional(r)?C.text:C.textMuted}}>{isAsignacionRemuneracional(r)?clp(Number(r.sueldo_asignado)>0?Number(r.sueldo_asignado):Math.round((form.sueldo_base||0)*(Number(r.porcentaje_costo)||0)/100)):"—"}</span>},
+                    {key:"sueldo",label:"Monto base asociado ($)",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:isAsignacionRemuneracional(r)?C.text:C.textMuted}}>{isAsignacionRemuneracional(r)?clp(Number(r.sueldo_asignado)>0?Number(r.sueldo_asignado):Math.round((form.sueldo_base||0)*(Number(r.porcentaje_costo)||0)/100)):"—"}</span>},
                     {key:"pct",label:"≈ % sueldo base",render:r=>isAsignacionRemuneracional(r)?<span style={{fontSize:11,color:C.textMuted}}>≈ {fmtPct(r.porcentaje_costo||0)}</span>:<span style={{fontSize:11,color:C.textMuted}}>No aplica</span>},
                     {key:"bonos",label:"Bonos",render:r=><span style={{fontSize:12,color:C.textMuted}}>Mov {clp(r.bono_movilizacion)} · Col {clp(r.bono_colacion)}</span>},
                     {key:"fechas",label:"Vigencia",render:r=><span style={{fontSize:12,color:C.textMuted}}>{dateOnly(r.fecha_inicio_asig)||"—"}<br/>{r.fecha_termino_asig?`hasta ${dateOnly(r.fecha_termino_asig)}`:"vigente"}</span>},
@@ -3881,7 +3898,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   })}
                   empty="Este trabajador aún no tiene asignaciones"
                 />
-                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Los montos asociados a una asignación representan valores referenciales vinculados a la participación del trabajador en un contrato o centro de costo. No constituyen por sí solos la liquidación final, el costo empresa ni el margen del contrato. La remuneración mensual será consolidada posteriormente por el módulo de Remuneraciones, considerando los componentes aplicables, asistencia, anexos, bonos, gratificación y demás reglas vigentes.</p>
+                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>El <b>monto base asociado</b> a una asignación es un valor referencial vinculado a la participación del trabajador en un contrato o centro de costo. No representa la liquidación final, el costo remuneracional completo ni el costo empresa. La remuneración real del mes se consolidará después en el módulo de Remuneraciones, sumando colación, movilización, gratificación, bonos, asistencia, anexos y demás reglas vigentes.</p>
               </>}
             </div>
           )}
