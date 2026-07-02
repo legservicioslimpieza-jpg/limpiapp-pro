@@ -1016,6 +1016,10 @@ function Contratos({data,insert,update}){
           <FL label="Días de alerta (aviso anticipado)"><input type="number" min={30} max={180} style={INP} value={form.dias_alerta||60} onChange={e=>setForm({...form,dias_alerta:Number(e.target.value)})}/></FL>
           <FL label="Supervisor"><select style={INP} value={form.supervisor_id||""} onChange={e=>setForm({...form,supervisor_id:e.target.value})}><option value="">— Sin asignar —</option>{data.trabajadores.map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}</select></FL>
           <FL label="ID Licitación"><input style={INP} value={form.licitacion_id||""} onChange={e=>setForm({...form,licitacion_id:e.target.value})} placeholder="Ej: 892200-1-LE26"/></FL>
+          <FL label="Ingreso / valor referencial del contrato ($)"><input type="number" min={0} style={INP} value={form.valor_referencial_contrato??""} onChange={e=>setForm({...form,valor_referencial_contrato:e.target.value===""?null:Number(e.target.value)})} placeholder="Ej: 900000"/></FL>
+          <FL label="Periodicidad del valor"><select style={INP} value={form.periodicidad_valor||""} onChange={e=>setForm({...form,periodicidad_valor:e.target.value||null})}><option value="">— Seleccionar —</option><option value="mensual">Mensual</option><option value="unico">Único</option><option value="por_evento">Por evento</option><option value="orden_servicio">Por orden de servicio</option><option value="estado_pago">Por estado de pago</option></select></FL>
+          <FL label="Documento fuente (opcional)"><select style={INP} value={form.tipo_documento_fuente||""} onChange={e=>setForm({...form,tipo_documento_fuente:e.target.value||null})}><option value="">— Seleccionar —</option><option value="oc_publica">Orden de compra (Mercado Público)</option><option value="oc_privada">Orden de compra privada</option><option value="contrato">Contrato</option><option value="cotizacion">Cotización aceptada</option><option value="orden_servicio">Orden de servicio</option><option value="estado_pago">Estado de pago</option><option value="otro">Otro</option></select></FL>
+          <div style={{gridColumn:"1 / -1",fontSize:11,color:C.textMuted,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 10px"}}>Este valor pertenece al contrato o centro de costo, no a un trabajador específico. No representa factura emitida, caja recibida ni margen real.</div>
         </FormCard>
       )}
       <Panel noPad>
@@ -3227,23 +3231,15 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const asignacionesTrab=form?(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id):[];
   const asignacionesActivas=asignacionesTrab.filter(isAsignacionVigenteHoy);
   const asignacionesOperacionalesActivas=asignacionesTrab.filter(a=>isAsignacionOperacional(a)&&a.estado_asig==="activa"&&a.activo!==false);
-  const pctTotal=asignacionesActivas.reduce((sum,a)=>sum+Number(a.porcentaje_costo||0),0);
-  const pctRemunActivas=asignacionesActivas.filter(isAsignacionRemuneracional).reduce((sum,a)=>sum+Number(a.porcentaje_costo||0),0);
-  const hayRemunActivas=asignacionesActivas.some(isAsignacionRemuneracional);
-  const pctRemunOk=Math.abs(pctRemunActivas-100)<0.01;
-  const pctOk=Math.abs(pctTotal-100)<0.01;
-  const estadoPct=pctOk?{txt:"✅ 100% financiado",col:C.green,bg:C.greenBg,border:C.greenBorder}:pctTotal>100?{txt:`❌ Exceso ${fmtPct(pctTotal-100)}`,col:C.red,bg:C.redBg,border:C.redBorder}:{txt:`⚠ Déficit ${fmtPct(100-pctTotal)}`,col:C.yellow,bg:C.yellowBg,border:C.yellowBorder};
+  // J2-lite: la asignación describe la participación del trabajador, no un % contra el sueldo base.
+  // Solo se conserva el total asociado (dato neutro, sin juicio de déficit/exceso).
+  const montoAsociadoTotal=asignacionesActivas.filter(isAsignacionRemuneracional).reduce((s,a)=>s+(Number(a.sueldo_asignado)||0),0);
 
   const contratoNombre=id=>{const c=data.contratos.find(ct=>ct.id===id);return c?`${c.id} — ${c.cliente}`:id;};
   const openNuevaAsignacion=()=>{
     if(!form||isNew)return;
-    // Financiamiento remuneracional: la 1ª asignación remuneracional activa financia el 100% (monto = sueldo base).
-    // Las siguientes arrancan con el monto restante por financiar; el usuario lo ajusta.
-    const montoOtrasRemun=asignacionesActivas.filter(isAsignacionRemuneracional).reduce((s,a)=>s+(Number(a.sueldo_asignado)||0),0);
-    const esPrimeraRemun=!asignacionesActivas.some(isAsignacionRemuneracional);
-    const montoInicial=esPrimeraRemun?(form.sueldo_base||0):Math.max(0,(form.sueldo_base||0)-montoOtrasRemun);
-    const pctInicial=(form.sueldo_base>0)?Math.round(montoInicial/form.sueldo_base*10000)/100:0;
-    setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,sueldo_asignado:montoInicial,bono_asistencia:form.bono_asistencia||0,bono_movilizacion:form.bono_movilizacion||0,bono_colacion:form.bono_colacion||0,gratificacion_monto:form.gratificacion_monto||0,porcentaje_costo:pctInicial,fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,horas_semanales:0,dias_semana:"Lun-Vie",horario:"",jornada:"",descripcion:""});
+    // J2-lite: el monto asociado arranca vacío (placeholder "Ej: 100000"); no hay lógica de "primera=100%".
+    setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,sueldo_asignado:"",modalidad_cobertura:null,origen_trabajador:null,bono_asistencia:form.bono_asistencia||0,bono_movilizacion:form.bono_movilizacion||0,bono_colacion:form.bono_colacion||0,gratificacion_monto:form.gratificacion_monto||0,porcentaje_costo:0,fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,horas_semanales:0,dias_semana:"Lun-Vie",horario:"",jornada:"",descripcion:""});
   };
   const guardarAsignacion=async()=>{
     // Validaciones J2-lite (bloquean el guardado con mensaje).
@@ -3255,7 +3251,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       errs.push("La fecha de término no puede ser anterior a la fecha de inicio.");
     const _remun=asigForm.afecta_remuneracion!==false;
     const _monto=Number(asigForm.sueldo_asignado||0);
-    if(_remun && !(_monto>0)) errs.push("Si la asignación es remuneracional, el financiamiento ($) debe ser mayor a 0.");
+    if(_remun && !(_monto>0)) errs.push("Si la asignación es remuneracional, el monto asociado al trabajador ($) debe ser mayor a 0.");
     // Normalizar horario por si no se disparó el blur (usuario tecleó y guardó directo).
     let _horario=asigForm.horario||"";
     if(_horario){ const p=String(_horario).split("-"); const ini=fmtHoraOperativa(p[0]||""), fin=fmtHoraOperativa(p[1]||""); _horario=(ini||fin)?`${ini}-${fin}`:""; }
@@ -3583,7 +3579,6 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               const cli=(c.cliente&&c.cliente.trim()&&c.cliente.trim().toLowerCase()!=='por definir')?` · ${c.cliente}`:'';
               return `${c.id}${tipoL?` — ${tipoL}`:''}${cli}`;
             }).join(' + '):'Sin asignación activa';
-            const pctFin=asigs.reduce((s,a)=>s+(Number(a.porcentaje_costo)||0),0);
             const costoImputado=asigs.filter(isAsignacionRemuneracional).reduce((s,a)=>s+(Number(a.sueldo_asignado)>0?Number(a.sueldo_asignado):Math.round((form.sueldo_base||0)*(Number(a.porcentaje_costo)||0)/100)),0);
             const tabLabel={datos:'Datos personales',remuneracion:'Remuneración',asignaciones:'Asignaciones',anexos:'Anexos',documentos:'Documentos',expediente:'Expediente'}[tab]||'';
             return (
@@ -3598,8 +3593,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {form.rut&&<span style={{fontSize:12,color:C.textMuted}}>{form.rut}</span>}
                     <span style={{background:estado.bg,color:estado.c,border:`1px solid ${estado.c}33`,borderRadius:5,padding:'2px 8px',fontSize:11,fontWeight:600}}>{estado.t}</span>
                     <span style={{fontSize:12,color:C.textMuted}}>📋 {contratosTxt}</span>
-                    {asigs.length>0&&<span style={{fontSize:12,fontWeight:600,color:pctFin>=100?'#166534':pctFin>0?'#9a3412':'#991b1b'}}>{fmtPct(pctFin)} financiado</span>}
-                    {costoImputado>0&&<span style={{fontSize:12,color:C.textMuted}}>💰 Financiamiento remuneracional: <b style={{color:C.text}}>{clp(costoImputado)}</b></span>}
+                    {costoImputado>0&&<span style={{fontSize:12,color:C.textMuted}}>Monto asociado en asignaciones: <b style={{color:C.text}}>{clp(costoImputado)}</b></span>}
                   </div>
                 )}
               </div>
@@ -3788,8 +3782,9 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               :<>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:12}}>
                   <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                    <div style={{background:estadoPct.bg,border:`1px solid ${estadoPct.border}`,borderRadius:7,padding:"8px 12px",fontSize:12,color:estadoPct.col,fontWeight:600}}>
-                      Financiamiento remuneracional activo: {estadoPct.txt}
+                    <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:7,padding:"8px 12px",fontSize:12,color:C.text,fontWeight:600}}>
+                      Total asociado al trabajador en asignaciones activas: {clp(montoAsociadoTotal)}
+                      <div style={{fontSize:10,fontWeight:400,color:C.textMuted,marginTop:2}}>Dato referencial. No representa liquidación final ni costo empresa.</div>
                     </div>
                     {asignacionesOperacionalesActivas.length>0&&(<div style={{background:C.accentBg,border:`1px solid #bfdbfe`,borderRadius:7,padding:"8px 12px",fontSize:12,color:C.accentText,fontWeight:600}}>
                       👁 {asignacionesOperacionalesActivas.length} asignación(es) operacional(es), no afectan remuneración
@@ -3811,8 +3806,12 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                       </select>
                     </FL>
                     <FL label="Estado asignación"><select style={INP} value={asigForm.estado_asig||"activa"} onChange={e=>setAsigForm({...asigForm,estado_asig:e.target.value,activo:e.target.value!=="terminada"})}><option value="activa">Activa</option><option value="terminada">Terminada</option><option value="suspendida">Suspendida</option></select></FL>
-                    <FL label="Financiamiento remuneracional ($)"><input type="number" min={0} style={INP} value={asigForm.sueldo_asignado||0} onChange={e=>{const m=Number(e.target.value)||0;setAsigForm({...asigForm,sueldo_asignado:m,porcentaje_costo:(form.sueldo_base>0?Math.round(m/form.sueldo_base*10000)/100:0)});}} title="Monto de la remuneración base del trabajador que financia esta asignación. El porcentaje se calcula solo."/></FL>
-                    <FL label="% de financiamiento (calculado)"><input type="text" style={{...INP,background:'#f9fafb',cursor:'not-allowed',color:C.textMuted}} value={`${form.sueldo_base>0?Math.round((Number(asigForm.sueldo_asignado)||0)/form.sueldo_base*10000)/100:0}%`} readOnly title="Se calcula automáticamente: monto financiado ÷ sueldo base del trabajador. Es qué parte de la remuneración financia esta asignación, NO el costo empresa total."/></FL>
+                    <FL label="Monto asociado al trabajador en esta asignación ($)">
+                      <input type="number" min={0} style={INP} value={(asigForm.sueldo_asignado===null||asigForm.sueldo_asignado===undefined||asigForm.sueldo_asignado==="")?"":asigForm.sueldo_asignado} placeholder="Ej: 100000" onChange={e=>{const raw=e.target.value;const m=raw===""?"":Number(raw);setAsigForm({...asigForm,sueldo_asignado:m,porcentaje_costo:(form.sueldo_base>0&&raw!==""?Math.round(Number(raw)/form.sueldo_base*10000)/100:0)});}} title="Remuneración/componentes asociados a esta asignación para este trabajador. No es el ingreso del contrato."/>
+                      {form.sueldo_base>0&&Number(asigForm.sueldo_asignado)>0&&<div style={{fontSize:10,color:C.textMuted,marginTop:3}}>≈ {fmtPct(Number(asigForm.sueldo_asignado)/form.sueldo_base*100)} del sueldo base (dato auxiliar)</div>}
+                    </FL>
+                    <FL label="Modalidad de cobertura (opcional)"><select style={INP} value={asigForm.modalidad_cobertura||""} onChange={e=>setAsigForm({...asigForm,modalidad_cobertura:e.target.value||null})}><option value="">— Seleccionar modalidad —</option><option value="exclusivo">Trabajador exclusivo de la asignación</option><option value="reasignacion_parcial">Reasignación parcial dentro de jornada</option><option value="holgura_remunerada">Uso de holgura horaria ya remunerada</option><option value="pago_adicional">Pago adicional por nueva asignación</option><option value="horas_extra">Horas extra autorizadas</option><option value="volante_reemplazo">Trabajador volante / reemplazo</option></select></FL>
+                    <FL label="Origen del trabajador (opcional)"><select style={INP} value={asigForm.origen_trabajador||""} onChange={e=>setAsigForm({...asigForm,origen_trabajador:e.target.value||null})}><option value="">— Seleccionar origen —</option><option value="nuevo">Nuevo en la empresa (requiere contrato)</option><option value="existente_holgura">Existente con holgura (posible anexo)</option><option value="sin_holgura">Existente sin holgura (hora extra / pacto / revisión)</option></select></FL>
                     <FL label="Movilización ($)"><input type="number" style={INP} value={asigForm.bono_movilizacion||0} onChange={e=>setAsigForm({...asigForm,bono_movilizacion:Number(e.target.value)})}/></FL>
                     <FL label="Colación ($)"><input type="number" style={INP} value={asigForm.bono_colacion||0} onChange={e=>setAsigForm({...asigForm,bono_colacion:Number(e.target.value)})}/></FL>
                     <FL label="Bono asistencia ($)"><input type="number" style={INP} value={asigForm.bono_asistencia||0} onChange={e=>setAsigForm({...asigForm,bono_asistencia:Number(e.target.value)})}/></FL>
@@ -3851,20 +3850,17 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                 </div>)}
 
 
-                {hayRemunActivas && !pctRemunOk && (
-                  <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:'10px 12px',marginBottom:10,fontSize:12,color:'#92400e'}}>
-                    ⚠ El financiamiento remuneracional activo suma <b>{fmtPct(pctRemunActivas)}</b>, no 100%.
-                    {pctRemunActivas>100 ? ` Hay un exceso de ${fmtPct(pctRemunActivas-100)}.` : ` Hay un déficit de ${fmtPct(100-pctRemunActivas)}.`} Revisa el monto financiado por cada asignación.
+                <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 12px',marginBottom:10,fontSize:11,color:C.textMuted}}>
+                    El margen se calculará en una etapa posterior, cuando el sistema consolide remuneraciones, leyes sociales, insumos, EPP, maquinaria, supervisión, traslados, garantías, factoring y otros costos. Los montos de esta pantalla son referenciales de la participación del trabajador, no una liquidación ni un costo empresa.
                   </div>
-                )}
 
                 <DataTable
                   cols={[
                     {key:"centro",label:"Centro",render:r=><span style={{fontWeight:600}}>{contratoNombre(r.contrato_id)}</span>},
                     {key:"estado",label:"Estado",render:r=><Tag text={r.estado_asig||"activa"} scheme={(r.estado_asig==="terminada"||r.activo===false)?{bg:"#f9fafb",text:C.textMuted,border:C.border}:{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>},
                     {key:"tipo",label:"Tipo",render:r=>isAsignacionRemuneracional(r)?<Tag text="💰 Remuneracional" scheme={{bg:C.greenBg,text:C.green,border:C.greenBorder}}/>:<Tag text="👁 Operacional" scheme={{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
-                    {key:"sueldo",label:"Financiamiento remuneracional ($)",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:isAsignacionRemuneracional(r)?C.text:C.textMuted}}>{isAsignacionRemuneracional(r)?clp(Number(r.sueldo_asignado)>0?Number(r.sueldo_asignado):Math.round((form.sueldo_base||0)*(Number(r.porcentaje_costo)||0)/100)):"—"}</span>},
-                    {key:"pct",label:"% financiamiento",render:r=>isAsignacionRemuneracional(r)?<span style={{fontWeight:700,color:Number(r.porcentaje_costo||0)===100?C.green:C.yellow}}>{fmtPct(r.porcentaje_costo||0)}</span>:<span style={{fontSize:11,color:C.textMuted}}>No aplica</span>},
+                    {key:"sueldo",label:"Monto asociado ($)",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:isAsignacionRemuneracional(r)?C.text:C.textMuted}}>{isAsignacionRemuneracional(r)?clp(Number(r.sueldo_asignado)>0?Number(r.sueldo_asignado):Math.round((form.sueldo_base||0)*(Number(r.porcentaje_costo)||0)/100)):"—"}</span>},
+                    {key:"pct",label:"≈ % sueldo base",render:r=>isAsignacionRemuneracional(r)?<span style={{fontSize:11,color:C.textMuted}}>≈ {fmtPct(r.porcentaje_costo||0)}</span>:<span style={{fontSize:11,color:C.textMuted}}>No aplica</span>},
                     {key:"bonos",label:"Bonos",render:r=><span style={{fontSize:12,color:C.textMuted}}>Mov {clp(r.bono_movilizacion)} · Col {clp(r.bono_colacion)}</span>},
                     {key:"fechas",label:"Vigencia",render:r=><span style={{fontSize:12,color:C.textMuted}}>{dateOnly(r.fecha_inicio_asig)||"—"}<br/>{r.fecha_termino_asig?`hasta ${dateOnly(r.fecha_termino_asig)}`:"vigente"}</span>},
                     {key:"jornada",label:"Jornada",render:r=><span style={{fontSize:12,color:C.textMuted}}>{r.jornada||r.horario||"—"}</span>},
@@ -3885,7 +3881,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   })}
                   empty="Este trabajador aún no tiene asignaciones"
                 />
-                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Nota: el <b>financiamiento remuneracional ($)</b> es el monto que cada asignación aporta al sueldo base del trabajador; el <b>% de financiamiento</b> se deriva de ese monto ÷ la remuneración base imputable esperada. Aplica solo a asignaciones remuneracionales. Las asignaciones operacionales sirven para supervisión, checklist, evidencias y control; no reemplazan ni incrementan el sueldo legal. Este dato no es una base legal: el costo empresa real se calcula aparte.</p>
+                <p style={{fontSize:11,color:C.textMuted,marginTop:10}}>Los montos asociados a una asignación representan valores referenciales vinculados a la participación del trabajador en un contrato o centro de costo. No constituyen por sí solos la liquidación final, el costo empresa ni el margen del contrato. La remuneración mensual será consolidada posteriormente por el módulo de Remuneraciones, considerando los componentes aplicables, asistencia, anexos, bonos, gratificación y demás reglas vigentes.</p>
               </>}
             </div>
           )}
