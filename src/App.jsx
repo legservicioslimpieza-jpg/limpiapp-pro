@@ -170,6 +170,39 @@ const jornadaVigente = (trabajador, fecha, data) => {
   const principal = base || activos[0];
   return { estructurada:true, jornada: { ...principal, horas_semanales: horas, componentes: activos } };
 };
+
+// A.7: capacidad laboral semanal. Proyección pura (el Motor posee la regla, no almacena). Read-only.
+// Cuentan asignaciones que consumen jornada ordinaria: modalidad vacía(ordinaria)/exclusivo/
+// reasignacion_parcial/holgura_remunerada/pago_adicional/volante_reemplazo, con afecta_remuneracion!==false.
+// NO cuentan: operacionales puras (afecta_remuneracion===false) ni horas_extra (son SOBRE la jornada).
+const CAP_MODALIDADES_CUENTAN = ["", "exclusivo", "reasignacion_parcial", "holgura_remunerada", "pago_adicional", "volante_reemplazo"];
+const capacidadSemanal = (trabajador, asignacionesActivas, data) => {
+  const hoy = new Date().toISOString().slice(0,10);
+  const jv = jornadaVigente(trabajador, hoy, data);
+  if(!jv.estructurada) return { determinable:false };
+  const pactada = Number(jv.jornada.horas_semanales)||0;
+  const tope = topeLegalJornada(hoy);
+  let planificadas = 0, incompletas = 0;
+  (asignacionesActivas||[]).forEach(a => {
+    const cuenta = (a.afecta_remuneracion!==false) && CAP_MODALIDADES_CUENTAN.includes(a.modalidad_cobertura||"");
+    if(!cuenta) return;
+    const dur = horasANumero(a.horas_semanales);                 // duración diaria/turno
+    const ndias = textoADiasOperativo(a.dias_semana).length;     // nº días operativos
+    if(dur<=0 || ndias<=0){ incompletas++; return; }             // sin días/duración: no se cuenta, se advierte
+    planificadas += dur*ndias;                                   // horas semanales = duración × días
+  });
+  planificadas = Math.round(planificadas*100)/100;
+  const holgura = Math.max(0, Math.round((pactada-planificadas)*100)/100);   // contra la PACTADA, no el tope
+  const margen  = pactada<tope ? Math.round((tope-pactada)*100)/100 : 0;     // solo referencia, requiere anexo
+  const sobre   = Math.max(0, Math.round((planificadas-pactada)*100)/100);
+  const eq = Math.abs(planificadas-pactada)<0.01;
+  let estado;
+  if(sobre>0.01) estado={key:"extraordinaria",txt:"Posible jornada extraordinaria — requiere pacto o regularización"};
+  else if(eq&&pactada>=tope) estado={key:"tope",txt:"Al tope de la jornada pactada"};
+  else if(eq) estado={key:"anexo",txt:"Requiere anexo o revisión antes de nueva asignación"};
+  else estado={key:"disponible",txt:"Disponible dentro de jornada"};
+  return { determinable:true, pactada, tope, planificadas, holgura, margen, sobre, incompletas, estado };
+};
 // Visual legacy SEPARADO — solo para mostrar info no estructurada, NUNCA para cálculo legal.
 const jornadaVisualLegacy = (trabajador) => {
   const t = [trabajador && trabajador.jornada, trabajador && trabajador.horario].filter(Boolean).join(" ");
@@ -3281,6 +3314,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   // J2-lite: la asignación describe la participación del trabajador, no un % contra el sueldo base.
   // Solo se conserva el total asociado (dato neutro, sin juicio de déficit/exceso).
   const montoAsociadoTotal=asignacionesActivas.filter(isAsignacionRemuneracional).reduce((s,a)=>s+(Number(a.sueldo_asignado)||0),0);
+  const cap=capacidadSemanal(form,asignacionesActivas,data);
 
   const contratoNombre=id=>{const c=data.contratos.find(ct=>ct.id===id);return c?`${c.id} — ${c.cliente}`:id;};
   const openNuevaAsignacion=()=>{
@@ -3925,6 +3959,29 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                 </div>)}
 
 
+                {(()=>{
+                  const estColor={disponible:{bg:C.greenBg,bd:C.greenBorder,tx:C.green},anexo:{bg:'#fffbeb',bd:'#fde68a',tx:'#b45309'},tope:{bg:'#fffbeb',bd:'#fde68a',tx:'#b45309'},extraordinaria:{bg:C.redBg,bd:C.redBorder,tx:C.red}};
+                  const row=(l,v,extra)=>(<div style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'2px 0'}}><span style={{color:C.textMuted}}>{l}</span><span style={{fontWeight:600,color:C.text}}>{v}{extra}</span></div>);
+                  const hh=n=>`${(Math.round((Number(n)||0)*100)/100).toLocaleString('es-CL',{maximumFractionDigits:2})} h`;
+                  return (
+                    <div style={{border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 14px',marginBottom:10,background:C.surface}}>
+                      <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.4,marginBottom:8}}>Capacidad laboral semanal</div>
+                      {!cap.determinable ? (
+                        <div style={{fontSize:12,color:C.textMuted}}>Capacidad no determinable — estructure la jornada del contrato laboral (pestaña Datos → jornada) para calcularla.</div>
+                      ) : (<>
+                        {row('Jornada pactada vigente:',hh(cap.pactada))}
+                        {row('Tope legal vigente:',hh(cap.tope))}
+                        {row('Planificado dentro de jornada:',hh(cap.planificadas))}
+                        {row('Holgura contractual disponible:',hh(cap.holgura))}
+                        {cap.margen>0 && row('Margen hasta tope legal:',hh(cap.margen),<span style={{fontWeight:400,color:C.textMuted}}> · requiere anexo</span>)}
+                        {cap.sobre>0 && row('Horas sobre jornada pactada:',hh(cap.sobre))}
+                        <div style={{marginTop:8}}><span style={{display:'inline-block',fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:6,background:(estColor[cap.estado.key]||{}).bg,border:`1px solid ${(estColor[cap.estado.key]||{}).bd}`,color:(estColor[cap.estado.key]||{}).tx}}>{cap.estado.txt}</span></div>
+                        {cap.incompletas>0 && <div style={{fontSize:11,color:'#b45309',marginTop:6}}>⚠ {cap.incompletas} asignación(es) sin días u horas completos no se incluyeron en el cálculo.</div>}
+                        <div style={{fontSize:10,color:C.textMuted,marginTop:8,borderTop:`1px solid ${C.border}`,paddingTop:6}}>Basado en asignaciones planificadas. Las horas extraordinarias reales se confirman con el registro de asistencia.</div>
+                      </>)}
+                    </div>
+                  );
+                })()}
                 <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 12px',marginBottom:10,fontSize:11,color:C.textMuted}}>
                     El margen se calculará en una etapa posterior, cuando el sistema consolide remuneraciones, leyes sociales, insumos, EPP, maquinaria, supervisión, traslados, garantías, factoring y otros costos. Los montos de esta pantalla son referenciales de la participación del trabajador, no una liquidación ni un costo empresa.
                   </div>
