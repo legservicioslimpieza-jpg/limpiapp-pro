@@ -61,6 +61,17 @@ const J1_DIAS_ORDEN = ["lu","ma","mi","ju","vi","sa","do"];
 // Generador de texto (PROYECCIÓN, no fuente). Nunca contiene cifras fijas: usa el valor real.
 const jornadaATexto = (jp) => {
   if (!jp || typeof jp !== "object") return { jornada:"", horario:"" };
+  // J1.2: jornada por BLOQUES horarios (dentro de un mismo acto) → listar cada bloque + total.
+  if (Array.isArray(jp.bloques) && jp.bloques.length > 1) {
+    const partes = jp.bloques.map((b,i) => {
+      const g = jornadaATexto({ ...b, bloques:undefined, componentes:undefined, colacion_minutos:(b.colacion_min ?? b.colacion_minutos) });
+      const desc = [g.horario].filter(Boolean).join(" ").replace(/\.\s*$/, "") || "—";
+      const he = (b.horas_efectivas!=null && b.horas_efectivas!=="") ? ` Total: ${b.horas_efectivas} h.` : "";
+      return `Bloque ${i+1}: ${desc}.${he}`;
+    });
+    const total = jp.bloques.reduce((s,b)=>s+(Number(b.horas_efectivas)||0),0);
+    return { jornada: `Jornada ordinaria distribuida en bloques. ${partes.join(" ")} Total semanal pactado: ${total} h.`, horario:"" };
+  }
   // J1.1: jornada COMPUESTA (más de un componente activo) → listar componentes + total.
   if (Array.isArray(jp.componentes) && jp.componentes.length > 1) {
     const partes = jp.componentes.map((c,i) => {
@@ -323,6 +334,15 @@ const difHorasDec = (iniHHMM, finHHMM) => {
   return Math.round(d/60*100)/100;
 };
 const dateOnly = v => v ? String(v).split("T")[0] : "";
+// J1.2: horas efectivas semanales de un bloque = (horas brutas entre inicio y término − colación no imputable) × nº días.
+const calcHorasEfectivasBloque = (b) => {
+  if(!b) return 0;
+  const bruto = difHorasDec(b.hora_inicio, b.hora_termino);
+  const col = b.colacion_imputable ? 0 : (Number(b.colacion_min ?? b.colacion_minutos)||0)/60;
+  const dia = Math.max(0, bruto - col);
+  const ndias = Array.isArray(b.dias) ? b.dias.length : (b.dias ? textoADiasOperativo(b.dias).length : 0);
+  return Math.round(dia * ndias * 100)/100;
+};
 const dateNoon = v => { const d=dateOnly(v); return d ? `${d}T12:00:00` : null; };
 const parseNoon = v => v ? new Date(`${dateOnly(v)}T12:00:00`) : null;
 const isAsignacionVigenteHoy = a => {
@@ -3818,46 +3838,61 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   </div>
                 );
               }
-              const base=jp?{...jp,vigencia_desde:vigDesde}:{tipo:"ordinaria",dias:[],hora_inicio:"",hora_termino:"",colacion_minutos:60,colacion_imputable:false,horas_semanales:"",vigencia_desde:vigDesde,observaciones:""};
-              const upd=(patch)=>{ const njp={...base,...patch}; const g=jornadaATexto(njp);
-                // Cláusula del contrato original: captura técnica de un acto que ya existía (NO crea acto nuevo).
-                const clausula={clausula:"jornada",acto_tipo:"contrato_original",acto_id:form.id||null,
-                  vigencia_desde:(njp.vigencia_desde||fechaContrato||null),vigencia_hasta:null,
-                  efecto:"establece_total",componente_id:"base",regla_legal:"jornada_ordinaria",
-                  contenido:njp,captura_tecnica:new Date().toISOString()};
+              const tipoJ=(jp&&jp.tipo)||"ordinaria";
+              const seedBloque=(src)=>({dias:Array.isArray(src&&src.dias)?src.dias:[],hora_inicio:(src&&src.hora_inicio)||"",hora_termino:(src&&src.hora_termino)||"",colacion_min:Number((src&&(src.colacion_min??src.colacion_minutos))??60)||0,colacion_imputable:!!(src&&src.colacion_imputable),horas_efectivas:(src&&src.horas_efectivas!=null&&src.horas_efectivas!=="")?src.horas_efectivas:((src&&src.horas_semanales!=null&&src.horas_semanales!=="")?src.horas_semanales:""),ajuste_manual:!!(src&&src.ajuste_manual),observacion:(src&&src.observacion)||""});
+              const bloques=(jp&&Array.isArray(jp.bloques)&&jp.bloques.length>0)?jp.bloques.map(seedBloque):[seedBloque(jp)];
+              const totalEfectivas=Math.round(bloques.reduce((s,b)=>s+(Number(b.horas_efectivas)||0),0)*100)/100;
+              const tope=topeLegalJornada(vigDesde);
+              const escribir=(nb,opts)=>{ const o=opts||{}; const tipoU=o.tipo||tipoJ; const vigU=o.vigencia!==undefined?o.vigencia:vigDesde;
+                const total=Math.round(nb.reduce((s,b)=>s+(Number(b.horas_efectivas)||0),0)*100)/100; const b0=nb[0]||{};
+                const contenido={tipo:tipoU,tipo_jornada:nb.length>1?"por_bloques":"uniforme",horas_semanales:total,bloques:nb,
+                  dias:b0.dias||[],hora_inicio:b0.hora_inicio||"",hora_termino:b0.hora_termino||"",colacion_minutos:b0.colacion_min,colacion_imputable:!!b0.colacion_imputable,
+                  vigencia_desde:vigU,observaciones:(jp&&jp.observaciones)||""};
+                const g=jornadaATexto(contenido);
+                const clausula={clausula:"jornada",acto_tipo:"contrato_original",acto_id:form.id||null,vigencia_desde:(vigU||fechaContrato||null),vigencia_hasta:null,efecto:"establece_total",componente_id:"base",regla_legal:"jornada_ordinaria",contenido,captura_tecnica:new Date().toISOString()};
                 const otras=clausulas.filter(c=>!(c&&c.clausula==="jornada"));
-                setForm({...form,clausulas_contrato_original:[clausula,...otras],
-                  jornada:[g.jornada,g.horario].filter(Boolean).join(" ")||form.jornada,horario:g.horario||form.horario}); };
-              const toggleDia=(d)=>{ const ds=new Set(base.dias||[]); ds.has(d)?ds.delete(d):ds.add(d); upd({dias:[...ds]}); };
-              const val=jp?validarJornada({...base}):{ok:true,errores:[],aviso:""};
-              const prev=jornadaATexto(base);
-              const tope=topeLegalJornada(base.vigencia_desde);
+                setForm({...form,clausulas_contrato_original:[clausula,...otras],jornada:[g.jornada,g.horario].filter(Boolean).join(" ")||form.jornada,horario:g.horario||form.horario}); };
+              const updBloque=(i,patch)=>{const nb=bloques.map((b,idx)=>{if(idx!==i)return b;let m={...b,...patch};if(!("horas_efectivas" in patch)&&!m.ajuste_manual)m.horas_efectivas=calcHorasEfectivasBloque(m);return m;});escribir(nb);};
+              const toggleDiaB=(i,d)=>{const ds=new Set(bloques[i].dias||[]);ds.has(d)?ds.delete(d):ds.add(d);updBloque(i,{dias:[...ds]});};
+              const addBloque=()=>escribir([...bloques,seedBloque(null)]);
+              const rmBloque=(i)=>{const nb=bloques.filter((_,idx)=>idx!==i);escribir(nb.length?nb:[seedBloque(null)]);};
+              const val=jp?validarJornada({tipo:tipoJ,dias:(bloques[0]||{}).dias,hora_inicio:(bloques[0]||{}).hora_inicio,hora_termino:(bloques[0]||{}).hora_termino,horas_semanales:totalEfectivas,vigencia_desde:vigDesde,colacion_minutos:(bloques[0]||{}).colacion_min}):{ok:true,errores:[],aviso:""};
+              const prev=jornadaATexto({tipo:tipoJ,tipo_jornada:bloques.length>1?"por_bloques":"uniforme",horas_semanales:totalEfectivas,bloques,dias:(bloques[0]||{}).dias,hora_inicio:(bloques[0]||{}).hora_inicio,hora_termino:(bloques[0]||{}).hora_termino,colacion_minutos:(bloques[0]||{}).colacion_min,colacion_imputable:(bloques[0]||{}).colacion_imputable});
               return (
                 <div style={{gridColumn:"1 / -1",marginTop:14,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px"}}>
                   <div style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Jornada del contrato laboral original (estructurada)</div>
                   {!jp&&<div style={{fontSize:12,color:C.textMuted,marginBottom:8}}>Jornada sin estructurar. Capture la cláusula del contrato original ya existente (no crea un acto nuevo; la vigencia es la fecha real del contrato). El cálculo legal exige esta estructura. Tope legal vigente: {tope} h/sem.</div>}
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <FL label="Tipo"><select style={INP} value={base.tipo} onChange={e=>upd({tipo:e.target.value})}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                    <FL label="Tipo"><select style={INP} value={tipoJ} onChange={e=>escribir(bloques,{tipo:e.target.value})}>
                       <option value="ordinaria">Ordinaria</option><option value="parcial">Parcial</option>
                       <option value="bisemanal">Bisemanal</option><option value="otra">Otra</option>
                     </select></FL>
-                    <FL label={`Horas semanales (tope ${tope})`}><input type="number" min={0} style={INP} value={base.horas_semanales} onChange={e=>upd({horas_semanales:e.target.value===""?"":Number(e.target.value)})}/></FL>
-                    <FL label="Hora inicio"><input type="time" style={INP} value={base.hora_inicio||""} onChange={e=>upd({hora_inicio:e.target.value})}/></FL>
-                    <FL label="Hora término"><input type="time" style={INP} value={base.hora_termino||""} onChange={e=>upd({hora_termino:e.target.value})}/></FL>
-                    <FL label="Colación (min)"><input type="number" min={0} style={INP} value={base.colacion_minutos} onChange={e=>upd({colacion_minutos:e.target.value===""?"":Number(e.target.value)})}/></FL>
-                    <FL label="Vigencia desde (fecha real del contrato)"><input type="date" style={INP} value={base.vigencia_desde||""} onChange={e=>upd({vigencia_desde:e.target.value})}/></FL>
+                    <FL label="Vigencia desde (fecha real del contrato)"><input type="date" style={INP} value={vigDesde||""} onChange={e=>escribir(bloques,{vigencia:e.target.value})}/></FL>
                   </div>
-                  <div style={{marginTop:8,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
-                    <span style={{fontSize:11,color:C.textMuted}}>Días:</span>
-                    {J1_DIAS_ORDEN.map(d=>(
-                      <button key={d} type="button" onClick={()=>toggleDia(d)} style={{padding:"3px 9px",borderRadius:6,fontSize:11,cursor:"pointer",border:`1px solid ${C.border}`,background:(base.dias||[]).includes(d)?C.accent:C.surface,color:(base.dias||[]).includes(d)?C.accentText:C.text}}>{J1_DIAS[d].slice(0,3)}</button>
-                    ))}
-                    <label style={{fontSize:11,color:C.textMuted,marginLeft:10,display:"flex",alignItems:"center",gap:4,cursor:"pointer"}}>
-                      <input type="checkbox" checked={!!base.colacion_imputable} onChange={e=>upd({colacion_imputable:e.target.checked})}/>Colación imputable
-                    </label>
-                  </div>
-                  <div style={{marginTop:8}}><FL label="Observaciones"><input style={INP} value={base.observaciones||""} onChange={e=>upd({observaciones:e.target.value})}/></FL></div>
-                  <div style={{marginTop:8,padding:"8px 10px",background:C.surface,border:`1px dashed ${C.border}`,borderRadius:6}}>
+                  {bloques.map((b,i)=>{ const calc=calcHorasEfectivasBloque(b); const dif=b.ajuste_manual&&Math.abs(calc-(Number(b.horas_efectivas)||0))>0.01;
+                    return (
+                    <div key={i} style={{border:`1px solid ${C.border}`,borderRadius:6,padding:"10px",marginBottom:8,background:C.surface}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                        <span style={{fontSize:11,fontWeight:700,color:C.textMuted}}>Bloque {i+1}</span>
+                        {bloques.length>1&&<button type="button" onClick={()=>rmBloque(i)} style={{fontSize:11,color:C.red,background:"none",border:"none",cursor:"pointer"}}>Quitar</button>}
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                        <FL label="Hora inicio"><input type="time" style={INP} value={b.hora_inicio||""} onChange={e=>updBloque(i,{hora_inicio:e.target.value})}/></FL>
+                        <FL label="Hora término"><input type="time" style={INP} value={b.hora_termino||""} onChange={e=>updBloque(i,{hora_termino:e.target.value})}/></FL>
+                        <FL label="Colación (min)"><input type="number" min={0} style={INP} value={b.colacion_min} onChange={e=>updBloque(i,{colacion_min:e.target.value===""?0:Number(e.target.value)})}/></FL>
+                        <FL label="Horas efectivas del bloque"><input type="number" min={0} step="0.01" style={INP} value={b.horas_efectivas} onChange={e=>updBloque(i,{horas_efectivas:e.target.value===""?"":Number(e.target.value),ajuste_manual:true})}/></FL>
+                      </div>
+                      <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
+                        <span style={{fontSize:11,color:C.textMuted}}>Días:</span>
+                        {J1_DIAS_ORDEN.map(d=>(<button key={d} type="button" onClick={()=>toggleDiaB(i,d)} style={{padding:"3px 9px",borderRadius:6,fontSize:11,cursor:"pointer",border:`1px solid ${C.border}`,background:(b.dias||[]).includes(d)?C.accent:C.surface,color:(b.dias||[]).includes(d)?C.accentText:C.text}}>{J1_DIAS[d].slice(0,3)}</button>))}
+                        <label style={{fontSize:11,color:C.textMuted,marginLeft:10,display:"flex",alignItems:"center",gap:4,cursor:"pointer"}}><input type="checkbox" checked={!!b.colacion_imputable} onChange={e=>updBloque(i,{colacion_imputable:e.target.checked})}/>Colación imputable</label>
+                      </div>
+                      <div style={{marginTop:6,fontSize:11,color:C.textMuted}}>Horas calculadas: <b>{calc} h</b>{dif&&<span style={{color:"#b45309"}}> · ajustado manualmente a {b.horas_efectivas} h</span>}{b.ajuste_manual&&<button type="button" onClick={()=>updBloque(i,{ajuste_manual:false,horas_efectivas:calc})} style={{marginLeft:8,fontSize:11,color:C.accentText,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>usar calculado</button>}</div>
+                    </div>);
+                  })}
+                  <button type="button" onClick={addBloque} style={{fontSize:12,padding:"5px 12px",borderRadius:6,border:`1px dashed ${C.border}`,background:C.surface,color:C.accentText,cursor:"pointer",marginBottom:8}}>+ Agregar bloque</button>
+                  <div style={{padding:"8px 10px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,marginBottom:8,fontSize:12,fontWeight:700,color:C.text}}>Total semanal pactado: {totalEfectivas} h <span style={{fontWeight:400,color:C.textMuted}}>(tope legal vigente: {tope} h)</span></div>
+                  <div style={{padding:"8px 10px",background:C.surface,border:`1px dashed ${C.border}`,borderRadius:6}}>
                     <div style={{fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase",marginBottom:3}}>Vista previa · texto generado para el contrato</div>
                     <div style={{fontSize:12,color:C.text}}>{[prev.jornada,prev.horario].filter(Boolean).join(" ")||"—"}</div>
                   </div>
