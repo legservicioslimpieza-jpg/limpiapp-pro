@@ -116,8 +116,16 @@ const validarJornada = (jp) => {
     const algunoIncompleto = jp.bloques.some(b => !(Array.isArray(b.dias) ? b.dias.length : !!b.dias) || !b.hora_inicio || !b.hora_termino);
     if (algunoIncompleto) e.push("Cada bloque debe indicar días, hora de inicio y hora de término.");
     const sumaBloques = Math.round(jp.bloques.reduce((s,b) => s + (Number(b.horas_efectivas) || 0), 0) * 100) / 100;
+    const avisos = [];
     if (Number(jp.horas_semanales) && Math.abs(sumaBloques - Number(jp.horas_semanales)) > 0.5)
-      aviso = `Las horas efectivas de los bloques suman ${sumaBloques} h, pero la jornada pactada indica ${jp.horas_semanales} h.`;
+      avisos.push(`Las horas efectivas de los bloques suman ${sumaBloques} h, pero la jornada pactada indica ${jp.horas_semanales} h.`);
+    // JORNADA.3-A: validación diaria (jornada ordinaria). Solo advertencia, no bloqueo.
+    const MAX_DIARIO_ORDINARIO = 10;
+    const NOMBRE_DIA = { lu:"lunes", ma:"martes", mi:"miércoles", ju:"jueves", vi:"viernes", sa:"sábado", do:"domingo" };
+    const hpd = horasPorDia(jp.bloques);
+    Object.keys(hpd).forEach(d => { if (hpd[d] > MAX_DIARIO_ORDINARIO + 0.01) avisos.push(`El día ${NOMBRE_DIA[d]||d} suma ${hpd[d]} h efectivas. Supera el máximo diario ordinario (${MAX_DIARIO_ORDINARIO} h).`); });
+    solapesPorDia(jp.bloques).forEach(d => avisos.push(`Existe superposición horaria el ${NOMBRE_DIA[d]||d} entre bloques.`));
+    aviso = avisos.join(" ");
   } else {
     if (!Array.isArray(jp.dias) || jp.dias.length === 0) e.push("Debe indicar al menos un día.");
     if (jp.hora_inicio && jp.hora_termino && jp.hora_inicio >= jp.hora_termino)
@@ -289,6 +297,8 @@ const limpiarPayloadTrabajador = (obj) => {
   const clean = { ...obj };
   delete clean.jornada; delete clean.horario; delete clean.jornada_pactada;
   Object.keys(clean).forEach(k => { if (/^fecha/.test(k) && clean[k] === "") clean[k] = null; });
+  // MONEDA.1: campos monetarios vacíos -> 0 (número puro), nunca "" ni null en la base.
+  ["sueldo_base","bono_asistencia","bono_movilizacion","bono_colacion"].forEach(k => { if (clean[k] === "" || clean[k] === null || clean[k] === undefined) clean[k] = 0; else clean[k] = Math.max(0, Number(clean[k])||0); });
   return clean;
 };
 
@@ -305,14 +315,24 @@ const formatRutCL = r => { const c=limpiarRutCL(r); if(c.length<2) return String
 // CC.1: tipos de centro EXTERNOS que requieren RUT del cliente (CORPORATIVO es interno de LEG).
 const CC_TIPOS_EXTERNOS = ["LICITACION_PUBLICA","LICITACION_PRIVADA","PRIVADO_PERMANENTE","EVENTUAL","LICITACION","PRIVADO","CONTRATO_PRIVADO"];
 const ccEsExterno = tipo => CC_TIPOS_EXTERNOS.includes(tipo||"LICITACION");
-// A.1: props para input de MONTO (vacío editable, sin "0" pegado, no negativos, normaliza ceros a la izquierda).
+
+// MONEDA.1: normaliza texto monetario. "01000"->"1000", "0000"->"0" al perder foco, ""->"". Solo dígitos, sin ceros a la izquierda.
+const normalizeMoneyInput = (value) => String(value ?? "").replace(/[^\d]/g, "").replace(/^0+(?=\d)/, "");
+// A.1/BASE.1.2/MONEDA.1: input de MONTO. type text (control total del string) para que el cero inicial no quede pegado.
 const montoInputProps = (val, onNum) => ({
-  type:"number", min:0, inputMode:"numeric", placeholder:"Ej: 10000",
-  value:(val===null||val===undefined||val==="")?"":val,
+  type:"text", inputMode:"numeric", placeholder:"Ej: 10000",
+  value:(val===null||val===undefined||val==="")?"":String(val),
   onFocus:e=>{ try{ e.target.select(); }catch(_){} },
-  onChange:e=>{ const r=e.target.value; onNum(r===""?"":Math.max(0,Number(r))); },
+  onChange:e=>{ const clean=normalizeMoneyInput(e.target.value); onNum(clean===""?"":Math.max(0, Number(clean))); },
 });
-// A.2: props para input de HORAS (acepta decimales con coma o punto: 0,5 / 1.25). type text para permitir la coma.
+// BASE.1.2: input de minutos/enteros (colación, etc.). Vacío -> 0. Mismo tratamiento de ceros a la izquierda.
+const minutosInputProps = (val, onNum) => ({
+  type:"text", inputMode:"numeric",
+  value:(val===null||val===undefined||val==="")?"":String(val),
+  onFocus:e=>{ try{ e.target.select(); }catch(_){} },
+  onChange:e=>{ const clean=normalizeMoneyInput(e.target.value); onNum(clean===""?0:Math.max(0, Number(clean))); },
+});
+
 // A.2: normaliza horas a número (coma->punto) al guardar; "" o inválido -> 0; nunca negativo.
 const horasANumero = (v) => { const n=Number(String(v??"").replace(",",".")); return (isFinite(n)&&n>=0)?n:0; };
 // A (mejora): parsea duración flexible -> horas decimales. "01:15"->1.25, "1:15"->1.25, "0:30"->0.5,
@@ -361,6 +381,32 @@ const calcHorasEfectivasBloque = (b) => {
   const dia = Math.max(0, bruto - col);
   const ndias = Array.isArray(b.dias) ? b.dias.length : (b.dias ? textoADiasOperativo(b.dias).length : 0);
   return Math.round(dia * ndias * 100)/100;
+};
+// JORNADA.3-A: días de un bloque como lista de claves normalizadas.
+const diasDeBloque = (b) => Array.isArray(b.dias) ? b.dias : (b.dias ? textoADiasOperativo(b.dias) : []);
+// JORNADA.3-A: horas efectivas por día (un bloque aporta su duración diaria a cada uno de sus días).
+const horasPorDia = (bloques) => {
+  const acc = {};
+  (bloques||[]).forEach(b => {
+    const bruto = difHorasDec(b.hora_inicio, b.hora_termino);
+    const col = b.colacion_imputable ? 0 : (Number(b.colacion_min ?? b.colacion_minutos)||0)/60;
+    const horasDia = Math.max(0, Math.round((bruto - col)*100)/100);
+    diasDeBloque(b).forEach(d => { acc[d] = Math.round(((acc[d]||0) + horasDia)*100)/100; });
+  });
+  return acc;
+};
+// JORNADA.3-A: días con solape horario entre 2+ bloques (max de inicios < min de términos en minutos).
+const solapesPorDia = (bloques) => {
+  const tToMin = t => { const p=String(t||"").split(":"); return (Number(p[0])||0)*60+(Number(p[1])||0); };
+  const porDia = {};
+  (bloques||[]).forEach(b => { if(!b.hora_inicio||!b.hora_termino) return; diasDeBloque(b).forEach(d => { (porDia[d]=porDia[d]||[]).push([tToMin(b.hora_inicio), tToMin(b.hora_termino)]); }); });
+  const dias = [];
+  Object.keys(porDia).forEach(d => {
+    const iv = porDia[d]; if(iv.length<2) return;
+    iv.sort((a,b)=>a[0]-b[0]);
+    for(let i=1;i<iv.length;i++){ if(iv[i][0] < iv[i-1][1]){ dias.push(d); break; } }
+  });
+  return dias;
 };
 const dateNoon = v => { const d=dateOnly(v); return d ? `${d}T12:00:00` : null; };
 const parseNoon = v => v ? new Date(`${dateOnly(v)}T12:00:00`) : null;
@@ -3846,7 +3892,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           )}
           {tab==="remuneracion"&&(
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
-              <FL label="Sueldo base ($)"><input type="number" style={INP} value={form.sueldo_base||0} onChange={e=>setForm({...form,sueldo_base:Number(e.target.value)})}/></FL>
+              <FL label="Sueldo base ($)"><input style={INP} {...montoInputProps(form.sueldo_base, v=>setForm({...form,sueldo_base:v}))}/></FL>
               <FL label="Método gratificación">
                 <select style={INP} value={form.metodo_gratificacion||"25% MENSUAL"} onChange={e=>setForm({...form,metodo_gratificacion:e.target.value})}>
                   <option value="25% MENSUAL">25% mensual (tope legal IMM)</option>
@@ -3873,9 +3919,9 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               )}
               <FL label="AFP"><select style={INP} value={form.afp||"MODELO"} onChange={e=>setForm({...form,afp:e.target.value})}>{AFP_LIST.map(a=><option key={a}>{a}</option>)}</select></FL>
               <FL label="Salud"><select style={INP} value={form.salud||"FONASA"} onChange={e=>setForm({...form,salud:e.target.value})}>{SALUD_LIST.map(s=><option key={s}>{s}</option>)}</select></FL>
-              <FL label="Bono asistencia ($)"><input type="number" style={INP} value={form.bono_asistencia||0} onChange={e=>setForm({...form,bono_asistencia:Number(e.target.value)})}/></FL>
-              <FL label="Bono movilización ($)"><input type="number" style={INP} value={form.bono_movilizacion||0} onChange={e=>setForm({...form,bono_movilizacion:Number(e.target.value)})}/></FL>
-              <FL label="Bono colación ($)"><input type="number" style={INP} value={form.bono_colacion||0} onChange={e=>setForm({...form,bono_colacion:Number(e.target.value)})}/></FL>
+              <FL label="Bono asistencia ($)"><input style={INP} {...montoInputProps(form.bono_asistencia, v=>setForm({...form,bono_asistencia:v}))}/></FL>
+              <FL label="Bono movilización ($)"><input style={INP} {...montoInputProps(form.bono_movilizacion, v=>setForm({...form,bono_movilizacion:v}))}/></FL>
+              <FL label="Bono colación ($)"><input style={INP} {...montoInputProps(form.bono_colacion, v=>setForm({...form,bono_colacion:v}))}/></FL>
               <FL label="Tipo de trabajador">
                 <select style={INP} value={form.pensionado?"pensionado":"activo"} onChange={e=>setForm({...form,pensionado:e.target.value==="pensionado"})}>
                   <option value="activo">Activo (cotiza AFP y CES)</option>
@@ -3942,7 +3988,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                         <FL label="Hora inicio"><HoraInput value={b.hora_inicio||""} onChange={v=>updBloque(i,{hora_inicio:v})}/></FL>
                         <FL label="Hora término"><HoraInput value={b.hora_termino||""} onChange={v=>updBloque(i,{hora_termino:v})}/></FL>
-                        <FL label="Colación (min)"><input type="number" min={0} style={INP} value={b.colacion_min} onFocus={e=>{try{e.target.select();}catch(_){}}} onChange={e=>updBloque(i,{colacion_min:e.target.value===""?0:Number(e.target.value)})}/></FL>
+                        <FL label="Colación (min)"><input style={INP} {...minutosInputProps(b.colacion_min, v=>updBloque(i,{colacion_min:v}))}/></FL>
                         <FL label="Horas efectivas del bloque"><input type="number" min={0} step="0.01" style={INP} value={b.horas_efectivas} onFocus={e=>{try{e.target.select();}catch(_){}}} onChange={e=>updBloque(i,{horas_efectivas:e.target.value===""?"":Number(e.target.value),ajuste_manual:true})}/></FL>
                       </div>
                       <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
@@ -3960,7 +4006,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     <div style={{fontSize:12,color:C.text}}>{[prev.jornada,prev.horario].filter(Boolean).join(" ")||"—"}</div>
                   </div>
                   {jp&&!val.ok&&val.errores.map((er,i)=>(<div key={i} style={{marginTop:6,fontSize:11,color:C.red}}>⚠ {er}</div>))}
-                  {jp&&val.ok&&val.aviso&&<div style={{marginTop:6,fontSize:11,color:"#b45309"}}>ℹ {val.aviso}</div>}
+                  {jp&&val.aviso&&<div style={{marginTop:6,fontSize:11,color:"#b45309"}}>ℹ {val.aviso}</div>}
                 </div>
               );
             })()}
@@ -3998,7 +4044,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     </FL>
                     <FL label="Estado asignación"><select style={INP} value={asigForm.estado_asig||"activa"} onChange={e=>setAsigForm({...asigForm,estado_asig:e.target.value,activo:e.target.value!=="terminada"})}><option value="activa">Activa</option><option value="terminada">Terminada</option><option value="suspendida">Suspendida</option></select></FL>
                     <FL label="Monto asociado al trabajador en esta asignación ($)">
-                      <input type="number" min={0} disabled={asigForm.modalidad_cobertura==="holgura_remunerada"} style={{...INP,...(asigForm.modalidad_cobertura==="holgura_remunerada"?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={(asigForm.sueldo_asignado===null||asigForm.sueldo_asignado===undefined||asigForm.sueldo_asignado==="")?"":asigForm.sueldo_asignado} placeholder="Ej: 100000" onFocus={e=>{try{e.target.select();}catch(_){}}} onChange={e=>{const raw=e.target.value;const m=raw===""?"":Number(raw);setAsigForm({...asigForm,sueldo_asignado:m,porcentaje_costo:(form.sueldo_base>0&&raw!==""?Math.round(Number(raw)/form.sueldo_base*10000)/100:0)});}} title="Remuneración/componentes asociados a esta asignación para este trabajador. No es el ingreso del contrato."/>
+                      <input type="number" min={0} disabled={asigForm.modalidad_cobertura==="holgura_remunerada"} style={{...INP,...(asigForm.modalidad_cobertura==="holgura_remunerada"?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={(asigForm.sueldo_asignado===null||asigForm.sueldo_asignado===undefined||asigForm.sueldo_asignado==="")?"":asigForm.sueldo_asignado} placeholder="Ej: 100000" onFocus={e=>{try{e.target.select();}catch(_){}}} onChange={e=>{const raw=String(e.target.value).replace(/[^\d]/g,"");const m=raw===""?"":Math.max(0,Number(raw));setAsigForm({...asigForm,sueldo_asignado:m,porcentaje_costo:(form.sueldo_base>0&&raw!==""?Math.round(Number(raw)/form.sueldo_base*10000)/100:0)});}} title="Remuneración/componentes asociados a esta asignación para este trabajador. No es el ingreso del contrato."/>
                       {form.sueldo_base>0&&Number(asigForm.sueldo_asignado)>0&&<div style={{fontSize:10,color:C.textMuted,marginTop:3}}>≈ {fmtPct(Number(asigForm.sueldo_asignado)/form.sueldo_base*100)} del sueldo base (dato auxiliar)</div>}
                     </FL>
                     <FL label="Modalidad de cobertura (opcional)"><select style={INP} value={asigForm.modalidad_cobertura||""} onChange={e=>{const val=e.target.value||null;const patch={modalidad_cobertura:val};if(val==="holgura_remunerada"){patch.sueldo_asignado="";patch.bono_movilizacion="";patch.bono_colacion="";patch.bono_asistencia="";patch.gratificacion_metodo_asig="no_aplica";patch.gratificacion_monto="";patch.gratificacion_porcentaje_asig="";patch.gratificacion_observacion_asig="";patch.porcentaje_costo=0;}setAsigForm({...asigForm,...patch});}}><option value="">— Seleccionar modalidad —</option><option value="exclusivo">Trabajador exclusivo de la asignación</option><option value="reasignacion_parcial">Reasignación parcial dentro de jornada</option><option value="holgura_remunerada">Uso de holgura horaria ya remunerada</option><option value="pago_adicional">Pago adicional por nueva asignación</option><option value="horas_extra">Horas extra autorizadas</option><option value="volante_reemplazo">Trabajador volante / reemplazo</option></select>{asigForm.modalidad_cobertura==="holgura_remunerada"&&<div style={{fontSize:11,color:C.textMuted,marginTop:4,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 8px"}}>Esta modalidad no agrega nuevos haberes a la liquidación. Solo registra cobertura operativa usando jornada ya remunerada.</div>}</FL>
