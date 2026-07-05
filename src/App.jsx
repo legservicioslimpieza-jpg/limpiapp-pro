@@ -478,34 +478,37 @@ function FL({label,children,span}) {
   );
 }
 const INP={width:"100%",background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,boxSizing:"border-box"};
-// Campo de fecha con escritura libre dd/mm/aaaa (valida solo al completar 10 caracteres) + calendario.
-// Permite fechas futuras (salvo que se pase max). No transforma ni guarda fechas parciales.
+// FECHA.1-lite: campo de fecha con escritura libre. Acepta dd/mm/aaaa, "01082016" (8 dígitos) y "01-08-2016".
+// Parsea al completar y en onBlur. Guarda ISO yyyy-mm-dd. Fecha inválida => error visible, sin commit silencioso.
 function FechaInput({value,onChange,style,max}){
   const isoToDisp=iso=>{ if(!iso) return ''; const p=String(iso).split('T')[0].split('-'); return (p.length===3&&p[0]&&p[1]&&p[2])?`${p[2]}/${p[1]}/${p[0]}`:''; };
   const [txt,setTxt]=useState(isoToDisp(value));
   const [msg,setMsg]=useState('');
   useEffect(()=>{ setTxt(isoToDisp(value)); },[value]);
-  const commit=v=>{
-    if(v.length===0){ setMsg(''); onChange(''); return; }
-    if(v.length<10){ setMsg('Completa la fecha en formato dd/mm/aaaa'); return; }
+  const aDisplay=v=>{ const s=String(v||'').trim(); const soloDig=s.replace(/\D/g,''); if(/^\d{8}$/.test(soloDig)) return `${soloDig.slice(0,2)}/${soloDig.slice(2,4)}/${soloDig.slice(4)}`; const m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/); if(m) return `${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/${m[3]}`; return s; };
+  const commit=raw=>{
+    const v=aDisplay(raw);
+    if(v.length===0){ setMsg(''); onChange(''); return true; }
     const m=v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if(!m){ setMsg('Completa la fecha en formato dd/mm/aaaa'); return; }
+    if(!m){ setMsg('Fecha incompleta o inválida (usa dd/mm/aaaa)'); return false; }
     const d=m[1],mo=m[2],y=m[3]; const iso=`${y}-${mo}-${d}`; const dt=new Date(iso+'T12:00:00');
-    if(isNaN(dt)||dt.getFullYear()!=+y||(dt.getMonth()+1)!=+mo||dt.getDate()!=+d){ setMsg('Fecha inválida'); return; }
-    if(max&&iso>max){ setMsg('La fecha no puede ser posterior a hoy'); return; }
-    setMsg(''); onChange(iso);
+    if(isNaN(dt)||dt.getFullYear()!=+y||(dt.getMonth()+1)!=+mo||dt.getDate()!=+d){ setMsg('Fecha inválida'); return false; }
+    if(max&&iso>max){ setMsg('La fecha no puede ser posterior a hoy'); return false; }
+    setMsg(''); setTxt(v); onChange(iso); return true;
   };
-  const onText=e=>{ const v=e.target.value.replace(/[^\d/]/g,'').slice(0,10); setTxt(v); if(v.length===10||v.length===0) commit(v); else setMsg('Completa la fecha en formato dd/mm/aaaa'); };
+  const onText=e=>{ const v=e.target.value.replace(/[^\d/\-]/g,'').slice(0,10); setTxt(v); const dig=v.replace(/\D/g,''); if(v.length===0){ commit(''); } else if(v.length===10||dig.length===8){ commit(v); } else { setMsg('Completa la fecha en formato dd/mm/aaaa'); } };
+  const onBlurText=()=>{ if(txt&&txt.trim()){ commit(txt); } };
   return (
     <div>
       <div style={{display:'flex',gap:6,alignItems:'center'}}>
-        <input style={{...(style||INP),flex:1}} value={txt} onChange={onText} placeholder="dd/mm/aaaa" inputMode="numeric" maxLength={10}/>
+        <input style={{...(style||INP),flex:1}} value={txt} onChange={onText} onBlur={onBlurText} placeholder="dd/mm/aaaa" inputMode="numeric" maxLength={10}/>
         <input type="date" aria-label="Abrir calendario" title="Calendario" style={{width:36,minWidth:36,padding:'6px 2px',border:`1px solid ${C.border}`,borderRadius:6,background:C.surface,color:C.text,boxSizing:'border-box',cursor:'pointer'}} value={value?String(value).split('T')[0]:''} max={max||undefined} onChange={e=>{ const iv=e.target.value; if(iv){ setTxt(isoToDisp(iv)); setMsg(''); onChange(iv); } }}/>
       </div>
       {msg&&<div style={{fontSize:11,color:'#9a3412',marginTop:4}}>{msg}</div>}
     </div>
   );
 }
+
 function PrimaryBtn({onClick,children,disabled,color,small}){
   return <button onClick={onClick} disabled={disabled} style={{background:disabled?"#e5e7eb":(color||C.accent),color:"#fff",border:"none",borderRadius:6,padding:small?"5px 12px":"7px 16px",fontSize:12,fontWeight:600,cursor:disabled?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:5}}>{children}</button>;
 }
