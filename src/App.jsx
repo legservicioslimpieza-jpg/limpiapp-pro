@@ -509,6 +509,32 @@ function FechaInput({value,onChange,style,max}){
   );
 }
 
+// HORA.1-lite: campo de hora con escritura fluida. Reusa fmtHoraOperativa (normaliza) + horaOperativaValida (valida).
+// Acepta "9"->09:00, "900"->09:00, "0930"->09:30, "1830"->18:30, "18:30". Rechaza 25:00, 18:75. Picker nativo secundario.
+function HoraInput({value,onChange,style}){
+  const [txt,setTxt]=useState(value||'');
+  const [msg,setMsg]=useState('');
+  useEffect(()=>{ setTxt(value||''); },[value]);
+  const commit=raw=>{
+    const s=String(raw||'').trim();
+    if(s===''){ setMsg(''); setTxt(''); onChange(''); return true; }
+    const norm=fmtHoraOperativa(s);
+    if(!horaOperativaValida(norm)){ setMsg('Hora inválida (usa HH:mm, 00:00–23:59)'); return false; }
+    setMsg(''); setTxt(norm); onChange(norm); return true;
+  };
+  const onText=e=>{ const v=e.target.value.replace(/[^\d:]/g,'').slice(0,5); setTxt(v); const dig=v.replace(/\D/g,''); if(v===''){ commit(''); } else if(v.includes(':')?v.length>=4:dig.length>=3){ /* espera blur */ setMsg(''); } };
+  const onBlurText=()=>{ if(txt&&String(txt).trim()) commit(txt); };
+  return (
+    <div>
+      <div style={{display:'flex',gap:6,alignItems:'center'}}>
+        <input style={{...(style||INP),flex:1}} value={txt} onChange={onText} onBlur={onBlurText} placeholder="HH:mm (ej: 0930)" inputMode="numeric" maxLength={5}/>
+        <input type="time" aria-label="Selector de hora" title="Selector de hora" style={{width:36,minWidth:36,padding:'6px 2px',border:`1px solid ${C.border}`,borderRadius:6,background:C.surface,color:C.text,boxSizing:'border-box',cursor:'pointer'}} value={horaOperativaValida(value||'')?value:''} onChange={e=>{ const iv=e.target.value; if(iv){ setTxt(iv); setMsg(''); onChange(iv); } }}/>
+      </div>
+      {msg&&<div style={{fontSize:11,color:'#9a3412',marginTop:4}}>{msg}</div>}
+    </div>
+  );
+}
+
 function PrimaryBtn({onClick,children,disabled,color,small}){
   return <button onClick={onClick} disabled={disabled} style={{background:disabled?"#e5e7eb":(color||C.accent),color:"#fff",border:"none",borderRadius:6,padding:small?"5px 12px":"7px 16px",fontSize:12,fontWeight:600,cursor:disabled?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:5}}>{children}</button>;
 }
@@ -3905,8 +3931,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                         {bloques.length>1&&<button type="button" onClick={()=>rmBloque(i)} style={{fontSize:11,color:C.red,background:"none",border:"none",cursor:"pointer"}}>Quitar</button>}
                       </div>
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                        <FL label="Hora inicio"><input type="time" style={INP} value={b.hora_inicio||""} onChange={e=>updBloque(i,{hora_inicio:e.target.value})}/></FL>
-                        <FL label="Hora término"><input type="time" style={INP} value={b.hora_termino||""} onChange={e=>updBloque(i,{hora_termino:e.target.value})}/></FL>
+                        <FL label="Hora inicio"><HoraInput value={b.hora_inicio||""} onChange={v=>updBloque(i,{hora_inicio:v})}/></FL>
+                        <FL label="Hora término"><HoraInput value={b.hora_termino||""} onChange={v=>updBloque(i,{hora_termino:v})}/></FL>
                         <FL label="Colación (min)"><input type="number" min={0} style={INP} value={b.colacion_min} onChange={e=>updBloque(i,{colacion_min:e.target.value===""?0:Number(e.target.value)})}/></FL>
                         <FL label="Horas efectivas del bloque"><input type="number" min={0} step="0.01" style={INP} value={b.horas_efectivas} onChange={e=>updBloque(i,{horas_efectivas:e.target.value===""?"":Number(e.target.value),ajuste_manual:true})}/></FL>
                       </div>
@@ -3985,18 +4011,16 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                       const jGen=(ini,fin)=>[asigForm.dias_semana||"",(ini||fin)?`${ini}-${fin}`:""].filter(Boolean).join(" ");
                       // inicio: recompone término desde la duración vigente (mantiene duración)
                       const onInicioBlur=(val)=>{const ini=fmtHoraOperativa(val);const fin=(ini&&durDec>0)?sumaHoraFin(ini,durDec):hFin;const nh=(ini||fin)?`${ini}-${fin}`:"";setAsigForm({...asigForm,horario:nh,jornada:jGen(ini,fin)});};
-                      const onInicioChange=(val)=>{const ini=val.replace(/[^\d:]/g,"").slice(0,5);const nh=(ini||hFin)?`${ini}-${hFin}`:"";setAsigForm({...asigForm,horario:nh,jornada:jGen(ini,hFin)});};
                       // término: recalcula la duración
                       const onTerminoBlur=(val)=>{const fin=fmtHoraOperativa(val);const dur=(hIni&&fin)?difHorasDec(hIni,fin):durDec;const nh=(hIni||fin)?`${hIni}-${fin}`:"";setAsigForm({...asigForm,horario:nh,horas_semanales:dur,_durRaw:duracionATexto(dur),jornada:jGen(hIni,fin)});};
-                      const onTerminoChange=(val)=>{const fin=val.replace(/[^\d:]/g,"").slice(0,5);const nh=(hIni||fin)?`${hIni}-${fin}`:"";setAsigForm({...asigForm,horario:nh,jornada:jGen(hIni,fin)});};
                       // duración: recalcula término (mantiene inicio)
                       const onDuracionBlur=(val)=>{const dec=parseDuracion(val);const fin=(hIni&&dec>0)?sumaHoraFin(hIni,dec):hFin;const nh=(hIni||fin)?`${hIni}-${fin}`:(asigForm.horario||"");setAsigForm({...asigForm,horas_semanales:dec,_durRaw:duracionATexto(dec),horario:nh,jornada:jGen(hIni,fin)});};
                       const diasSel=textoADiasOperativo(asigForm.dias_semana);
                       const toggleDia=(k)=>{const s=diasSel.includes(k)?diasSel.filter(x=>x!==k):[...diasSel,k];const txt=diasATextoOperativo(s);setAsigForm({...asigForm,dias_semana:txt,jornada:[txt,asigForm.horario||""].filter(Boolean).join(" ")});};
                       const jornadaGen=[asigForm.dias_semana||"",asigForm.horario||""].filter(Boolean).join(" ");
                       return (<>
-                        <FL label="Hora inicio (operativa)"><input style={INP} value={hIni} inputMode="numeric" placeholder="escribe 0730 → 07:30" onChange={e=>onInicioChange(e.target.value)} onBlur={e=>onInicioBlur(e.target.value)}/></FL>
-                        <FL label="Hora término (operativa)"><input style={INP} value={hFin} inputMode="numeric" placeholder="escribe 1700 → 17:00" onChange={e=>onTerminoChange(e.target.value)} onBlur={e=>onTerminoBlur(e.target.value)}/></FL>
+                        <FL label="Hora inicio (operativa)"><HoraInput value={hIni} onChange={v=>onInicioBlur(v)}/></FL>
+                        <FL label="Hora término (operativa)"><HoraInput value={hFin} onChange={v=>onTerminoBlur(v)}/></FL>
                         <FL label="Duración de asignación para costeo operativo">
                           <input style={INP} value={durDisplay} placeholder="Ej: 01:15 ó 1,25" onChange={e=>setAsigForm({...asigForm,_durRaw:e.target.value})} onBlur={e=>onDuracionBlur(e.target.value)} title="Duración operativa para costeo. Se guarda como decimal. NO es la jornada legal (esa se toma del contrato estructurado)."/>
                           <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>Ej: 00:30 = media hora, 01:15 = una hora y quince minutos.{durDec>0?` Se guarda como ${durDec} h.`:""}</div>
