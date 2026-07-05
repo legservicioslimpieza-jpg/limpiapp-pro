@@ -105,21 +105,31 @@ const validarJornada = (jp) => {
   const e = [];
   if (!jp) return { ok:false, errores:["Sin datos de jornada."], aviso:"" };
   if (!jp.vigencia_desde) e.push("Falta la fecha de vigencia (debe ser la fecha real del contrato, no la de captura).");
-  if (!Array.isArray(jp.dias) || jp.dias.length === 0) e.push("Debe indicar al menos un día.");
-  if (jp.hora_inicio && jp.hora_termino && jp.hora_inicio >= jp.hora_termino)
-    e.push("La hora de inicio debe ser anterior a la de término.");
+  const tieneBloques = Array.isArray(jp.bloques) && jp.bloques.length >= 1;
   if (!(Number(jp.horas_semanales) > 0)) e.push("Las horas semanales deben ser mayores a 0.");
   const tope = topeLegalJornada(jp.vigencia_desde);
   if (Number(jp.horas_semanales) > tope)
     e.push(`Las horas semanales (${jp.horas_semanales}) superan el tope legal vigente: ${tope} h (parámetro normativo a la fecha ${jp.vigencia_desde || "actual"}).`);
   let aviso = "";
-  if (jp.hora_inicio && jp.hora_termino && Array.isArray(jp.dias) && jp.dias.length) {
-    const tToMin = t => { const p = String(t).split(":").map(Number); return (p[0]||0)*60 + (p[1]||0); };
-    const colResta = jp.colacion_imputable ? 0 : (Number(jp.colacion_minutos) || 0);
-    const minDia = Math.max(0, tToMin(jp.hora_termino) - tToMin(jp.hora_inicio) - colResta);
-    const hImpl = (minDia * jp.dias.length) / 60;
-    if (Number(jp.horas_semanales) && Math.abs(hImpl - Number(jp.horas_semanales)) > 2)
-      aviso = `Las horas implícitas (~${hImpl.toFixed(1)}) no calzan con las ${jp.horas_semanales} pactadas. Puede ser una distribución irregular legítima.`;
+  if (tieneBloques) {
+    // J1.2: validar por bloques. La suma de horas efectivas debe calzar con las pactadas; NO usar horas implícitas simples.
+    const algunoIncompleto = jp.bloques.some(b => !(Array.isArray(b.dias) ? b.dias.length : !!b.dias) || !b.hora_inicio || !b.hora_termino);
+    if (algunoIncompleto) e.push("Cada bloque debe indicar días, hora de inicio y hora de término.");
+    const sumaBloques = Math.round(jp.bloques.reduce((s,b) => s + (Number(b.horas_efectivas) || 0), 0) * 100) / 100;
+    if (Number(jp.horas_semanales) && Math.abs(sumaBloques - Number(jp.horas_semanales)) > 0.5)
+      aviso = `Las horas efectivas de los bloques suman ${sumaBloques} h, pero la jornada pactada indica ${jp.horas_semanales} h.`;
+  } else {
+    if (!Array.isArray(jp.dias) || jp.dias.length === 0) e.push("Debe indicar al menos un día.");
+    if (jp.hora_inicio && jp.hora_termino && jp.hora_inicio >= jp.hora_termino)
+      e.push("La hora de inicio debe ser anterior a la de término.");
+    if (jp.hora_inicio && jp.hora_termino && Array.isArray(jp.dias) && jp.dias.length) {
+      const tToMin = t => { const p = String(t).split(":").map(Number); return (p[0]||0)*60 + (p[1]||0); };
+      const colResta = jp.colacion_imputable ? 0 : (Number(jp.colacion_minutos) || 0);
+      const minDia = Math.max(0, tToMin(jp.hora_termino) - tToMin(jp.hora_inicio) - colResta);
+      const hImpl = (minDia * jp.dias.length) / 60;
+      if (Number(jp.horas_semanales) && Math.abs(hImpl - Number(jp.horas_semanales)) > 2)
+        aviso = `Las horas implícitas (~${hImpl.toFixed(1)}) no calzan con las ${jp.horas_semanales} pactadas. Puede ser una distribución irregular legítima.`;
+    }
   }
   return { ok: e.length === 0, errores: e, aviso };
 };
@@ -299,6 +309,7 @@ const ccEsExterno = tipo => CC_TIPOS_EXTERNOS.includes(tipo||"LICITACION");
 const montoInputProps = (val, onNum) => ({
   type:"number", min:0, inputMode:"numeric", placeholder:"Ej: 10000",
   value:(val===null||val===undefined||val==="")?"":val,
+  onFocus:e=>{ try{ e.target.select(); }catch(_){} },
   onChange:e=>{ const r=e.target.value; onNum(r===""?"":Math.max(0,Number(r))); },
 });
 // A.2: props para input de HORAS (acepta decimales con coma o punto: 0,5 / 1.25). type text para permitir la coma.
@@ -526,10 +537,7 @@ function HoraInput({value,onChange,style}){
   const onBlurText=()=>{ if(txt&&String(txt).trim()) commit(txt); };
   return (
     <div>
-      <div style={{display:'flex',gap:6,alignItems:'center'}}>
-        <input style={{...(style||INP),flex:1}} value={txt} onChange={onText} onBlur={onBlurText} placeholder="HH:mm (ej: 0930)" inputMode="numeric" maxLength={5}/>
-        <input type="time" aria-label="Selector de hora" title="Selector de hora" style={{width:36,minWidth:36,padding:'6px 2px',border:`1px solid ${C.border}`,borderRadius:6,background:C.surface,color:C.text,boxSizing:'border-box',cursor:'pointer'}} value={horaOperativaValida(value||'')?value:''} onChange={e=>{ const iv=e.target.value; if(iv){ setTxt(iv); setMsg(''); onChange(iv); } }}/>
-      </div>
+      <input style={{...(style||INP)}} value={txt} onChange={onText} onBlur={onBlurText} placeholder="HH:mm (ej: 0930)" inputMode="numeric" maxLength={5}/>
       {msg&&<div style={{fontSize:11,color:'#9a3412',marginTop:4}}>{msg}</div>}
     </div>
   );
@@ -3910,7 +3918,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               const toggleDiaB=(i,d)=>{const ds=new Set(bloques[i].dias||[]);ds.has(d)?ds.delete(d):ds.add(d);updBloque(i,{dias:[...ds]});};
               const addBloque=()=>escribir([...bloques,seedBloque(null)]);
               const rmBloque=(i)=>{const nb=bloques.filter((_,idx)=>idx!==i);escribir(nb.length?nb:[seedBloque(null)]);};
-              const val=jp?validarJornada({tipo:tipoJ,dias:(bloques[0]||{}).dias,hora_inicio:(bloques[0]||{}).hora_inicio,hora_termino:(bloques[0]||{}).hora_termino,horas_semanales:totalEfectivas,vigencia_desde:vigDesde,colacion_minutos:(bloques[0]||{}).colacion_min}):{ok:true,errores:[],aviso:""};
+              const val=jp?validarJornada({tipo:tipoJ,bloques,dias:(bloques[0]||{}).dias,hora_inicio:(bloques[0]||{}).hora_inicio,hora_termino:(bloques[0]||{}).hora_termino,horas_semanales:totalEfectivas,vigencia_desde:vigDesde,colacion_minutos:(bloques[0]||{}).colacion_min}):{ok:true,errores:[],aviso:""};
+
               const prev=jornadaATexto({tipo:tipoJ,tipo_jornada:bloques.length>1?"por_bloques":"uniforme",horas_semanales:totalEfectivas,bloques,dias:(bloques[0]||{}).dias,hora_inicio:(bloques[0]||{}).hora_inicio,hora_termino:(bloques[0]||{}).hora_termino,colacion_minutos:(bloques[0]||{}).colacion_min,colacion_imputable:(bloques[0]||{}).colacion_imputable});
               return (
                 <div style={{gridColumn:"1 / -1",marginTop:14,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px"}}>
@@ -3933,8 +3942,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                         <FL label="Hora inicio"><HoraInput value={b.hora_inicio||""} onChange={v=>updBloque(i,{hora_inicio:v})}/></FL>
                         <FL label="Hora término"><HoraInput value={b.hora_termino||""} onChange={v=>updBloque(i,{hora_termino:v})}/></FL>
-                        <FL label="Colación (min)"><input type="number" min={0} style={INP} value={b.colacion_min} onChange={e=>updBloque(i,{colacion_min:e.target.value===""?0:Number(e.target.value)})}/></FL>
-                        <FL label="Horas efectivas del bloque"><input type="number" min={0} step="0.01" style={INP} value={b.horas_efectivas} onChange={e=>updBloque(i,{horas_efectivas:e.target.value===""?"":Number(e.target.value),ajuste_manual:true})}/></FL>
+                        <FL label="Colación (min)"><input type="number" min={0} style={INP} value={b.colacion_min} onFocus={e=>{try{e.target.select();}catch(_){}}} onChange={e=>updBloque(i,{colacion_min:e.target.value===""?0:Number(e.target.value)})}/></FL>
+                        <FL label="Horas efectivas del bloque"><input type="number" min={0} step="0.01" style={INP} value={b.horas_efectivas} onFocus={e=>{try{e.target.select();}catch(_){}}} onChange={e=>updBloque(i,{horas_efectivas:e.target.value===""?"":Number(e.target.value),ajuste_manual:true})}/></FL>
                       </div>
                       <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
                         <span style={{fontSize:11,color:C.textMuted}}>Días:</span>
@@ -3989,7 +3998,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     </FL>
                     <FL label="Estado asignación"><select style={INP} value={asigForm.estado_asig||"activa"} onChange={e=>setAsigForm({...asigForm,estado_asig:e.target.value,activo:e.target.value!=="terminada"})}><option value="activa">Activa</option><option value="terminada">Terminada</option><option value="suspendida">Suspendida</option></select></FL>
                     <FL label="Monto asociado al trabajador en esta asignación ($)">
-                      <input type="number" min={0} disabled={asigForm.modalidad_cobertura==="holgura_remunerada"} style={{...INP,...(asigForm.modalidad_cobertura==="holgura_remunerada"?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={(asigForm.sueldo_asignado===null||asigForm.sueldo_asignado===undefined||asigForm.sueldo_asignado==="")?"":asigForm.sueldo_asignado} placeholder="Ej: 100000" onChange={e=>{const raw=e.target.value;const m=raw===""?"":Number(raw);setAsigForm({...asigForm,sueldo_asignado:m,porcentaje_costo:(form.sueldo_base>0&&raw!==""?Math.round(Number(raw)/form.sueldo_base*10000)/100:0)});}} title="Remuneración/componentes asociados a esta asignación para este trabajador. No es el ingreso del contrato."/>
+                      <input type="number" min={0} disabled={asigForm.modalidad_cobertura==="holgura_remunerada"} style={{...INP,...(asigForm.modalidad_cobertura==="holgura_remunerada"?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={(asigForm.sueldo_asignado===null||asigForm.sueldo_asignado===undefined||asigForm.sueldo_asignado==="")?"":asigForm.sueldo_asignado} placeholder="Ej: 100000" onFocus={e=>{try{e.target.select();}catch(_){}}} onChange={e=>{const raw=e.target.value;const m=raw===""?"":Number(raw);setAsigForm({...asigForm,sueldo_asignado:m,porcentaje_costo:(form.sueldo_base>0&&raw!==""?Math.round(Number(raw)/form.sueldo_base*10000)/100:0)});}} title="Remuneración/componentes asociados a esta asignación para este trabajador. No es el ingreso del contrato."/>
                       {form.sueldo_base>0&&Number(asigForm.sueldo_asignado)>0&&<div style={{fontSize:10,color:C.textMuted,marginTop:3}}>≈ {fmtPct(Number(asigForm.sueldo_asignado)/form.sueldo_base*100)} del sueldo base (dato auxiliar)</div>}
                     </FL>
                     <FL label="Modalidad de cobertura (opcional)"><select style={INP} value={asigForm.modalidad_cobertura||""} onChange={e=>{const val=e.target.value||null;const patch={modalidad_cobertura:val};if(val==="holgura_remunerada"){patch.sueldo_asignado="";patch.bono_movilizacion="";patch.bono_colacion="";patch.bono_asistencia="";patch.gratificacion_metodo_asig="no_aplica";patch.gratificacion_monto="";patch.gratificacion_porcentaje_asig="";patch.gratificacion_observacion_asig="";patch.porcentaje_costo=0;}setAsigForm({...asigForm,...patch});}}><option value="">— Seleccionar modalidad —</option><option value="exclusivo">Trabajador exclusivo de la asignación</option><option value="reasignacion_parcial">Reasignación parcial dentro de jornada</option><option value="holgura_remunerada">Uso de holgura horaria ya remunerada</option><option value="pago_adicional">Pago adicional por nueva asignación</option><option value="horas_extra">Horas extra autorizadas</option><option value="volante_reemplazo">Trabajador volante / reemplazo</option></select>{asigForm.modalidad_cobertura==="holgura_remunerada"&&<div style={{fontSize:11,color:C.textMuted,marginTop:4,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 8px"}}>Esta modalidad no agrega nuevos haberes a la liquidación. Solo registra cobertura operativa usando jornada ya remunerada.</div>}</FL>
