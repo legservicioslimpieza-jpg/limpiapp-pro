@@ -287,6 +287,14 @@ const clp = n => `$${Math.round(n||0).toLocaleString("es-CL")}`;
 const pct = n => `${((n||0)*100).toFixed(2)}%`;
 // J2-lite: formatea un porcentaje ya en escala 0-100 con máximo 2 decimales (coma decimal es-CL). 133.3299… -> "133,33%".
 const fmtPct = n => `${(Math.round((Number(n)||0)*100)/100).toLocaleString("es-CL",{maximumFractionDigits:2})}%`;
+// CC.1: RUT chileno. limpiar / dígito verificador (módulo 11) / validar / formatear "76.123.456-7".
+const limpiarRutCL = r => String(r||"").replace(/[.\-\s]/g,"").toUpperCase();
+const dvRutCL = cuerpo => { let s=1,m=0; for(let i=cuerpo.length-1;i>=0;i--){ s=(s+Number(cuerpo[i])*(9-m%6))%11; m++; } return s?String(s-1):"K"; };
+const validarRutCL = r => { const c=limpiarRutCL(r); if(c.length<2) return false; const cuerpo=c.slice(0,-1), dv=c.slice(-1); if(!/^\d+$/.test(cuerpo)) return false; return dvRutCL(cuerpo)===dv; };
+const formatRutCL = r => { const c=limpiarRutCL(r); if(c.length<2) return String(r||""); const cuerpo=c.slice(0,-1), dv=c.slice(-1); if(!/^\d+$/.test(cuerpo)) return String(r||""); return cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g,".")+"-"+dv; };
+// CC.1: tipos de centro EXTERNOS que requieren RUT del cliente (CORPORATIVO es interno de LEG).
+const CC_TIPOS_EXTERNOS = ["LICITACION_PUBLICA","LICITACION_PRIVADA","PRIVADO_PERMANENTE","EVENTUAL","LICITACION","PRIVADO","CONTRATO_PRIVADO"];
+const ccEsExterno = tipo => CC_TIPOS_EXTERNOS.includes(tipo||"LICITACION");
 // A.1: props para input de MONTO (vacío editable, sin "0" pegado, no negativos, normaliza ceros a la izquierda).
 const montoInputProps = (val, onNum) => ({
   type:"number", min:0, inputMode:"numeric", placeholder:"Ej: 10000",
@@ -1093,7 +1101,16 @@ function Contratos({data,insert,update}){
   const [form,setForm]=useState(null);
   const isNew=form&&!data.contratos.find(c=>c.id===form.id);
   const openNew=()=>setForm({id:genId("CT"),cliente:"",instalacion:"",direccion:"",supervisor_id:data.trabajadores.find(t=>t.cargo==="Supervisor"||t.cargo==="Supervisora")?.id||"",estado:"Vigente",activo:true,tipo_centro_costo:"LICITACION_PUBLICA",estado_financiero:"financiado"});
-  const save=async()=>{if(!form.cliente.trim())return;const ok=isNew?await insert("contratos",form):await update("contratos",form);if(ok)setForm(null);};
+  const save=async()=>{if(!form.cliente.trim())return;
+    // CC.1: al CREAR un centro externo, exigir RUT válido. En edición legacy solo se advierte (no se bloquea).
+    if(isNew && ccEsExterno(form.tipo_centro_costo)){
+      const v=(form.rut_cliente||"").trim();
+      if(!v){ alert("Este centro es externo. Ingrese el RUT del cliente/institución antes de crear."); return; }
+      if(!validarRutCL(v)){ alert("El RUT del cliente/institución no es válido (dígito verificador no coincide)."); return; }
+    }
+    const rc=(form.rut_cliente||"").trim();
+    const formGuardar=(rc&&validarRutCL(rc))?{...form,rut_cliente:formatRutCL(rc)}:form;
+    const ok=isNew?await insert("contratos",formGuardar):await update("contratos",formGuardar);if(ok)setForm(null);};
   const esLic=c=>['LICITACION','LICITACION_PUBLICA','LICITACION_PRIVADA'].includes(c.tipo_centro_costo||'LICITACION');
   const nLic=data.contratos.filter(esLic).length;
   const nCorp=data.contratos.filter(c=>c.tipo_centro_costo==="CORPORATIVO").length;
@@ -1104,18 +1121,26 @@ function Contratos({data,insert,update}){
       {form&&(
         <FormCard onSave={save} onCancel={()=>setForm(null)} saveLabel={isNew?"Crear":"Actualizar"}>
           <FL label="Cliente / Institución"><input style={INP} value={form.cliente} onChange={e=>setForm({...form,cliente:e.target.value})} placeholder="Ej: Seremi de Transportes"/></FL>
+          <FL label="RUT cliente / institución">
+            <input style={INP} value={form.rut_cliente||""} onChange={e=>setForm({...form,rut_cliente:e.target.value})} onBlur={e=>{const v=e.target.value.trim();if(v&&validarRutCL(v))setForm({...form,rut_cliente:formatRutCL(v)});}} placeholder="Ej: 78.086.977-1"/>
+            {(()=>{ const v=(form.rut_cliente||"").trim(); const ext=ccEsExterno(form.tipo_centro_costo);
+              if(v && !validarRutCL(v)) return <div style={{fontSize:11,color:C.red,marginTop:3}}>⚠ RUT inválido (dígito verificador no coincide).</div>;
+              if(!v && ext) return <div style={{fontSize:11,color:'#b45309',marginTop:3}}>Centro de costo sin RUT de cliente/institución. Completar para documentación y facturación futura.</div>;
+              if(!v && !ext) return <div style={{fontSize:11,color:C.textMuted,marginTop:3}}>Centro corporativo interno: RUT opcional / no aplica.</div>;
+              return null; })()}
+          </FL>
           <FL label="Instalación"><input style={INP} value={form.instalacion} onChange={e=>setForm({...form,instalacion:e.target.value})} placeholder="Ej: Sucursal Arica"/></FL>
           <FL label="Dirección"><input style={INP} value={form.direccion} onChange={e=>setForm({...form,direccion:e.target.value})} placeholder="Ej: Chacabuco Nº901"/></FL>
           <FL label="Tipo de centro"><select style={INP} value={form.tipo_centro_costo||"LICITACION_PUBLICA"} onChange={e=>setForm({...form,tipo_centro_costo:e.target.value})}><option value="LICITACION_PUBLICA">Licitación pública (alerta 33 días)</option><option value="LICITACION_PRIVADA">Licitación privada (configurable)</option><option value="PRIVADO_PERMANENTE">Contrato privado permanente (sin alerta de término)</option><option value="EVENTUAL">Servicio eventual (alerta 15 días)</option><option value="CORPORATIVO">Corporativo (configurable)</option><option value="LICITACION">Licitación (legado)</option></select></FL>
           <FL label="Estado"><select style={INP} value={form.estado} onChange={e=>setForm({...form,estado:e.target.value,activo:["Vigente","Renovación"].includes(e.target.value)})}>{ESTADOS_CT.map(s=><option key={s}>{s}</option>)}</select></FL>
           <FL label="Financiamiento"><select style={INP} value={form.estado_financiero||"financiado"} onChange={e=>setForm({...form,estado_financiero:e.target.value})}><option value="financiado">🟢 Financiado</option><option value="parcial">🟡 Parcial</option><option value="sin_financiamiento">🔴 Sin financiamiento</option><option value="en_riesgo">🟠 En riesgo</option><option value="cerrado">⚫ Cerrado</option></select></FL>
-          <FL label="Fecha inicio licitación"><FechaInput value={form.fecha_inicio_contrato||""} onChange={v=>setForm({...form,fecha_inicio_contrato:v})} style={INP}/></FL>
-          <FL label="Fecha término licitación"><FechaInput value={form.fecha_termino_contrato||""} onChange={v=>setForm({...form,fecha_termino_contrato:v})} style={INP}/></FL>
+          <FL label="Fecha inicio del servicio / contrato"><FechaInput value={form.fecha_inicio_contrato||""} onChange={v=>setForm({...form,fecha_inicio_contrato:v})} style={INP}/></FL>
+          <FL label="Fecha término del servicio / contrato"><FechaInput value={form.fecha_termino_contrato||""} onChange={v=>setForm({...form,fecha_termino_contrato:v})} style={INP}/></FL>
           <FL label="Probabilidad renovación"><select style={INP} value={form.probabilidad_renovacion||"media"} onChange={e=>setForm({...form,probabilidad_renovacion:e.target.value})}><option value="alta">Alta</option><option value="media">Media</option><option value="baja">Baja</option><option value="descartada">Descartada</option></select></FL>
           <FL label="Estado renovación"><select style={INP} value={form.estado_renovacion||"pendiente"} onChange={e=>setForm({...form,estado_renovacion:e.target.value})}><option value="vigente">Vigente</option><option value="en evaluacion">En evaluación</option><option value="pendiente">Pendiente</option><option value="adjudicada otra">Adjudicada otra empresa</option><option value="renovada">Renovada</option><option value="cerrada">Cerrada</option></select></FL>
           <FL label="Días de alerta (aviso anticipado)"><input type="number" min={30} max={180} style={INP} value={form.dias_alerta||60} onChange={e=>setForm({...form,dias_alerta:Number(e.target.value)})}/></FL>
           <FL label="Supervisor"><select style={INP} value={form.supervisor_id||""} onChange={e=>setForm({...form,supervisor_id:e.target.value})}><option value="">— Sin asignar —</option>{data.trabajadores.map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}</select></FL>
-          <FL label="ID Licitación"><input style={INP} value={form.licitacion_id||""} onChange={e=>setForm({...form,licitacion_id:e.target.value})} placeholder="Ej: 892200-1-LE26"/></FL>
+          <FL label="ID licitación / OC / contrato, si aplica"><input style={INP} value={form.licitacion_id||""} onChange={e=>setForm({...form,licitacion_id:e.target.value})} placeholder="Ej: 892200-1-LE26"/></FL>
           <FL label="Ingreso / valor referencial del contrato ($)"><input type="number" min={0} style={INP} value={form.valor_referencial_contrato??""} onChange={e=>setForm({...form,valor_referencial_contrato:e.target.value===""?null:Number(e.target.value)})} placeholder="Ej: 900000"/></FL>
           <FL label="Periodicidad del valor"><select style={INP} value={form.periodicidad_valor||""} onChange={e=>setForm({...form,periodicidad_valor:e.target.value||null})}><option value="">— Seleccionar —</option><option value="mensual">Mensual</option><option value="unico">Único</option><option value="por_evento">Por evento</option><option value="orden_servicio">Por orden de servicio</option><option value="estado_pago">Por estado de pago</option></select></FL>
           <FL label="Documento fuente (opcional)"><select style={INP} value={form.tipo_documento_fuente||""} onChange={e=>setForm({...form,tipo_documento_fuente:e.target.value||null})}><option value="">— Seleccionar —</option><option value="oc_publica">Orden de compra (Mercado Público)</option><option value="oc_privada">Orden de compra privada</option><option value="contrato">Contrato</option><option value="cotizacion">Cotización aceptada</option><option value="orden_servicio">Orden de servicio</option><option value="estado_pago">Estado de pago</option><option value="otro">Otro</option></select></FL>
