@@ -318,19 +318,29 @@ const ccEsExterno = tipo => CC_TIPOS_EXTERNOS.includes(tipo||"LICITACION");
 
 // MONEDA.1: normaliza texto monetario. "01000"->"1000", "0000"->"0" al perder foco, ""->"". Solo dígitos, sin ceros a la izquierda.
 const normalizeMoneyInput = (value) => String(value ?? "").replace(/[^\d]/g, "").replace(/^0+(?=\d)/, "");
+// MONEDA.1-B: normaliza también el valor MOSTRADO (hidratación), no solo al escribir. "01000"->"1000", 0->"0", ""->"".
+const moneyDisplayValue = (val) => { if (val === null || val === undefined || val === "") return ""; const clean = normalizeMoneyInput(val); return clean === "" ? "0" : clean; };
 // A.1/BASE.1.2/MONEDA.1: input de MONTO. type text (control total del string) para que el cero inicial no quede pegado.
 const montoInputProps = (val, onNum) => ({
   type:"text", inputMode:"numeric", placeholder:"Ej: 10000",
-  value:(val===null||val===undefined||val==="")?"":String(val),
+  value:moneyDisplayValue(val),
   onFocus:e=>{ try{ e.target.select(); }catch(_){} },
   onChange:e=>{ const clean=normalizeMoneyInput(e.target.value); onNum(clean===""?"":Math.max(0, Number(clean))); },
 });
 // BASE.1.2: input de minutos/enteros (colación, etc.). Vacío -> 0. Mismo tratamiento de ceros a la izquierda.
 const minutosInputProps = (val, onNum) => ({
   type:"text", inputMode:"numeric",
-  value:(val===null||val===undefined||val==="")?"":String(val),
+  value:moneyDisplayValue(val),
   onFocus:e=>{ try{ e.target.select(); }catch(_){} },
   onChange:e=>{ const clean=normalizeMoneyInput(e.target.value); onNum(clean===""?0:Math.max(0, Number(clean))); },
+});
+// MONEDA.1-C: input de BONOS. A diferencia del monto general, un 0 se muestra VACÍO (con placeholder), no como "0".
+// Al guardar se conserva 0 numérico (regla del payload). Solo cambia la visualización.
+const bonoInputProps = (val, onNum) => ({
+  type:"text", inputMode:"numeric", placeholder:"Ej: 10000",
+  value:(val===null||val===undefined||val==="" || Number(val)===0)?"":moneyDisplayValue(val),
+  onFocus:e=>{ try{ e.target.select(); }catch(_){} },
+  onChange:e=>{ const clean=normalizeMoneyInput(e.target.value); onNum(clean===""?"":Math.max(0, Number(clean))); },
 });
 
 // A.2: normaliza horas a número (coma->punto) al guardar; "" o inválido -> 0; nunca negativo.
@@ -3919,9 +3929,9 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               )}
               <FL label="AFP"><select style={INP} value={form.afp||"MODELO"} onChange={e=>setForm({...form,afp:e.target.value})}>{AFP_LIST.map(a=><option key={a}>{a}</option>)}</select></FL>
               <FL label="Salud"><select style={INP} value={form.salud||"FONASA"} onChange={e=>setForm({...form,salud:e.target.value})}>{SALUD_LIST.map(s=><option key={s}>{s}</option>)}</select></FL>
-              <FL label="Bono asistencia ($)"><input style={INP} {...montoInputProps(form.bono_asistencia, v=>setForm({...form,bono_asistencia:v}))}/></FL>
-              <FL label="Bono movilización ($)"><input style={INP} {...montoInputProps(form.bono_movilizacion, v=>setForm({...form,bono_movilizacion:v}))}/></FL>
-              <FL label="Bono colación ($)"><input style={INP} {...montoInputProps(form.bono_colacion, v=>setForm({...form,bono_colacion:v}))}/></FL>
+              <FL label="Bono asistencia ($)"><input style={INP} {...bonoInputProps(form.bono_asistencia, v=>setForm({...form,bono_asistencia:v}))}/></FL>
+              <FL label="Bono movilización ($)"><input style={INP} {...bonoInputProps(form.bono_movilizacion, v=>setForm({...form,bono_movilizacion:v}))}/></FL>
+              <FL label="Bono colación ($)"><input style={INP} {...bonoInputProps(form.bono_colacion, v=>setForm({...form,bono_colacion:v}))}/></FL>
               <FL label="Tipo de trabajador">
                 <select style={INP} value={form.pensionado?"pensionado":"activo"} onChange={e=>setForm({...form,pensionado:e.target.value==="pensionado"})}>
                   <option value="activo">Activo (cotiza AFP y CES)</option>
