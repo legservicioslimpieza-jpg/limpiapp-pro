@@ -3929,9 +3929,9 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               )}
               <FL label="AFP"><select style={INP} value={form.afp||"MODELO"} onChange={e=>setForm({...form,afp:e.target.value})}>{AFP_LIST.map(a=><option key={a}>{a}</option>)}</select></FL>
               <FL label="Salud"><select style={INP} value={form.salud||"FONASA"} onChange={e=>setForm({...form,salud:e.target.value})}>{SALUD_LIST.map(s=><option key={s}>{s}</option>)}</select></FL>
-              <FL label="Bono asistencia ($)"><input style={INP} {...bonoInputProps(form.bono_asistencia, v=>setForm({...form,bono_asistencia:v}))}/></FL>
-              <FL label="Bono movilización ($)"><input style={INP} {...bonoInputProps(form.bono_movilizacion, v=>setForm({...form,bono_movilizacion:v}))}/></FL>
-              <FL label="Bono colación ($)"><input style={INP} {...bonoInputProps(form.bono_colacion, v=>setForm({...form,bono_colacion:v}))}/></FL>
+              <FL label="Bono asistencia ($)"><input style={INP} {...bonoInputProps(form.bono_asistencia, v=>setForm({...form,bono_asistencia:v}))}/><div style={{fontSize:10,color:C.textMuted,marginTop:3}}>Vacío = sin bono ($0)</div></FL>
+              <FL label="Bono movilización ($)"><input style={INP} {...bonoInputProps(form.bono_movilizacion, v=>setForm({...form,bono_movilizacion:v}))}/><div style={{fontSize:10,color:C.textMuted,marginTop:3}}>Vacío = sin bono ($0)</div></FL>
+              <FL label="Bono colación ($)"><input style={INP} {...bonoInputProps(form.bono_colacion, v=>setForm({...form,bono_colacion:v}))}/><div style={{fontSize:10,color:C.textMuted,marginTop:3}}>Vacío = sin bono ($0)</div></FL>
               <FL label="Tipo de trabajador">
                 <select style={INP} value={form.pensionado?"pensionado":"activo"} onChange={e=>setForm({...form,pensionado:e.target.value==="pensionado"})}>
                   <option value="activo">Activo (cotiza AFP y CES)</option>
