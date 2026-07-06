@@ -342,6 +342,8 @@ const bonoInputProps = (val, onNum) => ({
   onFocus:e=>{ try{ e.target.select(); }catch(_){} },
   onChange:e=>{ const clean=normalizeMoneyInput(e.target.value); onNum(clean===""?"":Math.max(0, Number(clean))); },
 });
+// MICROCOPY.1-B: true si el bono se ve vacío (0/null/undefined/""). Solo para mostrar la ayuda condicional.
+const bonoVisualVacio = (v) => v === null || v === undefined || v === "" || Number(v) === 0;
 
 // A.2: normaliza horas a número (coma->punto) al guardar; "" o inválido -> 0; nunca negativo.
 const horasANumero = (v) => { const n=Number(String(v??"").replace(",",".")); return (isFinite(n)&&n>=0)?n:0; };
@@ -3929,9 +3931,9 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               )}
               <FL label="AFP"><select style={INP} value={form.afp||"MODELO"} onChange={e=>setForm({...form,afp:e.target.value})}>{AFP_LIST.map(a=><option key={a}>{a}</option>)}</select></FL>
               <FL label="Salud"><select style={INP} value={form.salud||"FONASA"} onChange={e=>setForm({...form,salud:e.target.value})}>{SALUD_LIST.map(s=><option key={s}>{s}</option>)}</select></FL>
-              <FL label="Bono asistencia ($)"><input style={INP} {...bonoInputProps(form.bono_asistencia, v=>setForm({...form,bono_asistencia:v}))}/><div style={{fontSize:10,color:C.textMuted,marginTop:3}}>Vacío = sin bono ($0)</div></FL>
-              <FL label="Bono movilización ($)"><input style={INP} {...bonoInputProps(form.bono_movilizacion, v=>setForm({...form,bono_movilizacion:v}))}/><div style={{fontSize:10,color:C.textMuted,marginTop:3}}>Vacío = sin bono ($0)</div></FL>
-              <FL label="Bono colación ($)"><input style={INP} {...bonoInputProps(form.bono_colacion, v=>setForm({...form,bono_colacion:v}))}/><div style={{fontSize:10,color:C.textMuted,marginTop:3}}>Vacío = sin bono ($0)</div></FL>
+              <FL label="Bono asistencia ($)"><input style={INP} {...bonoInputProps(form.bono_asistencia, v=>setForm({...form,bono_asistencia:v}))}/>{bonoVisualVacio(form.bono_asistencia)&&<div style={{fontSize:10,color:C.textMuted,marginTop:3}}>Vacío = sin bono ($0)</div>}</FL>
+              <FL label="Bono movilización ($)"><input style={INP} {...bonoInputProps(form.bono_movilizacion, v=>setForm({...form,bono_movilizacion:v}))}/>{bonoVisualVacio(form.bono_movilizacion)&&<div style={{fontSize:10,color:C.textMuted,marginTop:3}}>Vacío = sin bono ($0)</div>}</FL>
+              <FL label="Bono colación ($)"><input style={INP} {...bonoInputProps(form.bono_colacion, v=>setForm({...form,bono_colacion:v}))}/>{bonoVisualVacio(form.bono_colacion)&&<div style={{fontSize:10,color:C.textMuted,marginTop:3}}>Vacío = sin bono ($0)</div>}</FL>
               <FL label="Tipo de trabajador">
                 <select style={INP} value={form.pensionado?"pensionado":"activo"} onChange={e=>setForm({...form,pensionado:e.target.value==="pensionado"})}>
                   <option value="activo">Activo (cotiza AFP y CES)</option>
