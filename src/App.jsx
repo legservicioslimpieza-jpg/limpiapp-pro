@@ -3833,6 +3833,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                 {!isNew&&(
                   <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 14px'}}>
                     <span style={{fontWeight:700,fontSize:14,color:C.text}}>{form.nombre||form.id}</span>
+                    <span style={{fontSize:11,color:C.textMuted,background:C.surface,border:`1px solid ${C.border}`,borderRadius:5,padding:"1px 7px"}}>{form.id}</span>
                     {form.rut&&<span style={{fontSize:12,color:C.textMuted}}>{form.rut}</span>}
                     <span style={{background:estado.bg,color:estado.c,border:`1px solid ${estado.c}33`,borderRadius:5,padding:'2px 8px',fontSize:11,fontWeight:600}}>{estado.t}</span>
                     <span style={{fontSize:12,color:C.textMuted}}>📋 {contratosTxt}</span>
@@ -4254,7 +4255,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       <Panel noPad>
         <DataTable
           cols={[
-            {key:"nombre",label:"Nombre",render:r=><span style={{fontWeight:500}}>{r.nombre}</span>},
+            {key:"nombre",label:"Nombre",render:r=><span style={{fontWeight:500}}>{r.nombre} <span style={{fontSize:11,color:C.textMuted,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:5,padding:"1px 6px",fontWeight:400}}>{r.id}</span></span>},
             {key:"rut",label:"RUT",render:r=><span style={{color:C.textMuted,fontVariantNumeric:"tabular-nums"}}>{r.rut||"—"}</span>},
             {key:"cargo",label:"Cargo",render:r=><Tag text={r.cargo} scheme={r.cargo==="Supervisor"||r.cargo==="Supervisora"?{bg:C.purpleBg,text:C.purple,border:C.purpleBorder}:{bg:C.accentBg,text:C.accentText,border:"#bfdbfe"}}/>},
             {key:"sueldo",label:"Sueldo Base",render:r=><span style={{fontVariantNumeric:"tabular-nums",color:C.text}}>{r.sueldo_base?clp(r.sueldo_base):"—"}</span>},
