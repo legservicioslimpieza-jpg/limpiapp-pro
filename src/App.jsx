@@ -434,6 +434,11 @@ const isAsignacionVigenteHoy = a => {
 };
 const isAsignacionRemuneracional = a => a && a.afecta_remuneracion !== false;
 const isAsignacionOperacional = a => a && a.afecta_remuneracion === false;
+// RRHH.1-A: base activa de un trabajador. Refleja el predicado del índice único
+// (es_asignacion_base=true AND estado_asig='activa' AND activo IS DISTINCT FROM false).
+const baseActivaDe = (asignaciones) => (asignaciones||[]).find(
+  a => a && a.es_asignacion_base === true && a.estado_asig === 'activa' && a.activo !== false
+) || null;
 
 /* ─── Íconos ────────────────────────────────────────────────── */
 const Icon = {
@@ -3451,6 +3456,11 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const asignacionesTrab=form?(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id):[];
   const asignacionesActivas=asignacionesTrab.filter(isAsignacionVigenteHoy);
   const asignacionesOperacionalesActivas=asignacionesTrab.filter(a=>isAsignacionOperacional(a)&&a.estado_asig==="activa"&&a.activo!==false);
+  // RRHH.1-A UI (Incremento 1, solo lectura): base activa + remuneracionales activas para el panel.
+  const baseActiva=baseActivaDe(asignacionesTrab);
+  const asignacionesRemuneracionalesActivas=asignacionesTrab.filter(a=>isAsignacionVigenteHoy(a)&&isAsignacionRemuneracional(a));
+  const soloOperacional=!baseActiva&&asignacionesOperacionalesActivas.length>0&&asignacionesRemuneracionalesActivas.length===0;
+  const baseAdvertencias=(()=>{ const x=baseActiva&&baseActiva.base_inferencia_advertencias; if(Array.isArray(x))return x; try{return JSON.parse(x||'[]');}catch(_){return [];} })();
   // J2-lite: la asignación describe la participación del trabajador, no un % contra el sueldo base.
   // Solo se conserva el total asociado (dato neutro, sin juicio de déficit/exceso).
   const montoAsociadoTotal=asignacionesActivas.filter(isAsignacionRemuneracional).reduce((s,a)=>s+(Number(a.sueldo_asignado)||0),0);
@@ -4029,6 +4039,34 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               {isNew?
                 <AlertBanner type="warning" message="Primero crea el trabajador. Luego podrás asignarlo a uno o más centros de costo sin usar SQL."/>
               :<>
+                {(()=>{
+                  // RRHH.1-A UI Incremento 1 — SOLO LECTURA. Orden: base activa · sin asignaciones · solo operacional · sin base genérico.
+                  const confTxt={alta:'confianza alta',media:'confianza media',baja:'confianza baja',revision:'requiere revisión'};
+                  const motTxt={coincidencia_fecha_ingreso:'coincidencia fecha ingreso',unica_candidata:'única candidata',primera_o_mayor_peso:'primera o mayor peso',empate_fecha_ingreso:'empate de fecha',fecha_incompleta:'fecha incompleta',empate_criterios:'empate de criterios',revision_manual:'revisión manual'};
+                  const cCtr=baseActiva?(data.contratos||[]).find(x=>x.id===baseActiva.contrato_id):null;
+                  const procedencia=(()=>{ if(!baseActiva)return ''; if(baseActiva.base_origen==='manual')return 'Marcada manualmente'; if(baseActiva.base_origen==='migracion'){ const parts=['Detectada en migración']; if(baseActiva.base_inferencia_confianza)parts.push(confTxt[baseActiva.base_inferencia_confianza]||baseActiva.base_inferencia_confianza); if(baseActiva.base_inferencia_motivo)parts.push(motTxt[baseActiva.base_inferencia_motivo]||baseActiva.base_inferencia_motivo); return parts.join(' · '); } return baseActiva.base_origen?`Origen: ${baseActiva.base_origen}`:''; })();
+                  if(baseActiva){
+                    return (
+                      <div style={{background:'#FFF7F3',border:'1px solid #F0D9CE',borderRadius:8,padding:'10px 14px',marginBottom:12}}>
+                        <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                          <span style={{background:'#FFF1EA',color:'#C96F4A',border:'1px solid #F0D9CE',borderRadius:6,padding:'3px 10px',fontSize:11,fontWeight:700}}>Base de ingreso</span>
+                          <span style={{fontSize:13,color:C.text,fontWeight:600}}>{cCtr?`${cCtr.cliente||cCtr.id} · ${baseActiva.contrato_id}`:baseActiva.contrato_id}</span>
+                          {baseAdvertencias.includes('fecha_asignacion_anterior_a_ingreso')&&(
+                            <span style={{background:'#FEF3C7',color:'#92400e',border:'1px solid #fde68a',borderRadius:6,padding:'2px 8px',fontSize:10,fontWeight:600}}>Revisar fecha de ingreso/asignación</span>
+                          )}
+                        </div>
+                        {procedencia&&<div style={{fontSize:11,color:C.textMuted,marginTop:5}} title="Sello histórico de cómo se infirió la base; no es su estado vigente.">{procedencia}{baseActiva.base_inferencia_fecha?` · ${dateOnly(baseActiva.base_inferencia_fecha)}`:''}</div>}
+                      </div>
+                    );
+                  }
+                  if(asignacionesTrab.length===0){
+                    return <AlertBanner type="warning" message="Trabajador activo sin asignaciones registradas."/>;
+                  }
+                  if(soloOperacional){
+                    return <AlertBanner type="warning" message="Este trabajador tiene asignaciones operacionales, pero no tiene una asignación base remuneracional/corporativa definida. Considere crear o marcar una base corporativa/remuneracional."/>;
+                  }
+                  return <AlertBanner type="warning" message="Sin asignación base definida."/>;
+                })()}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:12}}>
                   <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                     <div style={{background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:7,padding:"8px 12px",fontSize:12,color:C.text,fontWeight:600}}>
