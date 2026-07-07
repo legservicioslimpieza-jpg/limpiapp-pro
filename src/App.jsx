@@ -3404,13 +3404,17 @@ let pendingAnexoHandoff = null;
 // Lanzamiento de Movilidad desde Capa B (Reasignar). Sobrevive a la navegación entre módulos.
 let pendingMovilidadStart = null;
 
-function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,contratoId}){
+function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,contratoId,reload}){
   const [form,setForm]=useState(null);
   const [tab,setTab]=useState("datos");
   const [asigForm,setAsigForm]=useState(null);
   const [retiroModal,setRetiroModal]=useState(null);
   const [anexoPrefill,setAnexoPrefill]=useState(null);
   const [movilidadModal,setMovilidadModal]=useState(null);
+  // RRHH.1-A Inc.2: marca manual de base de ingreso.
+  const [baseModal,setBaseModal]=useState(null);   // {asig} candidata a confirmar
+  const [baseSel,setBaseSel]=useState("");          // asignacion_id elegido en el selector
+  const [baseMarcando,setBaseMarcando]=useState(false);
   // Tras el/los remonte(s) que provoca loadAll, restaura ficha + pestaña + prefill.
   // waitForContratoId: si está, solo restaura cuando ya existe esa asignación activa (último remonte del doble write de movilidad).
   useEffect(()=>{
@@ -3461,6 +3465,39 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const asignacionesRemuneracionalesActivas=asignacionesTrab.filter(a=>isAsignacionVigenteHoy(a)&&isAsignacionRemuneracional(a));
   const soloOperacional=!baseActiva&&asignacionesOperacionalesActivas.length>0&&asignacionesRemuneracionalesActivas.length===0;
   const baseAdvertencias=(()=>{ const x=baseActiva&&baseActiva.base_inferencia_advertencias; if(Array.isArray(x))return x; try{return JSON.parse(x||'[]');}catch(_){return [];} })();
+  // RRHH.1-A Inc.2: marcar manualmente una asignación como base, SOLO si el trabajador no tiene base activa.
+  const marcarBaseManual=async(asig)=>{
+    if(!asig||!form) return;
+    // Guardas: respetan el índice y las reglas de candidatura.
+    if(baseActivaDe(asignacionesTrab)!==null){ alert("Ya existe una base activa. Ciérrala antes de marcar otra."); return; }
+    if(!isAsignacionRemuneracional(asig)||!isAsignacionVigenteHoy(asig)) return;
+    setBaseMarcando(true);
+    const hoy=new Date().toISOString().slice(0,10);
+    const { data: marcada, error } = await supabase
+      .from("asignaciones")
+      .update({
+        es_asignacion_base: true,
+        base_origen: "manual",
+        base_inferencia_confianza: null,
+        base_inferencia_motivo: null,
+        base_inferencia_advertencias: [],
+        base_inferencia_fecha: hoy
+      })
+      .eq("id", asig.id)
+      .eq("trabajador_id", form.id)
+      .select("id")
+      .single();
+    setBaseMarcando(false);
+    if(error){
+      const msg=(error.code==='23505'||/unique|duplicate/i.test(error.message||''))
+        ? "No se pudo marcar: el trabajador ya tiene una base activa. Refresca y cierra la base actual antes de marcar otra."
+        : "Error al marcar base: "+error.message;
+      alert(msg); return;
+    }
+    if(!marcada||!marcada.id){ alert("No se pudo marcar la base. Refresca la pantalla e intenta nuevamente."); return; }
+    setBaseModal(null); setBaseSel("");
+    if(reload) await reload();
+  };
   // J2-lite: la asignación describe la participación del trabajador, no un % contra el sueldo base.
   // Solo se conserva el total asociado (dato neutro, sin juicio de déficit/exceso).
   const montoAsociadoTotal=asignacionesActivas.filter(isAsignacionRemuneracional).reduce((s,a)=>s+(Number(a.sueldo_asignado)||0),0);
@@ -3719,6 +3756,28 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                 </>):(
                   <button disabled={!valido} onClick={()=>ejecutar(false)} style={{padding:'9px 16px',borderRadius:6,border:'none',background:C.accent,color:'#fff',cursor:valido?'pointer':'not-allowed',opacity:valido?1:0.5,fontSize:12,fontWeight:700}}>Mover trabajador</button>
                 )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {baseModal&&form&&(()=>{
+        const a=baseModal.asig; const c=(data.contratos||[]).find(x=>x.id===a.contrato_id);
+        const cerrar=()=>{ if(!baseMarcando){ setBaseModal(null); } };
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}} onClick={cerrar}>
+            <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:'18px 20px',maxWidth:440,width:'100%'}} onClick={e=>e.stopPropagation()}>
+              <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:10}}>Marcar base de ingreso</div>
+              <p style={{fontSize:13,color:C.text,lineHeight:1.5,margin:'0 0 16px'}}>
+                ¿Marcar <b>{a.contrato_id} — {c?.cliente||'—'}</b> como base de ingreso de <b>{form.nombre} · {form.id}</b>? Se registrará como decisión manual. No se modificará ninguna otra asignación.
+              </p>
+              <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+                <button type="button" onClick={cerrar} disabled={baseMarcando}
+                  style={{padding:'7px 14px',borderRadius:6,border:`1px solid ${C.border}`,background:C.surface,color:C.text,fontSize:12,fontWeight:600,cursor:baseMarcando?'not-allowed':'pointer'}}>Cancelar</button>
+                <button type="button" onClick={()=>marcarBaseManual(a)} disabled={baseMarcando}
+                  style={{padding:'7px 14px',borderRadius:6,border:'none',background:'#C96F4A',color:'#fff',fontSize:12,fontWeight:600,cursor:baseMarcando?'not-allowed':'pointer',opacity:baseMarcando?0.7:1}}>
+                  {baseMarcando?'Marcando…':'Confirmar marca manual'}
+                </button>
               </div>
             </div>
           </div>
@@ -4057,6 +4116,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                           )}
                         </div>
                         {procedencia&&<div style={{fontSize:11,color:C.textMuted,marginTop:5}} title="Sello histórico de cómo se infirió la base; no es su estado vigente.">{procedencia}{baseActiva.base_inferencia_fecha?` · ${dateOnly(baseActiva.base_inferencia_fecha)}`:''}</div>}
+                        <div style={{fontSize:11,color:C.textMuted,marginTop:6,fontStyle:'italic'}}>Para cambiar la base de ingreso, cierre primero la base actual y luego marque una nueva base.</div>
                       </div>
                     );
                   }
@@ -4066,7 +4126,25 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   if(soloOperacional){
                     return <AlertBanner type="warning" message="Este trabajador tiene asignaciones operacionales, pero no tiene una asignación base remuneracional/corporativa definida. Considere crear o marcar una base corporativa/remuneracional."/>;
                   }
-                  return <AlertBanner type="warning" message="Sin asignación base definida."/>;
+                  return (
+                    <div>
+                      <AlertBanner type="warning" message="Sin asignación base definida."/>
+                      {asignacionesRemuneracionalesActivas.length>0&&(
+                        <div style={{marginTop:8,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 14px'}}>
+                          <div style={{fontSize:12,fontWeight:600,color:C.text,marginBottom:6}}>Seleccione asignación base</div>
+                          <select style={INP} value={baseSel} onChange={e=>setBaseSel(e.target.value)}>
+                            <option value="">— Seleccione una candidata —</option>
+                            {asignacionesRemuneracionalesActivas.map(a=>{ const c=(data.contratos||[]).find(x=>x.id===a.contrato_id);
+                              return <option key={a.id} value={a.id}>{a.contrato_id} — {c?.cliente||'—'} — {clp(a.sueldo_asignado||0)} — vigente</option>; })}
+                          </select>
+                          <button type="button" disabled={!baseSel} onClick={()=>{ const a=asignacionesRemuneracionalesActivas.find(x=>String(x.id)===String(baseSel)); if(a) setBaseModal({asig:a}); }}
+                            style={{marginTop:8,padding:'6px 14px',borderRadius:6,border:'none',background:baseSel?'#C96F4A':'#d1c7bd',color:'#fff',fontSize:12,fontWeight:600,cursor:baseSel?'pointer':'not-allowed'}}>
+                            Marcar como base de ingreso
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
                 })()}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,gap:12}}>
                   <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -7777,7 +7855,7 @@ if(perfil?.rol === 'trabajador') return <PortalTrabajador />;
         {tab==="dashboard"      &&<Dashboard      data={data} contratoId={contratoId} insert={insert} update={update} setTab={setTab}/>}
         {tab==="contratos"      &&<Contratos       data={data} insert={insert} update={update}/>}
         {tab==="dependencias"   &&<Dependencias    data={data} contratoId={contratoId} insert={insert} update={update}/>}
-        {tab==="trabajadores"   &&<Trabajadores    data={data} insert={insert} update={update} saveAsignacion={saveAsignacion} terminarAsignacion={terminarAsignacion} contratoId={contratoId}/>}
+        {tab==="trabajadores"   &&<Trabajadores    data={data} insert={insert} update={update} saveAsignacion={saveAsignacion} terminarAsignacion={terminarAsignacion} contratoId={contratoId} reload={reload}/>}
         {tab==="evidencias"    &&<TabEvidencias   data={data} contratoId={contratoId}/>}
         {tab==="qr"            &&<TabQR           data={data} contratoId={contratoId}/>}
         {tab==="asistencia"     &&<Asistencia      data={data} contratoId={contratoId} insert={insert} update={update}/>}
