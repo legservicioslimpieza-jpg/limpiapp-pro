@@ -440,6 +440,32 @@ const baseActivaDe = (asignaciones) => (asignaciones||[]).find(
   a => a && a.es_asignacion_base === true && a.estado_asig === 'activa' && a.activo !== false
 ) || null;
 
+// RRHH.2-B (FASE 3-C/D): evaluación de efecto del trabajador. Helper congelado, validado 18/0.
+// Régimen dual: NUEVO estricto vs HEREDADO (grandfathering + alerta de saneamiento).
+// es_heredado tiene PRIORIDAD sobre PENDIENTE_* (evita contener a los heredados operativos).
+// Orden: ACTIVO_COMPLETO -> EXCEPCIONAL vigente -> es_heredado -> PENDIENTE_* -> resto.
+const ESTADOS_PENDIENTES_RRHH2B = ['PENDIENTE_DATOS_BASE','PENDIENTE_ACTO_LABORAL','PENDIENTE_ASIGNACION','PENDIENTE_DOCUMENTAL','PENDIENTE_REVISION'];
+const excepcionVigenteRRHH2B = (t, hoy) => {
+  const campos=[t.excepcion_motivo,t.excepcion_autorizado_por,t.excepcion_fecha,t.excepcion_fecha_limite_regularizacion,t.excepcion_estado_regularizacion];
+  if(!campos.every(v=>v!==null&&v!==undefined&&String(v).trim()!=='')) return false;
+  if(t.excepcion_estado_regularizacion!=='pendiente') return false;
+  const limite=new Date(t.excepcion_fecha_limite_regularizacion);
+  const ref=hoy?new Date(hoy):new Date();
+  return limite>=new Date(ref.toISOString().slice(0,10));
+};
+const evaluarEfectoTrabajador = (t, hoy) => {
+  if(!t) return {produceEfectos:false,regimen:'NO_CLASIFICADO',alerta:'Sin clasificar',motivo:'Trabajador no provisto'};
+  if(t.estado_ingreso==='ACTIVO_COMPLETO') return {produceEfectos:true,regimen:'NUEVO_COMPLETO',alerta:null,motivo:'Ingreso completo y validado'};
+  if(t.estado_ingreso==='ACTIVACION_EXCEPCIONAL'){
+    if(excepcionVigenteRRHH2B(t,hoy)) return {produceEfectos:true,regimen:'EXCEPCIONAL',alerta:'Activación excepcional',motivo:'Activado con excepción; regularizar antes de '+t.excepcion_fecha_limite_regularizacion};
+    return {produceEfectos:false,regimen:'EXCEPCIONAL_INVALIDA',alerta:'Excepción vencida o incompleta',motivo:'La activación excepcional no está vigente'};
+  }
+  if(t.es_heredado===true) return {produceEfectos:true,regimen:'HEREDADO',alerta:'Requiere saneamiento',motivo:'Opera por continuidad (anterior a RRHH.2-B); completar checklist de saneamiento'};
+  if(ESTADOS_PENDIENTES_RRHH2B.includes(t.estado_ingreso)) return {produceEfectos:false,regimen:'EN_PREPARACION',alerta:'En preparación',motivo:'Ingreso incompleto; no produce efectos hasta activarse'};
+  return {produceEfectos:false,regimen:'NO_CLASIFICADO',alerta:'Sin clasificar',motivo:'Registro sin evaluar por el modelo'};
+};
+const puedeOperarEnMotor = (t, hoy) => (t && t.activo!==false) && (t && (t.estado==='ACTIVO'||t.estado==='PREAVISO')) && evaluarEfectoTrabajador(t,hoy).produceEfectos;
+
 /* ─── Íconos ────────────────────────────────────────────────── */
 const Icon = {
   dashboard:    <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
@@ -6883,7 +6909,8 @@ function Remuneraciones({ data, saveRem, insert, update }) {
             <FL label="Trabajador(a)">
               <select style={INP} value={tId} onChange={e => { setTId(e.target.value); setRes(null); setAsignacionesRem([]); setMontosAuto(null); }}>
                 <option value="">— Seleccionar —</option>
-                {data.trabajadores.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+                {/* RRHH.2-B FASE 3-D: solo trabajadores que producen efectos (heredados operativos + nuevos completos + excepción vigente). No borra histórico; solo filtra el selector de nueva liquidación. */}
+                {data.trabajadores.filter(t => puedeOperarEnMotor(t)).map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
               </select>
             </FL>
             {trabajador && (
