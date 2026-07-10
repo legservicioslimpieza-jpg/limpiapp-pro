@@ -5702,7 +5702,7 @@ function Incidencias({data,contratoId,insert,update}){
   const incs=contratoId?data.incidencias.filter(i=>i.contrato_id===contratoId):data.incidencias;
   const ab=incs.filter(i=>i.estado==="Abierta").length;
   const openNew=()=>{const deps=contratoId?data.dependencias.filter(d=>d.contrato_id===contratoId):data.dependencias;setForm({id:genId("IN"),contrato_id:contratoId||data.contratos.find(c=>c.activo)?.id||"",dep_id:deps[0]?.id||"",fecha_hora:new Date().toISOString(),tipo:"Falta Insumos",descripcion:"",estado:"Abierta",trabajador_id:""});};
-  const save=async()=>{if(!form.descripcion.trim())return;const ok=await insert("incidencias",form);if(ok)setForm(null);};
+  const save=async()=>{if(!form.descripcion.trim())return;const payload={...form,trabajador_id:form.trabajador_id||null};const ok=await insert("incidencias",payload);if(ok)setForm(null);};
   const cambiarEstado=async(inc,estado)=>update("incidencias",{...inc,estado});
   return(
     <div>
