@@ -3988,7 +3988,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               <FL label="Fecha ingreso a la empresa"><input type="date" style={INP} value={form.fecha_inicio||""} onChange={e=>setForm({...form,fecha_inicio:e.target.value})}/></FL>
               {form.tipo_contrato==="PLAZO FIJO" && <FL label="Fecha término (plazo fijo)"><input type="date" style={INP} value={form.fecha_termino_plazo||""} onChange={e=>setForm({...form,fecha_termino_plazo:e.target.value||null})}/></FL>}
               <FL label="Nacionalidad"><input style={INP} value={form.nacionalidad||""} onChange={e=>setForm({...form,nacionalidad:e.target.value})} placeholder="Chilena"/></FL>
-              <FL label="Fecha de nacimiento"><input type="date" style={INP} value={form.fecha_nacimiento||""} onChange={e=>setForm({...form,fecha_nacimiento:e.target.value||null})}/></FL>
+              <FL label="Fecha de nacimiento"><FechaInput style={INP} value={form.fecha_nacimiento||""} onChange={v=>setForm({...form,fecha_nacimiento:v||null})}/></FL>
               <FL label="Estado civil"><select style={INP} value={form.estado_civil||""} onChange={e=>setForm({...form,estado_civil:e.target.value})}><option value="">—</option><option>Soltero(a)</option><option>Casado(a)</option><option>Viudo(a)</option><option>Divorciado(a)</option><option>Separado(a) judicialmente</option><option>Conviviente civil</option></select></FL>
               <FL label="Teléfono"><input style={INP} value={form.telefono} onChange={e=>setForm({...form,telefono:e.target.value})} placeholder="+569XXXXXXXX"/></FL>
               <FL label="Email"><input style={INP} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="correo@empresa.cl"/></FL>
