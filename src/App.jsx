@@ -630,11 +630,15 @@ function FechaInput({value,onChange,style,max}){
   };
   const onText=e=>{ const v=e.target.value.replace(/[^\d/\-]/g,'').slice(0,10); setTxt(v); const dig=v.replace(/\D/g,''); if(v.length===0){ commit(''); } else if(v.length===10||dig.length===8){ commit(v); } else { setMsg('Completa la fecha en formato dd/mm/aaaa'); } };
   const onBlurText=()=>{ if(txt&&txt.trim()){ commit(txt); } };
+  // FECHA.2-B: abre el selector nativo desde el botón. showPicker() si existe; fallback focus/click.
+  const dateRef=useRef(null);
+  const abrirCalendario=()=>{ const el=dateRef.current; if(!el) return; if(typeof el.showPicker==='function'){ try{ el.showPicker(); }catch(_){ el.focus(); el.click(); } } else { el.focus(); el.click(); } };
   return (
     <div>
       <div style={{display:'flex',gap:6,alignItems:'center'}}>
         <input style={{...(style||INP),flex:1}} value={txt} onChange={onText} onBlur={onBlurText} placeholder="dd/mm/aaaa" inputMode="numeric" maxLength={10}/>
-        <input type="date" aria-label="Abrir calendario" title="Calendario" style={{width:36,minWidth:36,padding:'6px 2px',border:`1px solid ${C.border}`,borderRadius:6,background:C.surface,color:C.text,boxSizing:'border-box',cursor:'pointer'}} value={value?String(value).split('T')[0]:''} max={max||undefined} onChange={e=>{ const iv=e.target.value; if(iv){ setTxt(isoToDisp(iv)); setMsg(''); onChange(iv); } }}/>
+        <button type="button" aria-label="Abrir calendario" title="Abrir calendario" onClick={abrirCalendario} style={{width:36,minWidth:36,height:34,flex:'none',display:'flex',alignItems:'center',justifyContent:'center',border:`1px solid ${C.border}`,borderRadius:6,background:C.surface,color:C.text,cursor:'pointer',fontSize:15,padding:0}}>📅</button>
+        <input ref={dateRef} type="date" tabIndex={-1} aria-hidden="true" style={{position:'absolute',width:1,height:1,opacity:0,pointerEvents:'none',border:0,padding:0,margin:0}} value={value?String(value).split('T')[0]:''} max={max||undefined} onChange={e=>{ const iv=e.target.value; if(iv){ setTxt(isoToDisp(iv)); setMsg(''); onChange(iv); } }}/>
       </div>
       {msg&&<div style={{fontSize:11,color:'#9a3412',marginTop:4}}>{msg}</div>}
     </div>
