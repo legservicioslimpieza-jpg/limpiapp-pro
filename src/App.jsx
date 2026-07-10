@@ -5157,7 +5157,8 @@ function TabEvidencias({ data, contratoId }) {
         <FL label="Trabajador">
           <select style={{...INP,width:200}} value={filtroT} onChange={e=>setFiltroT(e.target.value)}>
             <option value="">Todos</option>
-            {(data.trabajadores||[]).filter(t=>t.activo).map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}
+            {/* RRHH.2-B FASE 4-C2: contención por coherencia (reporte). */}
+            {(data.trabajadores||[]).filter(t=>puedeOperarEnMotor(t)).map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}
           </select>
         </FL>
         <FL label="Contrato">
@@ -5437,7 +5438,8 @@ function Asistencia({data,contratoId,insert,update}){
 
   // Resumen mensual
   const resumen = data.trabajadores
-    .filter(t=>["TR001","TR002","TR003","TR004","TR005"].includes(t.id))
+    // RRHH.2-B FASE 4-C2: antes hardcode [TR001,TR002,TR003,TR004,TR005]. Ahora dotación operativa vía helper.
+    .filter(t=>puedeOperarEnMotor(t))
     .map(t=>{
       const recs=(data.asistencia||[]).filter(a=>a.trabajador_id===t.id&&a.fecha.slice(0,7)===filtroMes);
       return {
@@ -5474,7 +5476,8 @@ function Asistencia({data,contratoId,insert,update}){
             <FL label="Trabajador(a)">
               <select style={INP} value={tId} onChange={e=>{setTId(e.target.value);setCId("");}}>
                 <option value="">— Seleccionar —</option>
-                {data.trabajadores.filter(t=>t.activo&&["TR001","TR003","TR004","TR005"].includes(t.id)).map(t=>(
+                {/* RRHH.2-B FASE 4-C2: contención + arreglo de hardcode. Antes: 4 ids fijos [TR001,TR003,TR004,TR005]. Ahora: dotación operativa real vía helper. */}
+                {data.trabajadores.filter(t=>puedeOperarEnMotor(t)).map(t=>(
                   <option key={t.id} value={t.id}>{t.nombre}</option>
                 ))}
               </select>
@@ -5572,7 +5575,8 @@ function Asistencia({data,contratoId,insert,update}){
             <FL label="Trabajador">
               <select style={{...INP,width:200}} value={filtroTrab} onChange={e=>setFiltroTrab(e.target.value)}>
                 <option value="">Todos</option>
-                {data.trabajadores.filter(t=>t.activo).map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}
+                {/* RRHH.2-B FASE 4-C2: contención por coherencia (historial). */}
+                {data.trabajadores.filter(t=>puedeOperarEnMotor(t)).map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}
               </select>
             </FL>
           </div>
