@@ -474,6 +474,30 @@ const esHeredadoConSaneamientoRRHH2B = (t) => t && !esDesvinculadoRRHH2B(t) && t
 const esEnPreparacionRRHH2B = (t) => t && !esDesvinculadoRRHH2B(t) && t.es_heredado!==true
   && (t.estado==='PREINGRESO' || t.estado_ingreso==='BORRADOR' || ESTADOS_PENDIENTES_RRHH2B.includes(t.estado_ingreso)); // nuevo incompleto, no opera
 
+// RRHH.2-B FASE 5-B: checklist de ingreso en vivo v0 (SOLO LECTURA). No escribe estado_ingreso, no activa, no toca motores.
+// primerPendiente=null NO significa ACTIVO_COMPLETO: solo que los 2 items de v0 (datos base + asignación) están cumplidos.
+const evaluarChecklistIngreso = (t, asignacionesDelTrabajador) => {
+  const asigs = asignacionesDelTrabajador || [];
+  const dbNombre = !!(t && t.nombre && String(t.nombre).trim());
+  const dbRut = !!(t && t.rut && validarRutCL(t.rut));
+  const dbNacimiento = !!(t && t.fecha_nacimiento);
+  const dbContacto = !!(t && ((t.telefono && String(t.telefono).trim()) || (t.email && String(t.email).trim())));
+  const datosBaseOk = dbNombre && dbRut && dbNacimiento && dbContacto;
+  const asignacionOk = asigs.some(isAsignacionVigenteHoy);
+  const items = [
+    { clave:'datos_base', ok:datosBaseOk, etiqueta:'Datos base', detalle:[
+      {campo:'Nombre', ok:dbNombre},
+      {campo:'RUT válido', ok:dbRut},
+      {campo:'Fecha de nacimiento', ok:dbNacimiento},
+      {campo:'Contacto (teléfono o email)', ok:dbContacto},
+    ]},
+    { clave:'asignacion', ok:asignacionOk, etiqueta:'Asignación remuneracional vigente' },
+  ];
+  const primerPendiente = !datosBaseOk ? 'PENDIENTE_DATOS_BASE' : (!asignacionOk ? 'PENDIENTE_ASIGNACION' : null);
+  const completos = items.filter(i=>i.ok).length;
+  return { items, primerPendiente, completos, total: items.length };
+};
+
 /* ─── Íconos ────────────────────────────────────────────────── */
 const Icon = {
   dashboard:    <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
@@ -3939,6 +3963,22 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           <div style={{display:"flex",gap:8,marginBottom:16,borderBottom:`1px solid ${C.borderLight}`,paddingBottom:12}}>
             {["datos","remuneracion","asignaciones","anexos","documentos","expediente"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:tab===t?C.accent:"transparent",color:tab===t?"#fff":C.textMuted,border:`1px solid ${tab===t?C.accent:C.border}`,borderRadius:6,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:tab===t?600:400}}>{t==="datos"?"Datos personales":t==="remuneracion"?"Remuneración":t==="asignaciones"?"Asignaciones":t==="anexos"?"Anexos":t==="documentos"?"Documentos":"Expediente"}</button>)}
           </div>
+          {tab==="datos" && (form.estado==='PREINGRESO'||form.estado_ingreso==='BORRADOR'||ESTADOS_PENDIENTES_RRHH2B.includes(form.estado_ingreso)) && (()=>{
+            const chk = evaluarChecklistIngreso(form, asignacionesTrab);
+            return (
+              <div style={{background:'#fefce8',border:`1px solid ${C.yellowBorder}`,borderRadius:8,padding:12,marginBottom:12}}>
+                <div style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:6}}>Checklist de ingreso ({chk.completos}/{chk.total})</div>
+                {chk.items.map(it=>(
+                  <div key={it.clave} style={{fontSize:12,marginBottom:4}}>
+                    <span style={{color:it.ok?C.green:C.yellow,fontWeight:600}}>{it.ok?'✓':'○'} {it.etiqueta}</span>
+                    {it.detalle && !it.ok && (<span style={{color:C.textMuted}}> — falta: {it.detalle.filter(d=>!d.ok).map(d=>d.campo).join(', ')}</span>)}
+                  </div>
+                ))}
+                <div style={{fontSize:11,color:C.textMuted,marginTop:6}}>{chk.primerPendiente ? `Primer pendiente: ${chk.primerPendiente==='PENDIENTE_DATOS_BASE'?'datos base':'asignación'}` : 'Datos base y asignación completos.'}</div>
+                <div style={{fontSize:11,color:C.textMuted,marginTop:4,fontStyle:'italic'}}>Checklist parcial v0: evalúa datos base y asignación. La activación requiere más pasos.</div>
+              </div>
+            );
+          })()}
           {tab==="datos"&&(
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
               <FL label="Nombre completo"><input style={INP} value={form.nombre} onChange={e=>setForm({...form,nombre:e.target.value})} placeholder="Nombre Apellido Apellido"/></FL>
