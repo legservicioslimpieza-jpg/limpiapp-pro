@@ -466,6 +466,14 @@ const evaluarEfectoTrabajador = (t, hoy) => {
 };
 const puedeOperarEnMotor = (t, hoy) => (t && t.activo!==false) && (t && (t.estado==='ACTIVO'||t.estado==='PREAVISO')) && evaluarEfectoTrabajador(t,hoy).produceEfectos;
 
+// RRHH.2-B FASE 4-G2: clasificadores de dotación (lectura operacional vs completitud, buckets mutuamente excluyentes).
+const esDesvinculadoRRHH2B = (t) => t && (t.estado==='DESVINCULADO' || t.activo===false);
+const esOperativoRRHH2B = (t) => puedeOperarEnMotor(t);                                  // KPI principal: dotación que opera hoy
+const esCompletoRRHH2B = (t) => t && !esDesvinculadoRRHH2B(t) && t.estado_ingreso==='ACTIVO_COMPLETO';               // saneado, sin deuda
+const esHeredadoConSaneamientoRRHH2B = (t) => t && !esDesvinculadoRRHH2B(t) && t.es_heredado===true && ESTADOS_PENDIENTES_RRHH2B.includes(t.estado_ingreso); // opera con deuda
+const esEnPreparacionRRHH2B = (t) => t && !esDesvinculadoRRHH2B(t) && t.es_heredado!==true
+  && (t.estado==='PREINGRESO' || t.estado_ingreso==='BORRADOR' || ESTADOS_PENDIENTES_RRHH2B.includes(t.estado_ingreso)); // nuevo incompleto, no opera
+
 /* ─── Íconos ────────────────────────────────────────────────── */
 const Icon = {
   dashboard:    <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
@@ -1040,7 +1048,7 @@ function Dashboard({data,contratoId,insert,update,setTab}){
         <KPICard label="Ejecución hoy" value={`${evHoy.length}/${diaria.length}`} sub="Tareas diarias" color={C.accent}/>
         <KPICard label="Incidencias abiertas" value={incAb} sub={incAb===0?"Sin pendientes":"Requieren atención"} color={incAb>0?C.red:C.green}/>
         <KPICard label="Contratos vigentes" value={data.contratos.filter(c=>c.activo&&c.estado==="Vigente").length} sub="Activos"/>
-        <KPICard label="Trabajadores activos" value={data.trabajadores.filter(t=>t.activo).length} sub={`Desvinculados: ${data.trabajadores.filter(t=>!t.activo&&t.estado==='DESVINCULADO').length}`} color={C.accent}/>
+        <KPICard label="Trabajadores operativos" value={data.trabajadores.filter(esOperativoRRHH2B).length} sub={`Saneados ${data.trabajadores.filter(esCompletoRRHH2B).length} · Heredados ${data.trabajadores.filter(esHeredadoConSaneamientoRRHH2B).length} · En prep. ${data.trabajadores.filter(esEnPreparacionRRHH2B).length} · Desvinc. ${data.trabajadores.filter(esDesvinculadoRRHH2B).length}`} color={C.accent}/>
         <KPICard label="Dependencias" value={contratoId?data.dependencias.filter(d=>d.contrato_id===contratoId&&d.activo).length:data.dependencias.filter(d=>d.activo).length} sub="En control"/>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
@@ -3891,7 +3899,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           </div>
         );
       })()}
-      <PageHeader title="Trabajadores" subtitle={contratoId ? `${trabajadoresFiltrados.filter(t=>t.activo).length} asignados` : `${data.trabajadores.filter(t=>t.activo).length} activos`} action={<PrimaryBtn onClick={openNew}>+ Nuevo trabajador</PrimaryBtn>}/>
+      <PageHeader title="Trabajadores" subtitle={contratoId ? `${trabajadoresFiltrados.filter(esOperativoRRHH2B).length} asignados` : `${data.trabajadores.filter(esOperativoRRHH2B).length} operativos`} action={<PrimaryBtn onClick={openNew}>+ Nuevo trabajador</PrimaryBtn>}/>
       {form&&(
         <div style={{background:C.surface,border:`1px solid ${C.accent}`,borderRadius:8,padding:20,marginBottom:16,boxShadow:`0 0 0 3px ${C.accent}14`}}>
           {(()=>{
@@ -4380,6 +4388,27 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           rows={trabajadoresFiltrados}
         />
       </Panel>
+      {/* RRHH.2-B FASE 4-G2: secciones de dotación no operativa (visibilidad de la deuda) */}
+      {data.trabajadores.filter(esHeredadoConSaneamientoRRHH2B).length>0 && (
+        <Panel title={`Requieren saneamiento (${data.trabajadores.filter(esHeredadoConSaneamientoRRHH2B).length})`}>
+          {data.trabajadores.filter(esHeredadoConSaneamientoRRHH2B).map(t=>(
+            <div key={t.id} style={{padding:'6px 8px',borderBottom:`1px solid ${C.border}`,fontSize:13,display:'flex',justifyContent:'space-between'}}>
+              <span>{t.nombre}</span>
+              <span style={{color:C.textMuted,fontSize:11}}>Opera con deuda · {t.estado_ingreso}</span>
+            </div>
+          ))}
+        </Panel>
+      )}
+      {data.trabajadores.filter(esEnPreparacionRRHH2B).length>0 && (
+        <Panel title={`En preparación (${data.trabajadores.filter(esEnPreparacionRRHH2B).length})`}>
+          {data.trabajadores.filter(esEnPreparacionRRHH2B).map(t=>(
+            <div key={t.id} style={{padding:'6px 8px',borderBottom:`1px solid ${C.border}`,fontSize:13,display:'flex',justifyContent:'space-between'}}>
+              <span>{t.nombre}</span>
+              <span style={{color:C.textMuted,fontSize:11}}>No opera aún · {t.estado_ingreso||t.estado||'BORRADOR'}</span>
+            </div>
+          ))}
+        </Panel>
+      )}
     </div>
   );
 }
