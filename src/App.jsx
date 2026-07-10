@@ -1226,7 +1226,7 @@ const FINANC_TAG={
 function Contratos({data,insert,update}){
   const [form,setForm]=useState(null);
   const isNew=form&&!data.contratos.find(c=>c.id===form.id);
-  const openNew=()=>setForm({id:genId("CT"),cliente:"",instalacion:"",direccion:"",supervisor_id:data.trabajadores.find(t=>t.cargo==="Supervisor"||t.cargo==="Supervisora")?.id||"",estado:"Vigente",activo:true,tipo_centro_costo:"LICITACION_PUBLICA",estado_financiero:"financiado"});
+  const openNew=()=>setForm({id:genId("CT"),cliente:"",instalacion:"",direccion:"",supervisor_id:data.trabajadores.filter(t=>puedeOperarEnMotor(t)).find(t=>t.cargo==="Supervisor"||t.cargo==="Supervisora")?.id||"",estado:"Vigente",activo:true,tipo_centro_costo:"LICITACION_PUBLICA",estado_financiero:"financiado"});
   const save=async()=>{if(!form.cliente.trim())return;
     // CC.1: al CREAR un centro externo, exigir RUT válido. En edición legacy solo se advierte (no se bloquea).
     if(isNew && ccEsExterno(form.tipo_centro_costo)){
@@ -1265,7 +1265,7 @@ function Contratos({data,insert,update}){
           <FL label="Probabilidad renovación"><select style={INP} value={form.probabilidad_renovacion||"media"} onChange={e=>setForm({...form,probabilidad_renovacion:e.target.value})}><option value="alta">Alta</option><option value="media">Media</option><option value="baja">Baja</option><option value="descartada">Descartada</option></select></FL>
           <FL label="Estado renovación"><select style={INP} value={form.estado_renovacion||"pendiente"} onChange={e=>setForm({...form,estado_renovacion:e.target.value})}><option value="vigente">Vigente</option><option value="en evaluacion">En evaluación</option><option value="pendiente">Pendiente</option><option value="adjudicada otra">Adjudicada otra empresa</option><option value="renovada">Renovada</option><option value="cerrada">Cerrada</option></select></FL>
           <FL label="Días de alerta (aviso anticipado)"><input type="number" min={30} max={180} style={INP} value={form.dias_alerta||60} onChange={e=>setForm({...form,dias_alerta:Number(e.target.value)})}/></FL>
-          <FL label="Supervisor"><select style={INP} value={form.supervisor_id||""} onChange={e=>setForm({...form,supervisor_id:e.target.value})}><option value="">— Sin asignar —</option>{data.trabajadores.map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}</select></FL>
+          <FL label="Supervisor"><select style={INP} value={form.supervisor_id||""} onChange={e=>setForm({...form,supervisor_id:e.target.value})}><option value="">— Sin asignar —</option>{/* RRHH.2-B FASE 4-E2: piso mínimo puedeOperarEnMotor (no desvinculados/PREINGRESO; SUP001 heredado sigue). */}{data.trabajadores.filter(t=>puedeOperarEnMotor(t)).map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}</select></FL>
           <FL label="ID licitación / OC / contrato, si aplica"><input style={INP} value={form.licitacion_id||""} onChange={e=>setForm({...form,licitacion_id:e.target.value})} placeholder="Ej: 892200-1-LE26"/></FL>
           <FL label="Ingreso / valor referencial del contrato ($)"><input type="number" min={0} style={INP} value={form.valor_referencial_contrato??""} onChange={e=>setForm({...form,valor_referencial_contrato:e.target.value===""?null:Number(e.target.value)})} placeholder="Ej: 900000"/></FL>
           <FL label="Periodicidad del valor"><select style={INP} value={form.periodicidad_valor||""} onChange={e=>setForm({...form,periodicidad_valor:e.target.value||null})}><option value="">— Seleccionar —</option><option value="mensual">Mensual</option><option value="unico">Único</option><option value="por_evento">Por evento</option><option value="orden_servicio">Por orden de servicio</option><option value="estado_pago">Por estado de pago</option></select></FL>
@@ -5740,7 +5740,7 @@ function Supervisiones({data,contratoId,insert}){
   const [form,setForm]=useState(null);
   const sups=contratoId?data.supervisiones.filter(s=>s.contrato_id===contratoId):data.supervisiones;
   const cumPr=sups.length?Math.round(sups.reduce((a,s)=>a+s.cumplimiento,0)/sups.length):0;
-  const openNew=()=>setForm({id:genId("SV"),contrato_id:contratoId||data.contratos.find(c=>c.activo)?.id||"",supervisor_id:data.trabajadores.find(t=>t.cargo==="Supervisor"||t.cargo==="Supervisora")?.id||data.trabajadores[0]?.id||"",fecha:new Date().toISOString().slice(0,10),cumplimiento:90,observacion:""});
+  const openNew=()=>setForm({id:genId("SV"),contrato_id:contratoId||data.contratos.find(c=>c.activo)?.id||"",supervisor_id:data.trabajadores.filter(t=>puedeOperarEnMotor(t)).find(t=>t.cargo==="Supervisor"||t.cargo==="Supervisora")?.id||data.trabajadores.filter(t=>puedeOperarEnMotor(t))[0]?.id||"",fecha:new Date().toISOString().slice(0,10),cumplimiento:90,observacion:""});
   const save=async()=>{const ok=await insert("supervisiones",form);if(ok)setForm(null);};
   return(
     <div>
@@ -5759,7 +5759,7 @@ function Supervisiones({data,contratoId,insert}){
               </div>
             </div>
           </FL>
-          <FL label="Supervisor"><select style={INP} value={form.supervisor_id} onChange={e=>setForm({...form,supervisor_id:e.target.value})}>{data.trabajadores.map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}</select></FL>
+          <FL label="Supervisor"><select style={INP} value={form.supervisor_id} onChange={e=>setForm({...form,supervisor_id:e.target.value})}>{/* RRHH.2-B FASE 4-E2: piso mínimo puedeOperarEnMotor. */}{data.trabajadores.filter(t=>puedeOperarEnMotor(t)).map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}</select></FL>
           <FL label="Observaciones" span><textarea rows={3} style={{...INP,resize:"vertical"}} value={form.observacion} onChange={e=>setForm({...form,observacion:e.target.value})} placeholder="Novedades y puntos de mejora…"/></FL>
         </FormCard>
       )}
