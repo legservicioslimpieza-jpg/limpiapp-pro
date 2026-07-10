@@ -3486,7 +3486,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       .filter(p=>p.periodo)
       .sort((a,b)=>String(b.periodo).localeCompare(String(a.periodo)))[0]?.imm;
     setTab("datos");setAsigForm(null);
-    setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",domicilio:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"ACTIVO",fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:"",nacionalidad:"Chilena",fecha_nacimiento:"",estado_civil:"",fecha_termino_plazo:null,ciudad:"",region:""});
+    setForm({id:genId("TR"),nombre:"",cargo:"Auxiliar Aseo",telefono:"",email:"",domicilio:"",activo:true,rut:"",sueldo_base:(Number(immN)>0?Number(immN):0),tipo_contrato:"PLAZO FIJO",afp:"MODELO",salud:"FONASA",bono_asistencia:0,bono_movilizacion:0,bono_colacion:0,metodo_gratificacion:"25% MENSUAL",estado:"PREINGRESO",estado_ingreso:"BORRADOR",es_heredado:false,fecha_inicio:"",correo_notificaciones:"",autoriza_com_electronica:false,fecha_actualizacion_datos:"",nacionalidad:"Chilena",fecha_nacimiento:"",estado_civil:"",fecha_termino_plazo:null,ciudad:"",region:""});
   };
   const save=async()=>{if(!form.nombre.trim())return;const _cj=(Array.isArray(form.clausulas_contrato_original)?form.clausulas_contrato_original:[]).find(c=>c&&c.clausula==="jornada");const vj=_cj?validarJornada({...(_cj.contenido||{}),vigencia_desde:_cj.vigencia_desde}):{ok:true,errores:[]};if(!vj.ok){alert("No se puede guardar la jornada:\n\n• "+vj.errores.join("\n• "));return;}const clean=limpiarPayloadTrabajador({...form,fecha_actualizacion_datos:new Date().toISOString().slice(0,10)});
     const ok=isNew?await insert("trabajadores",clean):await update("trabajadores",clean);if(ok){setForm(null);setAsigForm(null);}};
@@ -3905,7 +3905,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
           {(()=>{
             const pa=preavisoActivo(form.id, data);
             const estado=(form.activo===false||form.estado==='DESVINCULADO')?{t:'Desvinculado',c:'#6b7280',bg:'#f3f4f6'}
-              :(form.estado==='PREAVISO'||pa)?{t:'Preaviso',c:'#1e40af',bg:'#eff6ff'}
+              :(form.estado==='PREINGRESO'||form.estado_ingreso==='BORRADOR')?{t:'En preparación',c:'#a16207',bg:'#fefce8'}:(form.estado==='PREAVISO'||pa)?{t:'Preaviso',c:'#1e40af',bg:'#eff6ff'}
               :{t:'Activo',c:'#166534',bg:'#f0fdf4'};
             const asigs=(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id&&a.activo!==false&&a.estado_asig!=='terminada');
             const contratosTxt=asigs.length?asigs.map(a=>{
@@ -4382,7 +4382,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               const antig=anios>0?`${anios}a ${mRest}m`:`${meses}m`;
               return <span style={{color:C.textMuted,fontSize:12}}>{fecha}<br/><span style={{color:C.green,fontWeight:600}}>{antig}</span></span>;
             }},
-            {key:"activo",label:"Estado",render:r=><Tag text={r.activo?"Activo":"Inactivo"} scheme={r.activo?{bg:C.greenBg,text:C.green,border:C.greenBorder}:{bg:"#f9fafb",text:C.textMuted,border:C.border}}/>},
+            {key:"activo",label:"Estado",render:r=>{const enPrep=r.estado==="PREINGRESO"||r.estado_ingreso==="BORRADOR"; return <Tag text={enPrep?"En preparación":(r.activo?"Activo":"Inactivo")} scheme={enPrep?{bg:C.yellowBg,text:C.yellow,border:C.yellowBorder}:(r.activo?{bg:C.greenBg,text:C.green,border:C.greenBorder}:{bg:"#f9fafb",text:C.textMuted,border:C.border})}/>;}},
             {key:"edit",label:"",render:r=><button onClick={()=>{setTab("datos");setAsigForm(null);setForm({...r});}} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
           ]}
           rows={trabajadoresFiltrados}
