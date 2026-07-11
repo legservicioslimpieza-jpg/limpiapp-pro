@@ -1451,6 +1451,8 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
     const rec={...form,
       fecha_firma:form.fecha_firma?dateNoon(form.fecha_firma):null,
       fecha_vigencia:form.fecha_vigencia?dateNoon(form.fecha_vigencia):null,
+      centro_anterior: form.centro_anterior || null,
+      centro_nuevo: form.centro_nuevo || null,
     };
     const isEdit=anexos.find(a=>a.id===form.id);
     const ok=await(isEdit?update('anexos_contrato',rec):insert('anexos_contrato',rec));
