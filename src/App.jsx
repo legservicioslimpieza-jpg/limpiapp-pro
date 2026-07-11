@@ -616,19 +616,20 @@ function FechaInput({value,onChange,style,max}){
   const isoToDisp=iso=>{ if(!iso) return ''; const p=String(iso).split('T')[0].split('-'); return (p.length===3&&p[0]&&p[1]&&p[2])?`${p[2]}/${p[1]}/${p[0]}`:''; };
   const [txt,setTxt]=useState(isoToDisp(value));
   const [msg,setMsg]=useState('');
-  useEffect(()=>{ setTxt(isoToDisp(value)); },[value]);
+  const lastCommitted = useRef(value);
+  useEffect(()=>{ if (value !== lastCommitted.current) { setTxt(isoToDisp(value)); lastCommitted.current = value; if (!value) setMsg(''); } },[value]);
   const aDisplay=v=>{ const s=String(v||'').trim(); const soloDig=s.replace(/\D/g,''); if(/^\d{8}$/.test(soloDig)) return `${soloDig.slice(0,2)}/${soloDig.slice(2,4)}/${soloDig.slice(4)}`; const m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/); if(m) return `${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/${m[3]}`; return s; };
   const commit=raw=>{
     const v=aDisplay(raw);
-    if(v.length===0){ setMsg(''); onChange(''); return true; }
+    if(v.length===0){ setMsg(''); lastCommitted.current=''; onChange(''); return true; }
     const m=v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if(!m){ setMsg('Fecha incompleta o inválida (usa dd/mm/aaaa)'); return false; }
+    if(!m){ setMsg('Fecha incompleta o inválida (usa dd/mm/aaaa)'); lastCommitted.current=''; onChange(''); return false; }
     const d=m[1],mo=m[2],y=m[3]; const iso=`${y}-${mo}-${d}`; const dt=new Date(iso+'T12:00:00');
-    if(isNaN(dt)||dt.getFullYear()!=+y||(dt.getMonth()+1)!=+mo||dt.getDate()!=+d){ setMsg('Fecha inválida'); return false; }
-    if(max&&iso>max){ setMsg('La fecha no puede ser posterior a hoy'); return false; }
-    setMsg(''); setTxt(v); onChange(iso); return true;
+    if(isNaN(dt)||dt.getFullYear()!=+y||(dt.getMonth()+1)!=+mo||dt.getDate()!=+d){ setMsg('Fecha inválida'); lastCommitted.current=''; onChange(''); return false; }
+    if(max&&iso>max){ setMsg('La fecha no puede ser posterior a hoy'); lastCommitted.current=''; onChange(''); return false; }
+    setMsg(''); setTxt(v); lastCommitted.current=iso; onChange(iso); return true;
   };
-  const onText=e=>{ const v=e.target.value.replace(/[^\d/\-]/g,'').slice(0,10); setTxt(v); const dig=v.replace(/\D/g,''); if(v.length===0){ commit(''); } else if(v.length===10||dig.length===8){ commit(v); } else { setMsg('Completa la fecha en formato dd/mm/aaaa'); } };
+  const onText=e=>{ const v=e.target.value.replace(/[^\d/\-]/g,'').slice(0,10); setTxt(v); const dig=v.replace(/\D/g,''); if(v.length===0){ commit(''); } else if(v.length===10||dig.length===8){ commit(v); } else { setMsg('Completa la fecha en formato dd/mm/aaaa'); lastCommitted.current=''; onChange(''); } };
   const onBlurText=()=>{ if(txt&&txt.trim()){ commit(txt); } };
   return (
     <div>
@@ -1562,8 +1563,8 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
                 {ESTADOS_ANEXO.map(e=><option key={e.val} value={e.val}>{e.label}</option>)}
               </select>
             </FL>
-            <FL label="Fecha firma"><input type="date" style={INP} value={form.fecha_firma?.split('T')[0]||''} onChange={e=>setForm({...form,fecha_firma:e.target.value})}/></FL>
-            <FL label="Fecha vigencia *"><input type="date" style={INP} value={form.fecha_vigencia?.split('T')[0]||''} onChange={e=>setForm({...form,fecha_vigencia:e.target.value})}/></FL>
+            <FL label="Fecha firma"><FechaInput style={INP} value={form.fecha_firma||""} onChange={v=>setForm({...form,fecha_firma:v})}/></FL>
+            <FL label="Fecha vigencia *"><FechaInput style={INP} value={form.fecha_vigencia||""} onChange={v=>setForm({...form,fecha_vigencia:v})}/></FL>
             <FL label="Motivo / observación" style={{gridColumn:'1/-1'}}>
               <input style={INP} value={form.motivo||''} onChange={e=>setForm({...form,motivo:e.target.value})} placeholder="Ej: Reducción acordada por cierre CT007"/>
             </FL>
@@ -2992,7 +2993,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
                 </div>
               )}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                <FL label="Fecha de separación"><input type="date" style={INP} value={finiquitoModal.fechaSep||""} onChange={e=>setFiniquitoModal({...finiquitoModal,fechaSep:e.target.value})}/></FL>
+                <FL label="Fecha de separación"><FechaInput style={INP} value={finiquitoModal.fechaSep||""} onChange={v=>setFiniquitoModal({...finiquitoModal,fechaSep:v})}/></FL>
                 <FL label="Causal">
                   <select style={INP} value={finiquitoModal.motivoCode} onChange={e=>setFiniquitoModal({...finiquitoModal,motivoCode:e.target.value})}>
                     <option value="art161">Art. 161 — Necesidades de la empresa</option>
@@ -3086,7 +3087,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
                   Para esta causal (mutuo acuerdo / renuncia) <b>no corresponde</b> una carta de aviso de despido del Art. 162. El término se documenta con el finiquito y, en su caso, la carta de renuncia del trabajador.
                 </div>
               ):(<>
-                <FL label="Fecha de separación"><input type="date" style={INP} value={cartaModal.fechaSep||""} onChange={e=>setCartaModal({...cartaModal,fechaSep:e.target.value})}/></FL>
+                <FL label="Fecha de separación"><FechaInput style={INP} value={cartaModal.fechaSep||""} onChange={v=>setCartaModal({...cartaModal,fechaSep:v})}/></FL>
                 {cruces.length>0&&(
                   <div style={{marginTop:10,background:C.surfaceAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 12px',fontSize:11,color:C.text}}>
                     <b>Contrato / asignación asociada</b>
