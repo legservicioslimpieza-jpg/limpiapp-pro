@@ -2776,7 +2776,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
                 {Object.entries(TIPO_DOC_LABEL).map(([k,v])=><option key={k} value={k}>{v}</option>)}
               </select>
             </FL>
-            <FL label="Fecha del documento"><input type="date" style={INP} value={subForm.fecha_documento||""} onChange={e=>setSubForm({...subForm,fecha_documento:e.target.value})}/></FL>
+            <FL label="Fecha del documento"><FechaInput style={INP} value={subForm.fecha_documento||""} onChange={v=>setSubForm({...subForm,fecha_documento:v})}/></FL>
             <FL label="Estado">
               <select style={INP} value={subForm.estado} onChange={e=>setSubForm({...subForm,estado:e.target.value})}>
                 {Object.entries(ESTADO_DOC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
@@ -4134,7 +4134,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                       <option value="ordinaria">Ordinaria</option><option value="parcial">Parcial</option>
                       <option value="bisemanal">Bisemanal</option><option value="otra">Otra</option>
                     </select></FL>
-                    <FL label="Vigencia desde (fecha real del contrato)"><input type="date" style={INP} value={vigDesde||""} onChange={e=>escribir(bloques,{vigencia:e.target.value})}/></FL>
+                    <FL label="Vigencia desde (fecha real del contrato)"><FechaInput style={INP} value={vigDesde||""} onChange={v=>escribir(bloques,{vigencia:v})}/></FL>
                   </div>
                   {bloques.map((b,i)=>{ const calc=calcHorasEfectivasBloque(b); const dif=b.ajuste_manual&&Math.abs(calc-(Number(b.horas_efectivas)||0))>0.01;
                     return (
