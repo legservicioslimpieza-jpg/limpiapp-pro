@@ -2727,11 +2727,12 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
   };
   const verArchivo=async(d)=>{
     if(!d.archivo_url) return;
+    const win = window.open('', '_blank'); // DOCS.VER.1: abrir pestaña sincrónicamente al clic (evita bloqueo de pop-ups)
     try{
       const {data:s,error}=await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(d.archivo_url,300);
-      if(error||!s){ alert("No se pudo abrir el archivo."); return; }
-      window.open(s.signedUrl,"_blank");
-    }catch(e){ alert("Error: "+e.message); }
+      if(error||!s?.signedUrl){ if(win) win.close(); alert("No se pudo abrir el archivo."); return; }
+      if(win){ win.location.href = s.signedUrl; } else { window.location.href = s.signedUrl; }
+    }catch(e){ if(win) win.close(); alert("Error: "+e.message); }
   };
   const cambiarEstadoDoc=async(d,estado)=>{ await update('documentos_trabajador',{...d,estado}); };
 
@@ -3298,11 +3299,12 @@ function TabExpediente({trabajador, data, update}){
   };
   const verArchivo=async(d)=>{
     if(!d.archivo_url) return;
+    const win = window.open('', '_blank'); // DOCS.VER.1: abrir pestaña sincrónicamente al clic (evita bloqueo de pop-ups)
     try{
       const {data:s,error}=await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(d.archivo_url,300);
-      if(error||!s){ alert("No se pudo abrir el archivo."); return; }
-      window.open(s.signedUrl,"_blank");
-    }catch(e){ alert("Error: "+e.message); }
+      if(error||!s?.signedUrl){ if(win) win.close(); alert("No se pudo abrir el archivo."); return; }
+      if(win){ win.location.href = s.signedUrl; } else { window.location.href = s.signedUrl; }
+    }catch(e){ if(win) win.close(); alert("Error: "+e.message); }
   };
 
   // Checklist de obligatorios y completitud (fuente única compartida con 8D.6)
