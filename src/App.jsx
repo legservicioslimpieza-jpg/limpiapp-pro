@@ -304,6 +304,11 @@ const limpiarPayloadTrabajador = (obj) => {
 
 /* ─── Formatters ────────────────────────────────────────────── */
 const clp = n => `$${Math.round(n||0).toLocaleString("es-CL")}`;
+// REM.TEMP.1-B fix 1: quitar campos de trazabilidad (_sueldoLegal, _descuadre) antes de persistir en Supabase.
+const limpiarLiquidacionParaGuardar = (r) => {
+  const { _sueldoLegal, _descuadre, ...clean } = r || {};
+  return clean;
+};
 const pct = n => `${((n||0)*100).toFixed(2)}%`;
 // J2-lite: formatea un porcentaje ya en escala 0-100 con máximo 2 decimales (coma decimal es-CL). 133.3299… -> "133,33%".
 const fmtPct = n => `${(Math.round((Number(n)||0)*100)/100).toLocaleString("es-CL",{maximumFractionDigits:2})}%`;
@@ -434,6 +439,79 @@ const isAsignacionVigenteHoy = a => {
 };
 const isAsignacionRemuneracional = a => a && a.afecta_remuneracion !== false;
 const isAsignacionOperacional = a => a && a.afecta_remuneracion === false;
+
+// REM.TEMP.1-B: sueldo legal vigente del período, derivado de anexos (transiciones sueldo_anterior->sueldo_nuevo).
+// Función pura de lectura: no escribe nada, no llama a Supabase. periodo: 'yyyy-mm'.
+const sueldoVigente = (trabajador, periodo, anexosDelTrabajador) => {
+  const [yPeriodo, mPeriodo] = periodo.split('-').map(Number);
+  const ultimoDia = new Date(yPeriodo, mPeriodo, 0).getDate();
+  const finPeriodo = `${periodo}-${String(ultimoDia).padStart(2,'0')}`; // último día real del mes (yyyy-mm-dd), comparable como string
+  const anexosSueldo = (anexosDelTrabajador||[])
+    .filter(a => a && (a.estado==='firmado'||a.estado==='aplicado') && a.sueldo_nuevo!=null
+      && ['aumento_remuneracion','reduccion_remuneracion','cambio_multiple'].includes(a.tipo_anexo))
+    .map(a => ({...a, fv: a.fecha_vigencia?String(a.fecha_vigencia).split('T')[0]:''}))
+    .filter(a => a.fv)
+    .sort((a,b)=> a.fv<b.fv?-1:(a.fv>b.fv?1:0));
+
+  const vigentes = anexosSueldo.filter(a => a.fv <= finPeriodo);
+  const anexoVigente = vigentes.length ? vigentes[vigentes.length-1] : null;
+
+  if (anexoVigente) {
+    const diaVigencia = anexoVigente.fv.slice(8,10); // 'dd' del fecha_vigencia
+    const esInicioMes = diaVigencia === '01';
+    // ¿la vigencia cae DENTRO del período consultado (mismo mes), no en un mes anterior ya cerrado?
+    const mesVigencia = anexoVigente.fv.slice(0,7); // 'yyyy-mm'
+    const caeDentroDelPeriodo = mesVigencia === periodo;
+    if (caeDentroDelPeriodo && !esInicioMes) {
+      const fvDate = new Date(anexoVigente.fv + 'T12:00:00');
+      const diaAnteriorDate = new Date(fvDate); diaAnteriorDate.setDate(diaAnteriorDate.getDate()-1);
+      const diaAnteriorISO = `${diaAnteriorDate.getFullYear()}-${String(diaAnteriorDate.getMonth()+1).padStart(2,'0')}-${String(diaAnteriorDate.getDate()).padStart(2,'0')}`;
+      return {
+        sueldo: anexoVigente.sueldo_nuevo,
+        fuente: 'anexo_vigente',
+        anexoConsiderado: {id:anexoVigente.id, fecha_vigencia:anexoVigente.fv, sueldo_nuevo:anexoVigente.sueldo_nuevo},
+        requiereRevision: true,
+        alerta: `Cambio de sueldo a mitad de período (vigencia: ${anexoVigente.fv.split('-').reverse().join('/')}). Requiere revisión de prorrateo.`,
+        tramos: [
+          {desde:`${periodo}-01`, hasta:diaAnteriorISO, sueldo:anexoVigente.sueldo_anterior, origen:'sueldo anterior'},
+          {desde:anexoVigente.fv, hasta:finPeriodo, sueldo:anexoVigente.sueldo_nuevo, origen:'anexo vigente'},
+        ],
+      };
+    }
+    return {
+      sueldo: anexoVigente.sueldo_nuevo,
+      fuente: 'anexo_vigente',
+      anexoConsiderado: {id:anexoVigente.id, fecha_vigencia:anexoVigente.fv, sueldo_nuevo:anexoVigente.sueldo_nuevo},
+      requiereRevision: false,
+      alerta: null,
+      tramos: null,
+    };
+  }
+
+  // No hay anexo vigente: ¿hay uno futuro? usar su sueldo_anterior como referencia.
+  const futuros = anexosSueldo.filter(a => a.fv > finPeriodo);
+  if (futuros.length) {
+    const proximo = futuros[0];
+    return {
+      sueldo: proximo.sueldo_anterior!=null ? proximo.sueldo_anterior : (trabajador.sueldo_base||0),
+      fuente: 'anexo_futuro_anterior',
+      anexoConsiderado: {id:proximo.id, fecha_vigencia:proximo.fv, sueldo_nuevo:proximo.sueldo_nuevo},
+      requiereRevision: false,
+      alerta: null,
+      tramos: null,
+    };
+  }
+
+  // Sin ningún anexo relevante: el dato maestro del trabajador.
+  return {
+    sueldo: trabajador.sueldo_base||0,
+    fuente: 'sueldo_base',
+    anexoConsiderado: null,
+    requiereRevision: false,
+    alerta: null,
+    tramos: null,
+  };
+};
 // RRHH.1-A: base activa de un trabajador. Refleja el predicado del índice único
 // (es_asignacion_base=true AND estado_asig='activa' AND activo IS DISTINCT FROM false).
 const baseActivaDe = (asignaciones) => (asignaciones||[]).find(
@@ -5916,10 +5994,10 @@ function calcularLiquidacion(trabajador, params, tasas, iuscTabla, input) {
     contrato_id, periodo, descripcion='',
     dias_licencia_medica=0, dias_permiso_sin_goce=0,
     dias_vacaciones=0, dias_inasistencia=0,
-    dias_mes=30, sueldo_override=null, excluir_bonos=false,
+    dias_mes=30, sueldo_legal_periodo=null, excluir_bonos=false,
     bonos_override=null, gratificacion_override=null
   } = input;
-  const sueldoBase = sueldo_override > 0 ? sueldo_override : (trabajador.sueldo_base||0);
+  const sueldoBase = sueldo_legal_periodo > 0 ? sueldo_legal_periodo : (trabajador.sueldo_base||0);
 
   const esPensionado  = trabajador.pensionado || false;
   const esIndefinido  = (trabajador.tipo_contrato||'').toUpperCase().includes('INDEFINIDO');
@@ -6877,8 +6955,17 @@ function Remuneraciones({ data, saveRem, insert, update }) {
 
   const calcular = () => {
     if (!trabajador) { alert("Selecciona un trabajador."); return; }
-    setRes(calcularLiquidacion(trabajador, params || {}, tasas, iuscTabla, {
-      sueldo_override:       montosAuto ? montosAuto.sueldo : null,
+    // REM.TEMP.1-B: sueldo legal del período (contrato + anexos vigentes), no las asignaciones.
+    const anexosTrab = (data.anexos_contrato||[]).filter(a=>a.trabajador_id===tId);
+    const sueldoLegal = sueldoVigente(trabajador, periodo, anexosTrab);
+    const totalImputado = montosAuto ? montosAuto.sueldo : null;
+    const descuadre = (totalImputado!=null && totalImputado !== sueldoLegal.sueldo)
+      ? { diferencia: sueldoLegal.sueldo - totalImputado,
+          alerta: `Descuadre de imputación. Sueldo legal proyectado: ${clp(sueldoLegal.sueldo)}. Asignaciones distribuyen: ${clp(totalImputado)}.` }
+      : null;
+    setRes({
+      ...calcularLiquidacion(trabajador, params || {}, tasas, iuscTabla, {
+      sueldo_legal_periodo: sueldoLegal.sueldo,
       bonos_override:        montosAuto ? {
         bono_asistencia:     montosAuto.bono_asistencia,
         bono_movilizacion:   montosAuto.bono_movilizacion,
@@ -6893,7 +6980,10 @@ function Remuneraciones({ data, saveRem, insert, update }) {
       dias_vacaciones: diasVacaciones,
       dias_inasistencia: diasInasistencia,
       dias_mes: diasMes,
-    }));
+      }),
+      _sueldoLegal: sueldoLegal,
+      _descuadre: descuadre,
+    });
     setSaved(false);
   };
 
@@ -6902,21 +6992,23 @@ function Remuneraciones({ data, saveRem, insert, update }) {
   const guardar = async () => {
     if (!res) return;
     if (!paramsOk) { alert("🔒 No se puede guardar: parámetros legales incompletos para el período. Revise ⚙️ Parámetros Legales."); return; }
+    if (res._sueldoLegal?.requiereRevision) { alert("Esta liquidación requiere revisión manual antes de guardarse (cambio de sueldo a mitad de período). No se puede guardar como definitiva todavía."); return; }
     const existente = liqList.find(l => l.trabajador_id === tId && l.periodo === periodo);
     if (existente) {
       setDupAlerta({existente, res});
       return;
     }
     setSaving(true);
-    const ok = await saveRem(res);
+    const ok = await saveRem(limpiarLiquidacionParaGuardar(res));
     if (ok) setSaved(true);
     setSaving(false);
   };
 
   const confirmarReemplazo = async () => {
     if (!dupAlerta) return;
+    if (dupAlerta.res?._sueldoLegal?.requiereRevision) { alert("Esta liquidación requiere revisión manual antes de guardarse (cambio de sueldo a mitad de período). No se puede guardar como definitiva todavía."); setDupAlerta(null); return; }
     setSaving(true);
-    const ok = await saveRem(dupAlerta.res);
+    const ok = await saveRem(limpiarLiquidacionParaGuardar(dupAlerta.res));
     if (ok) setSaved(true);
     setSaving(false);
     setDupAlerta(null);
@@ -7158,7 +7250,7 @@ function Remuneraciones({ data, saveRem, insert, update }) {
                     <>
                       <SecondaryBtn onClick={imprimir} small>🖨 Imprimir</SecondaryBtn>
                       {!saved
-                        ? <PrimaryBtn onClick={guardar} disabled={saving} color={C.green} small>{saving ? "Guardando…" : "💾 Guardar"}</PrimaryBtn>
+                        ? <PrimaryBtn onClick={guardar} disabled={saving||res._sueldoLegal?.requiereRevision} color={res._sueldoLegal?.requiereRevision?'#9ca3af':C.green} small>{saving ? "Guardando…" : (res._sueldoLegal?.requiereRevision ? "🔒 Requiere revisión" : "💾 Guardar")}</PrimaryBtn>
                         : <Tag text="✓ Guardada" scheme={{ bg: C.greenBg, text: C.green, border: C.greenBorder }} />}
                     </>
                   ) : (
@@ -7167,6 +7259,20 @@ function Remuneraciones({ data, saveRem, insert, update }) {
                 </div>
               }
             >
+              {res._sueldoLegal?.requiereRevision && (
+                <div style={{background:'#fef3c7', border:'2px solid #dc2626', borderRadius:6, padding:10, marginBottom:10}}>
+                  <b>⚠ {res._sueldoLegal.alerta}</b>
+                  <p style={{fontSize:12, margin:'4px 0 0'}}>Esta liquidación no puede guardarse como definitiva hasta revisión manual.</p>
+                  {res._sueldoLegal.tramos && res._sueldoLegal.tramos.map(t=>(
+                    <p key={t.desde+t.origen} style={{fontSize:12, margin:'2px 0'}}>{t.desde} al {t.hasta}: {clp(t.sueldo)} ({t.origen})</p>
+                  ))}
+                </div>
+              )}
+              {res._descuadre && (
+                <div style={{background:'#fee2e2', border:'1px solid #dc2626', borderRadius:6, padding:10, marginBottom:10}}>
+                  <b>⚠ {res._descuadre.alerta}</b>
+                </div>
+              )}
               <div ref={slipRef}>
                 <div style={{ marginBottom: 16, padding: "12px 16px", background: C.surfaceAlt, borderRadius: 6, border: `1px solid ${C.border}` }}>
                   <p style={{ fontWeight: 700, fontSize: 14, color: C.text }}>LEG Servicios de Limpieza EIRL</p>
