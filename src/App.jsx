@@ -1463,6 +1463,9 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
 
   const aplicarAnexo=async(anexo)=>{
     if(anexo.estado!=='firmado') return;
+    const hoyStr=new Date().toLocaleDateString("en-CA",{timeZone:"America/Santiago"}); // ANEXOS.VIGENCIA.1: hora local Chile, no UTC
+    const fechaVigencia=anexo.fecha_vigencia?String(anexo.fecha_vigencia).split('T')[0]:'';
+    if(fechaVigencia && fechaVigencia>hoyStr) return; // ANEXOS.VIGENCIA.1: guardia, no aplicar antes de la vigencia
     setConfirmAplicar(anexo);
   };
 
@@ -1667,12 +1670,21 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
                     Editar
                   </button>
                 )}
-                {a.estado==='firmado'&&(
-                  <button onClick={()=>aplicarAnexo(a)}
-                    style={{fontSize:11,color:'#fff',background:'#1d4ed8',border:'none',borderRadius:4,padding:'2px 8px',cursor:'pointer',fontWeight:600}}>
-                    ⚡ Aplicar
-                  </button>
-                )}
+                {a.estado==='firmado'&&(()=>{
+                  const hoyStr=new Date().toLocaleDateString("en-CA",{timeZone:"America/Santiago"}); // ANEXOS.VIGENCIA.1: hora local Chile, no UTC
+                  const fechaVigencia=a.fecha_vigencia?String(a.fecha_vigencia).split('T')[0]:'';
+                  const esFuturo=fechaVigencia && fechaVigencia>hoyStr;
+                  const fvVisual=fechaVigencia?(()=>{const p=fechaVigencia.split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:fechaVigencia;})():'';
+                  return (
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:2}}>
+                      <button onClick={()=>aplicarAnexo(a)} disabled={esFuturo}
+                        style={{fontSize:11,color:'#fff',background:esFuturo?'#9ca3af':'#1d4ed8',border:'none',borderRadius:4,padding:'2px 8px',cursor:esFuturo?'not-allowed':'pointer',fontWeight:600,opacity:esFuturo?0.7:1}}>
+                        ⚡ Aplicar
+                      </button>
+                      {esFuturo && (<span style={{fontSize:10,color:C.textMuted,textAlign:'right',maxWidth:170}}>Vigencia futura: podrá aplicarse a partir del {fvVisual}</span>)}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
