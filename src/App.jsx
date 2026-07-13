@@ -2690,6 +2690,16 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
   const docs=(data.documentos_trabajador||[]).filter(d=>d.trabajador_id===trabajador.id)
     .sort((a,b)=>new Date(b.fecha_documento||b.fecha_carga||b.created_at||0)-new Date(a.fecha_documento||a.fecha_carga||a.created_at||0));
 
+  // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 2: solo se puede generar el contrato
+  // laboral estándar si el trabajador tiene una asignación base inicial activa.
+  const tieneBaseInicial = (data.asignaciones||[]).some(a =>
+    a.trabajador_id === trabajador.id &&
+    a.estado_asig === 'activa' &&
+    a.activo !== false &&
+    a.rol_asignacion === 'base_inicial'
+  );
+  const MSG_SIN_BASE_INICIAL = "Este trabajador aún no tiene una asignación base inicial activa. Primero debe existir una asignación base validada antes de generar el contrato laboral.";
+
   // ── Camino 2: generar documento desde el ERP, con control de duplicados ──
   // Solo se controlan los documentos ERP clave; los externos pueden repetirse.
   const ERP_CONTROLADOS = ['contrato','odi','reglamento','epp'];
@@ -2731,6 +2741,7 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
     setContratoModal({ lugar: lj.lugares, funciones: funcionesPorCargo(trabajador.cargo) });
   };
   const generarContrato=async(crearFila)=>{
+    if(!tieneBaseInicial){ alert(MSG_SIN_BASE_INICIAL); return; }
     const ov={lugar:contratoModal.lugar, funciones:contratoModal.funciones};
     const emp=await getEmpresaConfig();
     imprimirContratoTrabajo(trabajador, data, ov, emp);
@@ -3062,9 +3073,12 @@ function TabDocumentos({trabajador, data, insert, update, autoFiniquito, autoCar
                 <textarea style={{...INP,minHeight:80,resize:"vertical"}} value={contratoModal.funciones} onChange={e=>setContratoModal({...contratoModal,funciones:e.target.value})}/>
               </FL>
               <p style={{fontSize:11,color:C.textDim,margin:"6px 0 16px"}}>La jornada, remuneración, gratificación y demás cláusulas se toman automáticamente de las asignaciones y datos del trabajador.</p>
+              {!tieneBaseInicial && (
+                <div style={{fontSize:12,color:'#b45309',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:6,padding:'8px 10px',marginBottom:10}}>⚠ {MSG_SIN_BASE_INICIAL}</div>
+              )}
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                <button onClick={()=>generarContrato(true)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.accent}`,background:C.accent,color:"#fff",cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:600}}>{yaHay?`🔄 Generar nueva versión (v${proximaVersion('contrato')})`:"📄 Generar contrato (v1)"} <span style={{display:"block",fontSize:11,fontWeight:400,opacity:.9}}>Imprime y agrega la fila a la carpeta documental.</span></button>
-                {yaHay&&<button onClick={()=>generarContrato(false)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,fontWeight:500,color:C.text}}>👁 Solo reimprimir <span style={{display:"block",fontSize:11,fontWeight:400,color:C.textMuted}}>Abre el PDF sin crear otra fila.</span></button>}
+                <button onClick={()=>generarContrato(true)} disabled={!tieneBaseInicial} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${tieneBaseInicial?C.accent:C.border}`,background:tieneBaseInicial?C.accent:'#9ca3af',color:"#fff",cursor:tieneBaseInicial?"pointer":"not-allowed",textAlign:"left",fontSize:13,fontWeight:600,opacity:tieneBaseInicial?1:0.7}}>{yaHay?`🔄 Generar nueva versión (v${proximaVersion('contrato')})`:"📄 Generar contrato (v1)"} <span style={{display:"block",fontSize:11,fontWeight:400,opacity:.9}}>Imprime y agrega la fila a la carpeta documental.</span></button>
+                {yaHay&&<button onClick={()=>generarContrato(false)} disabled={!tieneBaseInicial} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:tieneBaseInicial?C.surface:'#f3f4f6',cursor:tieneBaseInicial?"pointer":"not-allowed",textAlign:"left",fontSize:13,fontWeight:500,color:tieneBaseInicial?C.text:C.textMuted,opacity:tieneBaseInicial?1:0.7}}>👁 Solo reimprimir <span style={{display:"block",fontSize:11,fontWeight:400,color:C.textMuted}}>Abre el PDF sin crear otra fila.</span></button>}
                 <button onClick={()=>setContratoModal(null)} style={{padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,cursor:"pointer",textAlign:"left",fontSize:13,color:C.textMuted}}>✕ Cancelar</button>
               </div>
             </div>
@@ -4258,7 +4272,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   <button type="button" onClick={addBloque} style={{fontSize:12,padding:"5px 12px",borderRadius:6,border:`1px dashed ${C.border}`,background:C.surface,color:C.accentText,cursor:"pointer",marginBottom:8}}>+ Agregar bloque</button>
                   <div style={{padding:"8px 10px",background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,marginBottom:8,fontSize:12,fontWeight:700,color:C.text}}>Total semanal pactado: {totalEfectivas} h <span style={{fontWeight:400,color:C.textMuted}}>(tope legal vigente: {tope} h)</span></div>
                   <div style={{padding:"8px 10px",background:C.surface,border:`1px dashed ${C.border}`,borderRadius:6}}>
-                    <div style={{fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase",marginBottom:3}}>Vista previa · texto generado para el contrato</div>
+                    <div style={{fontSize:10,fontWeight:700,color:C.textMuted,textTransform:"uppercase",marginBottom:3}}>Vista previa · cláusula de jornada</div>
                     <div style={{fontSize:12,color:C.text}}>{[prev.jornada,prev.horario].filter(Boolean).join(" ")||"—"}</div>
                   </div>
                   {jp&&!val.ok&&val.errores.map((er,i)=>(<div key={i} style={{marginTop:6,fontSize:11,color:C.red}}>⚠ {er}</div>))}
