@@ -778,6 +778,11 @@ function useData(){
       const res=await Promise.allSettled(TABLES.map(t=>supabase.from(t).select("*").order("id")));
       const d={};
       TABLES.forEach((t,i)=>{d[t]=res[i].status==="fulfilled"?(res[i].value.data||[]):[];});
+      // VISIBILIDAD.1 (CLEAN.1-B): excluir es_dato_prueba=true de la vista operativa.
+      // Se conserva la lista completa sin filtrar en trabajadoresTodos, por si se
+      // necesita una vista administrativa futura. Ningún dato se pierde ni se borra.
+      d.trabajadoresTodos = d.trabajadores;
+      d.trabajadores = (d.trabajadores||[]).filter(t=>t.es_dato_prueba!==true);
       setData(d);setDbMode(true);
     }catch{setData({});}
     setLoading(false);
@@ -4078,7 +4083,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               <FL label="Nombre completo"><input style={INP} value={form.nombre} onChange={e=>setForm({...form,nombre:e.target.value})} placeholder="Nombre Apellido Apellido"/></FL>
               <FL label="RUT"><input style={INP} value={form.rut||""} onChange={e=>setForm({...form,rut:e.target.value})} placeholder="12.345.678-9"/></FL>
               <FL label="Cargo"><select style={INP} value={form.cargo} onChange={e=>setForm({...form,cargo:e.target.value})}><option>Auxiliar Aseo</option><option>Supervisor</option><option>Supervisora</option><option>Jefe de Turno</option></select></FL>
-              <FL label="Tipo contrato"><select style={INP} value={form.tipo_contrato||"PLAZO FIJO"} onChange={e=>setForm({...form,tipo_contrato:e.target.value})}><option>PLAZO FIJO</option><option>INDEFINIDO</option><option>HONORARIOS</option></select></FL>
+              <FL label="Tipo contrato"><select style={INP} value={form.tipo_contrato||"PLAZO FIJO"} onChange={e=>setForm({...form,tipo_contrato:e.target.value})}><option>PLAZO FIJO</option><option>INDEFINIDO</option><option value="HONORARIOS" disabled>HONORARIOS (no disponible aquí — usar módulo Honorarios)</option></select></FL>
+              {form.tipo_contrato==="HONORARIOS" && <div style={{gridColumn:"1 / -1",fontSize:11,color:"#b45309",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:6,padding:"6px 10px"}}>⚠ Este registro histórico está marcado HONORARIOS. Los prestadores a honorarios no deben gestionarse como trabajadores dependientes; migrar al futuro módulo de Honorarios (HON.1).</div>}
               <FL label="Fecha ingreso a la empresa"><FechaInput style={INP} value={form.fecha_inicio||""} onChange={v=>setForm({...form,fecha_inicio:v})}/></FL>
               {form.tipo_contrato==="PLAZO FIJO" && <FL label="Fecha término (plazo fijo)"><FechaInput style={INP} value={form.fecha_termino_plazo||""} onChange={v=>setForm({...form,fecha_termino_plazo:v||null})}/></FL>}
               <FL label="Nacionalidad"><input style={INP} value={form.nacionalidad||""} onChange={e=>setForm({...form,nacionalidad:e.target.value})} placeholder="Chilena"/></FL>
