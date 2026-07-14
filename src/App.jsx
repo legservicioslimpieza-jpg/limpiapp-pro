@@ -3747,6 +3747,12 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     }
   };
   const guardarAsignacion=async(overrideDocumental=null)=>{
+    // Blindaje: si por error llega un SyntheticEvent de React (ej. onClick={guardarAsignacion}
+    // en vez de onClick={()=>guardarAsignacion()}), se ignora y se trata como "sin override".
+    const esEventoReact = overrideDocumental && typeof overrideDocumental==="object" && (
+      typeof overrideDocumental.preventDefault==="function" || "nativeEvent" in overrideDocumental
+    );
+    if(esEventoReact){ overrideDocumental.preventDefault?.(); overrideDocumental=null; }
     // Validaciones J2-lite (bloquean el guardado con mensaje).
     const errs=[];
     if(!asigForm?.contrato_id) errs.push("Selecciona un centro de costo.");
@@ -4556,7 +4562,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     <FL label="Descripción" span><input style={INP} value={asigForm.descripcion||""} onChange={e=>setAsigForm({...asigForm,descripcion:e.target.value})} placeholder="Ej: Anexo reducción jornada / apoyo domingos / servicio eventual"/></FL>
                   </div>
                   <div style={{display:"flex",gap:8,marginTop:12}}>
-                    <PrimaryBtn onClick={guardarAsignacion} color={C.green} small>{asigForm._edit?"Actualizar asignación":"Crear asignación"}</PrimaryBtn>
+                    <PrimaryBtn onClick={()=>guardarAsignacion()} color={C.green} small>{asigForm._edit?"Actualizar asignación":"Crear asignación"}</PrimaryBtn>
                     <SecondaryBtn onClick={()=>{setAsigForm(null);setEvalDocModal(null);}} small>Cancelar</SecondaryBtn>
                   </div>
                 </div>)}
