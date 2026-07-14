@@ -3616,6 +3616,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const [form,setForm]=useState(null);
   const [tab,setTab]=useState("datos");
   const [asigForm,setAsigForm]=useState(null);
+  const [evalDocModal,setEvalDocModal]=useState(null); // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 3C
   const [retiroModal,setRetiroModal]=useState(null);
   const [anexoPrefill,setAnexoPrefill]=useState(null);
   const [movilidadModal,setMovilidadModal]=useState(null);
@@ -3720,6 +3721,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
 
   const openNuevaAsignacion=()=>{
     if(!form||isNew)return;
+    setEvalDocModal(null); // Incremento 3C: no debe quedar un modal documental de una asignación previa
     // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 3A: clasificar automáticamente, sin IDs hardcodeados.
     const asignacionesTrabActivas=(data.asignaciones||[]).filter(a=>a.trabajador_id===form.id&&a.estado_asig==="activa"&&a.activo!==false);
     const tieneBaseInicialActiva=asignacionesTrabActivas.some(a=>a.rol_asignacion==="base_inicial");
@@ -3744,7 +3746,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,sueldo_asignado:"",modalidad_cobertura:null,origen_trabajador:null,gratificacion_metodo_asig:null,gratificacion_porcentaje_asig:"",gratificacion_observacion_asig:"",bono_asistencia:"",bono_movilizacion:"",bono_colacion:"",gratificacion_monto:"",porcentaje_costo:0,fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,horas_semanales:"",dias_semana:"Lun-Vie",horario:"",jornada:"",descripcion:"",rol_asignacion:"movimiento_posterior"});
     }
   };
-  const guardarAsignacion=async()=>{
+  const guardarAsignacion=async(overrideDocumental=null)=>{
     // Validaciones J2-lite (bloquean el guardado con mensaje).
     const errs=[];
     if(!asigForm?.contrato_id) errs.push("Selecciona un centro de costo.");
@@ -3766,9 +3768,17 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     if(_horario && !horarioRangoValido(_horario))
       errs.push("El horario operativo debe tener horas válidas en formato HH:mm-HH:mm.");
     if(errs.length){ alert("No se puede guardar la asignación:\n\n• "+errs.join("\n• ")); return; }
+    // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 3C: evaluación documental antes de guardar.
+    // Solo para movimiento_posterior con impacto, y solo si todavía no viene una decisión (override).
+    if(!overrideDocumental && asigForm.rol_asignacion==="movimiento_posterior" && impacto && impacto.tipo_resumen!=="sin_impacto"){
+      setEvalDocModal({impacto});
+      return;
+    }
+    // formGuardar es la fuente de verdad para el registro final: no depende del timing de setState.
+    const formGuardar={...asigForm, ...(overrideDocumental||{})};
     // El % de financiamiento SIEMPRE se deriva del monto ÷ remuneración base imputable (hoy sueldo_base).
-    const _pct=(_remun && (form.sueldo_base||0)>0)?Math.round(_monto/form.sueldo_base*10000)/100:(_remun?0:Number(asigForm.porcentaje_costo||0));
-    const registro={...asigForm,activo:asigForm.estado_asig!=="terminada",afecta_remuneracion:_remun,sueldo_asignado:_monto,bono_asistencia:Number(asigForm.bono_asistencia||0),bono_movilizacion:Number(asigForm.bono_movilizacion||0),bono_colacion:Number(asigForm.bono_colacion||0),gratificacion_monto:Number(asigForm.gratificacion_monto||0),gratificacion_porcentaje_asig:(asigForm.gratificacion_porcentaje_asig===""||asigForm.gratificacion_porcentaje_asig==null)?null:Number(asigForm.gratificacion_porcentaje_asig),porcentaje_costo:_pct,horas_semanales:_horasFinal,horario:_horario,jornada:[asigForm.dias_semana||"",_horario].filter(Boolean).join(" ")};
+    const _pct=(_remun && (form.sueldo_base||0)>0)?Math.round(_monto/form.sueldo_base*10000)/100:(_remun?0:Number(formGuardar.porcentaje_costo||0));
+    const registro={...formGuardar,activo:formGuardar.estado_asig!=="terminada",afecta_remuneracion:_remun,sueldo_asignado:_monto,bono_asistencia:Number(formGuardar.bono_asistencia||0),bono_movilizacion:Number(formGuardar.bono_movilizacion||0),bono_colacion:Number(formGuardar.bono_colacion||0),gratificacion_monto:Number(formGuardar.gratificacion_monto||0),gratificacion_porcentaje_asig:(formGuardar.gratificacion_porcentaje_asig===""||formGuardar.gratificacion_porcentaje_asig==null)?null:Number(formGuardar.gratificacion_porcentaje_asig),porcentaje_costo:_pct,horas_semanales:_horasFinal,horario:_horario,jornada:[formGuardar.dias_semana||"",_horario].filter(Boolean).join(" ")};
     delete registro._durRaw;
     // Holgura ya remunerada: esta asignación no agrega haberes. Se fuerzan a 0 los montos remuneracionales.
     if(registro.modalidad_cobertura==="holgura_remunerada"){
@@ -3792,7 +3802,17 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     }
     if(!registro.fecha_termino_asig) registro.fecha_termino_asig=null;
     const ok=await saveAsignacion(registro);
-    if(ok)setAsigForm(null);
+    if(ok){ setAsigForm(null); setEvalDocModal(null); }
+  };
+  // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 3C: confirmar decisión documental y reintentar guardado
+  // con el override ya resuelto (sin depender de setAsigForm + timing de React).
+  const confirmarEvaluacionDocumental=(opcionElegida, motivoTexto)=>{
+    if(!evalDocModal) return;
+    guardarAsignacion({
+      estado_evaluacion_documental: opcionElegida,
+      tipo_impacto_laboral: evalDocModal.impacto.tipo_resumen,
+      motivo_evaluacion_documental: motivoTexto || null,
+    });
   };
   const terminarAsig=(a)=>{
     setRetiroModal({asig:a, fecha:new Date().toISOString().slice(0,10), motivo:'', responsable:''});
@@ -3924,6 +3944,42 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                 </>):(
                   <button disabled={!retiroModal.fecha} onClick={()=>ejecutar(false)} style={{padding:'9px 16px',borderRadius:6,border:'none',background:C.accent,color:'#fff',cursor:retiroModal.fecha?'pointer':'not-allowed',opacity:retiroModal.fecha?1:0.5,fontSize:12,fontWeight:700}}>Terminar asignación</button>
                 )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {evalDocModal&&form&&asigForm&&(()=>{
+        const [opcion,setOpcion]=[evalDocModal.opcion||null, (v)=>setEvalDocModal({...evalDocModal,opcion:v})];
+        const motivo=evalDocModal.motivo||"";
+        const setMotivo=(v)=>setEvalDocModal({...evalDocModal,motivo:v});
+        const puedeConfirmar=opcion&&(opcion!=="no_aplica"||motivo.trim().length>0);
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}} onClick={()=>setEvalDocModal(null)}>
+            <div style={{background:'#fff',borderRadius:10,padding:22,maxWidth:520,width:'100%',maxHeight:'90vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+              <h3 style={{margin:'0 0 4px',fontSize:16,color:C.text}}>Revisión documental</h3>
+              <p style={{fontSize:12,color:C.textMuted,marginBottom:12}}>Esta asignación puede requerir respaldo documental. Elige cómo continuar.</p>
+              <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:7,padding:'8px 12px',fontSize:12,color:'#92400e',marginBottom:14}}>
+                {evalDocModal.impacto.alertas.map((msg,i)=><div key={i} style={i>0?{marginTop:4}:undefined}>⚠ {msg}</div>)}
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:12}}>
+                {[
+                  {v:'anexo_solicitado',l:'Solicitar borrador de anexo',d:'Se registrará la solicitud. El anexo se generará cuando esté disponible esa función.'},
+                  {v:'pendiente_revision',l:'Dejar pendiente de revisión',d:'La asignación se guarda; alguien deberá revisarla y decidir después.'},
+                  {v:'no_aplica',l:'No aplica / justificar',d:'Requiere indicar el motivo.'},
+                ].map(op=>(
+                  <button key={op.v} onClick={()=>setOpcion(op.v)} style={{textAlign:'left',padding:'10px 12px',borderRadius:8,border:`2px solid ${opcion===op.v?C.accent:C.border}`,background:opcion===op.v?C.accentBg:'#fff',cursor:'pointer'}}>
+                    <div style={{fontWeight:600,fontSize:13,color:C.text}}>{op.l}</div>
+                    <div style={{fontSize:11,color:C.textMuted,marginTop:2}}>{op.d}</div>
+                  </button>
+                ))}
+              </div>
+              {opcion==="no_aplica"&&(
+                <FL label="Motivo (obligatorio)"><textarea style={{...INP,minHeight:70}} value={motivo} onChange={e=>setMotivo(e.target.value)} placeholder="Explica por qué no corresponde anexo en este caso"/></FL>
+              )}
+              <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:16}}>
+                <button onClick={()=>setEvalDocModal(null)} style={{padding:'9px 16px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12,fontWeight:600,color:C.text}}>Cancelar</button>
+                <button disabled={!puedeConfirmar} onClick={()=>confirmarEvaluacionDocumental(opcion,motivo)} style={{padding:'9px 16px',borderRadius:6,border:'none',background:puedeConfirmar?C.accent:'#9ca3af',color:'#fff',cursor:puedeConfirmar?'pointer':'not-allowed',opacity:puedeConfirmar?1:0.7,fontSize:12,fontWeight:700}}>Confirmar y guardar</button>
               </div>
             </div>
           </div>
@@ -4135,7 +4191,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
             return (
               <div style={{marginBottom:14}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,flexWrap:'wrap',gap:8}}>
-                  <button onClick={()=>{setForm(null);setTab('datos');}} style={{background:'none',border:`1px solid ${C.border}`,borderRadius:6,padding:'4px 10px',fontSize:12,cursor:'pointer',color:C.text,fontWeight:600}}>← Volver a Trabajadores</button>
+                  <button onClick={()=>{setForm(null);setTab('datos');setEvalDocModal(null);}} style={{background:'none',border:`1px solid ${C.border}`,borderRadius:6,padding:'4px 10px',fontSize:12,cursor:'pointer',color:C.text,fontWeight:600}}>← Volver a Trabajadores</button>
                   <span style={{fontSize:11,color:C.textMuted}}>Trabajadores › <b style={{color:C.text}}>{isNew?'Nuevo trabajador':(form.nombre||form.id)}</b>{tabLabel?` › ${tabLabel}`:''}</span>
                 </div>
                 {!isNew&&(
@@ -4501,7 +4557,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                   </div>
                   <div style={{display:"flex",gap:8,marginTop:12}}>
                     <PrimaryBtn onClick={guardarAsignacion} color={C.green} small>{asigForm._edit?"Actualizar asignación":"Crear asignación"}</PrimaryBtn>
-                    <SecondaryBtn onClick={()=>setAsigForm(null)} small>Cancelar</SecondaryBtn>
+                    <SecondaryBtn onClick={()=>{setAsigForm(null);setEvalDocModal(null);}} small>Cancelar</SecondaryBtn>
                   </div>
                 </div>)}
 
@@ -4625,7 +4681,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               return <span style={{color:C.textMuted,fontSize:12}}>{fecha}<br/><span style={{color:C.green,fontWeight:600}}>{antig}</span></span>;
             }},
             {key:"activo",label:"Estado",render:r=>{const enPrep=r.estado==="PREINGRESO"||r.estado_ingreso==="BORRADOR"; return <Tag text={enPrep?"En preparación":(r.activo?"Activo":"Inactivo")} scheme={enPrep?{bg:C.yellowBg,text:C.yellow,border:C.yellowBorder}:(r.activo?{bg:C.greenBg,text:C.green,border:C.greenBorder}:{bg:"#f9fafb",text:C.textMuted,border:C.border})}/>;}},
-            {key:"edit",label:"",render:r=><button onClick={()=>{setTab("datos");setAsigForm(null);setForm({...r});}} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
+            {key:"edit",label:"",render:r=><button onClick={()=>{setTab("datos");setAsigForm(null);setEvalDocModal(null);setForm({...r});}} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>},
           ]}
           rows={trabajadoresFiltrados}
         />
