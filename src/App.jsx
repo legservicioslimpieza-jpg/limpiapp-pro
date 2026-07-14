@@ -4397,7 +4397,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     <FL label="Estado asignación"><select style={INP} value={asigForm.estado_asig||"activa"} onChange={e=>setAsigForm({...asigForm,estado_asig:e.target.value,activo:e.target.value!=="terminada"})}><option value="activa">Activa</option><option value="terminada">Terminada</option><option value="suspendida">Suspendida</option></select></FL>
                     {asigForm.rol_asignacion==="base_inicial"&&(
                       <div style={{gridColumn:"1 / -1",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"8px 12px",fontSize:12,color:C.text}}>
-                        <b>Asignación inicial del trabajador.</b> La remuneración se toma desde la ficha y queda bloqueada aquí. El centro de costo se elige en esta pantalla. Los campos operativos de días y horario solo describen la cobertura/costeo; no modifican la jornada legal del contrato.
+                        <b>Asignación inicial del trabajador.</b> La remuneración viene desde la pestaña Remuneración y queda bloqueada en esta asignación. Aquí se elige el centro de costo. Los días y horarios operativos solo describen la cobertura/costeo; no modifican la jornada legal del contrato.
                       </div>
                     )}
                     <FL label="Monto asociado al trabajador en esta asignación ($)">
