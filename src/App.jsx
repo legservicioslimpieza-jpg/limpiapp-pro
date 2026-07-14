@@ -512,6 +512,43 @@ const sueldoVigente = (trabajador, periodo, anexosDelTrabajador) => {
     tramos: null,
   };
 };
+
+// INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 3B: evaluación de impacto laboral para movimientos
+// posteriores. Función pura, solo lectura, no persiste nada. Base de comparación: la asignación
+// base_inicial del trabajador (no sueldoVigente — dominios separados: asignación vs. liquidación).
+const evaluarImpactoLaboral = (asignacionNueva, baseInicialDelTrabajador) => {
+  const remuneracional = (asignacionNueva.afecta_remuneracion!==false) && (
+    Number(asignacionNueva.sueldo_asignado||0)>0 ||
+    Number(asignacionNueva.bono_asistencia||0)>0 ||
+    Number(asignacionNueva.bono_movilizacion||0)>0 ||
+    Number(asignacionNueva.bono_colacion||0)>0
+  );
+  // Reutiliza exactamente el mismo cálculo de horas que guardarAsignacion (_horasFinal),
+  // no un parser nuevo: parseDuracion si hay texto crudo sin confirmar, si no horasANumero.
+  const horas = (asignacionNueva._durRaw!==undefined) ? parseDuracion(asignacionNueva._durRaw) : horasANumero(asignacionNueva.horas_semanales);
+  const jornada_operativa = horas>0 && asignacionNueva.modalidad_cobertura!=="holgura_remunerada";
+  const cIdNueva=asignacionNueva.contrato_id, cIdBase=baseInicialDelTrabajador?.contrato_id;
+  const centro_operativo = !!(cIdNueva && cIdBase && cIdNueva!==cIdBase);
+  const posible_centro_principal = centro_operativo && asignacionNueva.modalidad_cobertura==="exclusivo";
+
+  const hayCentro = centro_operativo || posible_centro_principal;
+  const hayRemuJor = remuneracional || jornada_operativa;
+  const tipo_resumen = !hayRemuJor && !hayCentro ? "sin_impacto"
+    : hayRemuJor && hayCentro ? "mixto_con_centro"
+    : hayCentro ? "centro"
+    : (remuneracional && jornada_operativa) ? "mixto"
+    : remuneracional ? "remuneracion" : "jornada";
+
+  const alertas=[];
+  if(remuneracional) alertas.push("Esta asignación registra un monto remuneracional asociado al trabajador.");
+  if(jornada_operativa) alertas.push("Esta asignación agrega cobertura horaria operativa. Revise si requiere ajuste documental de jornada.");
+  // Microprecisión: si posible_centro_principal, mostrar SOLO ese mensaje (no también el de centro_operativo, sería redundante).
+  if(posible_centro_principal) alertas.push("Esta asignación podría representar un cambio de centro principal del trabajador. Revise si corresponde.");
+  else if(centro_operativo) alertas.push("Esta asignación registra un centro de costo distinto al de la asignación inicial.");
+
+  return {remuneracional, jornada_operativa, centro_operativo, posible_centro_principal, tipo_resumen, alertas};
+};
+
 // RRHH.1-A: base activa de un trabajador. Refleja el predicado del índice único
 // (es_asignacion_base=true AND estado_asig='activa' AND activo IS DISTINCT FROM false).
 const baseActivaDe = (asignaciones) => (asignaciones||[]).find(
@@ -3675,6 +3712,12 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const cap=capacidadSemanal(form,asignacionesActivas,data);
 
   const contratoNombre=id=>{const c=data.contratos.find(ct=>ct.id===id);return c?`${c.id} — ${c.cliente}`:id;};
+
+  // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 3B: impacto laboral en vivo, solo para movimiento_posterior.
+  // No persiste nada, no aparece en base_inicial (por construcción de la condición).
+  const baseInicialTrab=form?(data.asignaciones||[]).find(a=>a.trabajador_id===form.id&&a.rol_asignacion==="base_inicial"&&a.estado_asig==="activa"&&a.activo!==false):null;
+  const impacto=(asigForm&&asigForm.rol_asignacion==="movimiento_posterior"&&baseInicialTrab)?evaluarImpactoLaboral(asigForm,baseInicialTrab):null;
+
   const openNuevaAsignacion=()=>{
     if(!form||isNew)return;
     // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 3A: clasificar automáticamente, sin IDs hardcodeados.
@@ -4398,6 +4441,11 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {asigForm.rol_asignacion==="base_inicial"&&(
                       <div style={{gridColumn:"1 / -1",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"8px 12px",fontSize:12,color:C.text}}>
                         <b>Asignación inicial del trabajador.</b> La remuneración viene desde la pestaña Remuneración y queda bloqueada en esta asignación. Aquí se elige el centro de costo. Los días y horarios operativos solo describen la cobertura/costeo; no modifican la jornada legal del contrato.
+                      </div>
+                    )}
+                    {impacto&&impacto.tipo_resumen!=="sin_impacto"&&(
+                      <div style={{gridColumn:"1 / -1",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#92400e"}}>
+                        {impacto.alertas.map((msg,i)=><div key={i} style={i>0?{marginTop:4}:undefined}>⚠ {msg}</div>)}
                       </div>
                     )}
                     <FL label="Monto asociado al trabajador en esta asignación ($)">
