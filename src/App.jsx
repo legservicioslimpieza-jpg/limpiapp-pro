@@ -212,13 +212,27 @@ const capacidadSemanal = (trabajador, asignacionesActivas, data) => {
   const pactada = Number(jv.jornada.horas_semanales)||0;
   const tope = topeLegalJornada(hoy);
   let planificadas = 0, incompletas = 0;
+  const advertenciasColacion = [];
   (asignacionesActivas||[]).forEach(a => {
     const cuenta = (a.afecta_remuneracion!==false) && CAP_MODALIDADES_CUENTAN.includes(a.modalidad_cobertura||"");
     if(!cuenta) return;
-    const dur = horasANumero(a.horas_semanales);                 // duración diaria/turno
     const ndias = textoADiasOperativo(a.dias_semana).length;     // nº días operativos
-    if(dur<=0 || ndias<=0){ incompletas++; return; }             // sin días/duración: no se cuenta, se advierte
-    planificadas += dur*ndias;                                   // horas semanales = duración × días
+    // ASIG.JORNADA.BASE.1: distinguir "sin horario" (legacy) de "horario inválido" (no calculable).
+    const horarioTxt = String(a.horario||"").trim();
+    const tieneHorario = horarioTxt.length>0;
+    const horarioValido = tieneHorario && horarioRangoValido(horarioTxt);
+    let dur;
+    if(horarioValido){
+      const r = horasEfectivasAsignacion(true, horarioTxt, a.colacion_minutos, a.colacion_imputable);
+      dur = r.horas;
+      if(r.advertencia) advertenciasColacion.push({asignacionId:a.id, contrato:a.contrato_id, advertencia:r.advertencia});
+    }else if(!tieneHorario){
+      dur = horasANumero(a.horas_semanales);                       // fallback legacy, sin cambios
+    }else{
+      dur = null;                                                  // horario informado pero inválido: no calculable
+    }
+    if(dur==null || dur<=0 || ndias<=0){ incompletas++; return; }   // sin días/duración: no se cuenta, se advierte
+    planificadas += dur*ndias;                                     // horas semanales = duración × días
   });
   planificadas = Math.round(planificadas*100)/100;
   const holgura = Math.max(0, Math.round((pactada-planificadas)*100)/100);   // contra la PACTADA, no el tope
@@ -230,7 +244,7 @@ const capacidadSemanal = (trabajador, asignacionesActivas, data) => {
   else if(eq&&pactada>=tope) estado={key:"tope",txt:"Al tope de la jornada pactada"};
   else if(eq) estado={key:"anexo",txt:"Requiere anexo o revisión antes de nueva asignación"};
   else estado={key:"disponible",txt:"Disponible dentro de jornada"};
-  return { determinable:true, pactada, tope, planificadas, holgura, margen, sobre, incompletas, estado };
+  return { determinable:true, pactada, tope, planificadas, holgura, margen, sobre, incompletas, estado, advertenciasColacion };
 };
 // Visual legacy SEPARADO — solo para mostrar info no estructurada, NUNCA para cálculo legal.
 const jornadaVisualLegacy = (trabajador) => {
@@ -388,6 +402,23 @@ const difHorasDec = (iniHHMM, finHHMM) => {
   let d = ((Number(pf[0])||0)*60+(Number(pf[1])||0)) - ((Number(pi[0])||0)*60+(Number(pi[1])||0));
   if(d<0) d+=1440;
   return Math.round(d/60*100)/100;
+};
+// ASIG.JORNADA.BASE.1: duración efectiva diaria de una asignación, distinguiendo colacion_imputable
+// null (no definida) de false (confirmada no imputable) — a diferencia de calcHorasEfectivasBloque,
+// que trata ambos casos igual. Reutiliza difHorasDec (cruce de medianoche ya resuelto), no lo duplica.
+const horasEfectivasAsignacion = (horarioValido, horario, colacionMinutos, colacionImputable) => {
+  if(!horarioValido) return {horas:null, advertencia:null, bruta:null};
+  const [ini,fin] = String(horario).split("-");
+  const bruta = difHorasDec(ini, fin);
+  if(colacionImputable===true) return {horas:bruta, advertencia:null, bruta};
+  if(colacionImputable===false){
+    if(colacionMinutos===null || colacionMinutos===undefined || colacionMinutos===""){
+      return {horas:bruta, advertencia:"Colación marcada como no imputable, pero sin minutos definidos. Revise la duración efectiva.", bruta};
+    }
+    const col=(Number(colacionMinutos)||0)/60;
+    return {horas: Math.max(0,bruta-col), advertencia:null, bruta};
+  }
+  return {horas:bruta, advertencia:"Colación no definida para esta asignación. Revise si la duración corresponde a horas efectivas o brutas.", bruta};
 };
 const dateOnly = v => v ? String(v).split("T")[0] : "";
 // J1.2: horas efectivas semanales de un bloque = (horas brutas entre inicio y término − colación no imputable) × nº días.
@@ -3732,6 +3763,12 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     }
     const esBaseInicial=asignacionesTrabActivas.length===0;
     if(esBaseInicial){
+      // ASIG.JORNADA.BASE.1: jornada precargada desde jornadaVigente, igual patrón que la remuneración.
+      const jv=jornadaVigente(form,new Date().toISOString().slice(0,10),data);
+      const diasTexto=jv.estructurada&&Array.isArray(jv.jornada.dias)?diasATextoOperativo(jv.jornada.dias):"Lun-Vie";
+      const horarioTexto=jv.estructurada&&jv.jornada.hora_inicio&&jv.jornada.hora_termino?`${jv.jornada.hora_inicio}-${jv.jornada.hora_termino}`:"";
+      const colMin=jv.estructurada?(jv.jornada.colacion_min??jv.jornada.colacion_minutos??null):null;
+      const colImp=jv.estructurada?(jv.jornada.colacion_imputable??null):null;
       // Asignación inicial operativa: remuneración/jornada precargadas y bloqueadas desde la ficha del trabajador.
       setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,
         sueldo_asignado:form.sueldo_base||0,modalidad_cobertura:null,origen_trabajador:null,
@@ -3739,11 +3776,11 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
         bono_asistencia:form.bono_asistencia||0,bono_movilizacion:form.bono_movilizacion||0,bono_colacion:form.bono_colacion||0,
         gratificacion_monto:form.gratificacion_monto||0,porcentaje_costo:100,
         fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,
-        horas_semanales:"",dias_semana:"Lun-Vie",horario:"",jornada:"",descripcion:"",
+        horas_semanales:"",dias_semana:diasTexto,horario:horarioTexto,colacion_minutos:colMin,colacion_imputable:colImp,jornada:"",descripcion:"",
         rol_asignacion:"base_inicial"});
     }else{
       // A.1/A.2: todos los campos numéricos arrancan vacíos (placeholder), no en 0 ni heredados.
-      setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,sueldo_asignado:"",modalidad_cobertura:null,origen_trabajador:null,gratificacion_metodo_asig:null,gratificacion_porcentaje_asig:"",gratificacion_observacion_asig:"",bono_asistencia:"",bono_movilizacion:"",bono_colacion:"",gratificacion_monto:"",porcentaje_costo:0,fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,horas_semanales:"",dias_semana:"Lun-Vie",horario:"",jornada:"",descripcion:"",rol_asignacion:"movimiento_posterior"});
+      setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,sueldo_asignado:"",modalidad_cobertura:null,origen_trabajador:null,gratificacion_metodo_asig:null,gratificacion_porcentaje_asig:"",gratificacion_observacion_asig:"",bono_asistencia:"",bono_movilizacion:"",bono_colacion:"",gratificacion_monto:"",porcentaje_costo:0,fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,horas_semanales:"",dias_semana:"Lun-Vie",horario:"",colacion_minutos:null,colacion_imputable:null,jornada:"",descripcion:"",rol_asignacion:"movimiento_posterior"});
     }
   };
   const guardarAsignacion=async(overrideDocumental=null)=>{
@@ -3782,9 +3819,14 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     }
     // formGuardar es la fuente de verdad para el registro final: no depende del timing de setState.
     const formGuardar={...asigForm, ...(overrideDocumental||{})};
+    // ASIG.JORNADA.BASE.1: si hay horario (ya validado arriba), usar duración efectiva con colación;
+    // si no hay horario, mantener el comportamiento legacy (_horasFinal, sin cambios).
+    const _horasEfectivas = _horario
+      ? horasEfectivasAsignacion(true,_horario,formGuardar.colacion_minutos,formGuardar.colacion_imputable).horas
+      : _horasFinal;
     // El % de financiamiento SIEMPRE se deriva del monto ÷ remuneración base imputable (hoy sueldo_base).
     const _pct=(_remun && (form.sueldo_base||0)>0)?Math.round(_monto/form.sueldo_base*10000)/100:(_remun?0:Number(formGuardar.porcentaje_costo||0));
-    const registro={...formGuardar,activo:formGuardar.estado_asig!=="terminada",afecta_remuneracion:_remun,sueldo_asignado:_monto,bono_asistencia:Number(formGuardar.bono_asistencia||0),bono_movilizacion:Number(formGuardar.bono_movilizacion||0),bono_colacion:Number(formGuardar.bono_colacion||0),gratificacion_monto:Number(formGuardar.gratificacion_monto||0),gratificacion_porcentaje_asig:(formGuardar.gratificacion_porcentaje_asig===""||formGuardar.gratificacion_porcentaje_asig==null)?null:Number(formGuardar.gratificacion_porcentaje_asig),porcentaje_costo:_pct,horas_semanales:_horasFinal,horario:_horario,jornada:[formGuardar.dias_semana||"",_horario].filter(Boolean).join(" ")};
+    const registro={...formGuardar,activo:formGuardar.estado_asig!=="terminada",afecta_remuneracion:_remun,sueldo_asignado:_monto,bono_asistencia:Number(formGuardar.bono_asistencia||0),bono_movilizacion:Number(formGuardar.bono_movilizacion||0),bono_colacion:Number(formGuardar.bono_colacion||0),gratificacion_monto:Number(formGuardar.gratificacion_monto||0),gratificacion_porcentaje_asig:(formGuardar.gratificacion_porcentaje_asig===""||formGuardar.gratificacion_porcentaje_asig==null)?null:Number(formGuardar.gratificacion_porcentaje_asig),porcentaje_costo:_pct,horas_semanales:_horasEfectivas,colacion_minutos:(formGuardar.colacion_minutos===""||formGuardar.colacion_minutos==null)?null:Number(formGuardar.colacion_minutos),colacion_imputable:(formGuardar.colacion_imputable===true||formGuardar.colacion_imputable===false)?formGuardar.colacion_imputable:null,horario:_horario,jornada:[formGuardar.dias_semana||"",_horario].filter(Boolean).join(" ")};
     delete registro._durRaw;
     // Holgura ya remunerada: esta asignación no agrega haberes. Se fuerzan a 0 los montos remuneracionales.
     if(registro.modalidad_cobertura==="holgura_remunerada"){
@@ -4547,6 +4589,16 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                           <input style={INP} value={durDisplay} placeholder="Ej: 01:15 ó 1,25" onChange={e=>setAsigForm({...asigForm,_durRaw:e.target.value})} onBlur={e=>onDuracionBlur(e.target.value)} title="Duración operativa para costeo. Se guarda como decimal. NO es la jornada legal (esa se toma del contrato estructurado)."/>
                           <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>Ej: 00:30 = media hora, 01:15 = una hora y quince minutos.{durDec>0?` Se guarda como ${durDec} h.`:""}</div>
                         </FL>
+                        <FL label="Colación (minutos)">
+                          <input type="number" min={0} disabled={asigForm.rol_asignacion==="base_inicial"} style={{...INP,...(asigForm.rol_asignacion==="base_inicial"?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={(asigForm.colacion_minutos===null||asigForm.colacion_minutos===undefined)?"":asigForm.colacion_minutos} placeholder="Ej: 60" onChange={e=>{const v=e.target.value; setAsigForm({...asigForm,colacion_minutos:v===""?null:Number(v)});}}/>
+                        </FL>
+                        <FL label="Colación imputable">
+                          <select disabled={asigForm.rol_asignacion==="base_inicial"} style={{...INP,...(asigForm.rol_asignacion==="base_inicial"?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={asigForm.colacion_imputable===true?"si":(asigForm.colacion_imputable===false?"no":"")} onChange={e=>{const v=e.target.value; setAsigForm({...asigForm,colacion_imputable:v===""?null:(v==="si")});}}>
+                            <option value="">— No definida —</option>
+                            <option value="no">No, se descuenta del horario</option>
+                            <option value="si">Sí, no se descuenta (ya está pagada)</option>
+                          </select>
+                        </FL>
                         <FL label="Días de asignación (operativo)" span>
                           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                             {J2_DIAS.map(([k,lbl])=>(<button key={k} type="button" onClick={()=>toggleDia(k)} style={{padding:"5px 11px",borderRadius:6,fontSize:12,cursor:"pointer",border:`1px solid ${C.border}`,background:diasSel.includes(k)?C.accent:C.surface,color:diasSel.includes(k)?C.accentText:C.text}}>{lbl}</button>))}
@@ -4586,6 +4638,9 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                         {cap.sobre>0 && row('Horas sobre jornada pactada:',hh(cap.sobre))}
                         <div style={{marginTop:8}}><span style={{display:'inline-block',fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:6,background:(estColor[cap.estado.key]||{}).bg,border:`1px solid ${(estColor[cap.estado.key]||{}).bd}`,color:(estColor[cap.estado.key]||{}).tx}}>{cap.estado.txt}</span></div>
                         {cap.incompletas>0 && <div style={{fontSize:11,color:'#b45309',marginTop:6}}>⚠ {cap.incompletas} asignación(es) sin días u horas completos no se incluyeron en el cálculo.</div>}
+                        {cap.advertenciasColacion&&cap.advertenciasColacion.length>0&&cap.advertenciasColacion.map((av,i)=>(
+                          <div key={i} style={{fontSize:11,color:'#b45309',marginTop:4}}>⚠ {av.contrato}: {av.advertencia}</div>
+                        ))}
                         <div style={{fontSize:10,color:C.textMuted,marginTop:8,borderTop:`1px solid ${C.border}`,paddingTop:6}}>Basado en asignaciones planificadas. Las horas extraordinarias reales se confirman con el registro de asistencia.</div>
                       </>)}
                     </div>
