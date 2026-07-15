@@ -440,6 +440,16 @@ const resolverColacionAlAbrir = (existente, jv) => {
   }
   return {colacion_minutos:existente.colacion_minutos??null, colacion_imputable:existente.colacion_imputable??null, editableRegularizacion:true, sinDerivar:true};
 };
+// ASIG.JORNADA.BASE.1-B microfix: ninguna marca interna de sesión/UI (prefijo "_") debe llegar a
+// Supabase. Regla genérica, no una lista de campos — evita que vuelva a pasar con marcas futuras.
+const limpiarAsignacionParaGuardar = (obj) => {
+  const clean = {};
+  Object.entries(obj || {}).forEach(([k,v]) => {
+    if (k.startsWith("_")) return;
+    clean[k] = v;
+  });
+  return clean;
+};
 const dateOnly = v => v ? String(v).split("T")[0] : "";
 // J1.2: horas efectivas semanales de un bloque = (horas brutas entre inicio y término − colación no imputable) × nº días.
 const calcHorasEfectivasBloque = (b) => {
@@ -3849,7 +3859,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     // El % de financiamiento SIEMPRE se deriva del monto ÷ remuneración base imputable (hoy sueldo_base).
     const _pct=(_remun && (form.sueldo_base||0)>0)?Math.round(_monto/form.sueldo_base*10000)/100:(_remun?0:Number(formGuardar.porcentaje_costo||0));
     const registro={...formGuardar,activo:formGuardar.estado_asig!=="terminada",afecta_remuneracion:_remun,sueldo_asignado:_monto,bono_asistencia:Number(formGuardar.bono_asistencia||0),bono_movilizacion:Number(formGuardar.bono_movilizacion||0),bono_colacion:Number(formGuardar.bono_colacion||0),gratificacion_monto:Number(formGuardar.gratificacion_monto||0),gratificacion_porcentaje_asig:(formGuardar.gratificacion_porcentaje_asig===""||formGuardar.gratificacion_porcentaje_asig==null)?null:Number(formGuardar.gratificacion_porcentaje_asig),porcentaje_costo:_pct,horas_semanales:_horasEfectivas,colacion_minutos:(formGuardar.colacion_minutos===""||formGuardar.colacion_minutos==null)?null:Number(formGuardar.colacion_minutos),colacion_imputable:(formGuardar.colacion_imputable===true||formGuardar.colacion_imputable===false)?formGuardar.colacion_imputable:null,horario:_horario,jornada:[formGuardar.dias_semana||"",_horario].filter(Boolean).join(" ")};
-    delete registro._durRaw;
+    // (el descarte de _durRaw y cualquier otra marca interna ahora lo hace limpiarAsignacionParaGuardar, más abajo)
     // Holgura ya remunerada: esta asignación no agrega haberes. Se fuerzan a 0 los montos remuneracionales.
     if(registro.modalidad_cobertura==="holgura_remunerada"){
       registro.sueldo_asignado=0; registro.bono_movilizacion=0; registro.bono_colacion=0; registro.bono_asistencia=0;
@@ -3871,7 +3881,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       registro.porcentaje_costo=100;
     }
     if(!registro.fecha_termino_asig) registro.fecha_termino_asig=null;
-    const ok=await saveAsignacion(registro);
+    const registroLimpio=limpiarAsignacionParaGuardar(registro);
+    const ok=await saveAsignacion(registroLimpio);
     if(ok){ setAsigForm(null); setEvalDocModal(null); }
   };
   // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 3C: confirmar decisión documental y reintentar guardado
