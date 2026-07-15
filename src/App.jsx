@@ -1711,6 +1711,9 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
   const showSueldo=['reduccion_remuneracion','aumento_remuneracion','cambio_multiple'].includes(form?.tipo_anexo);
   const showJornada=['reduccion_jornada','aumento_jornada','cambio_horario','cambio_multiple'].includes(form?.tipo_anexo);
   const showCentro=['cambio_centro','cambio_multiple'].includes(form?.tipo_anexo);
+  // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 4: convivencia anexo manual / anexo desde asignación.
+  const esDesdeAsignacion=!!form?.asignacion_origen_id;
+  const tieneComponenteRemuneracional=['remuneracion','mixto','mixto_con_centro'].includes(form?.impacto_laboral);
 
   return(
     <div style={{marginBottom:12}}>
@@ -1750,6 +1753,11 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
           <p style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>
             {anexos.find(a=>a.id===form.id)?'Editar anexo':'Nuevo anexo de contrato'}
           </p>
+          {form.asignacion_origen_id&&(
+            <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:7,padding:'8px 12px',fontSize:11,color:'#1e40af',marginBottom:12}}>
+              Este anexo está vinculado a una asignación operativa. Los datos de centro, jornada y horario vienen del movimiento original y están protegidos para mantener trazabilidad.
+            </div>
+          )}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
             <FL label="Tipo de anexo">
               <select style={INP} value={form.tipo_anexo} onChange={e=>setForm({...form,tipo_anexo:e.target.value})}>
@@ -1772,15 +1780,35 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
           {showSueldo&&(
             <div style={{background:'#fff',border:`1px solid ${C.borderLight}`,borderRadius:6,padding:10,marginBottom:10}}>
               <p style={{fontSize:11,fontWeight:600,color:C.textMuted,marginBottom:8}}>💰 Cambio remuneración</p>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                <FL label="Sueldo anterior ($)"><input type="number" style={{...INP,background:'#f9fafb',cursor:'not-allowed'}} value={form.sueldo_anterior} readOnly/></FL>
-                <FL label="Sueldo nuevo ($)"><input type="number" style={INP} value={form.sueldo_nuevo} onChange={e=>setForm({...form,sueldo_nuevo:Number(e.target.value)})}/></FL>
-              </div>
-              {form.sueldo_nuevo!==form.sueldo_anterior&&(
-                <p style={{fontSize:11,color:form.sueldo_nuevo<form.sueldo_anterior?'#dc2626':C.green,marginTop:4}}>
-                  {form.sueldo_nuevo<form.sueldo_anterior?'↓':'↑'} Diferencia: {clp(Math.abs(form.sueldo_nuevo-form.sueldo_anterior))}
-                </p>
-              )}
+              {esDesdeAsignacion&&!tieneComponenteRemuneracional?(
+                <p style={{fontSize:12,color:C.textMuted}}>No aplica — este movimiento no tiene componente remuneracional.</p>
+              ):(()=>{
+                // Microfix: "cero fantasma" — si viene de una asignación con componente remuneracional
+                // y el valor es 0/null/vacío, NO se muestra como si fuera un sueldo real. Solo afecta
+                // la PRESENTACIÓN del input; el dato en Supabase y el guardado normal no cambian.
+                const anteriorEsFantasma = esDesdeAsignacion && tieneComponenteRemuneracional && !form.sueldo_anterior;
+                const nuevoEsFantasma = esDesdeAsignacion && tieneComponenteRemuneracional && !form.sueldo_nuevo;
+                return (<>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                    <FL label="Sueldo anterior ($)">
+                      {anteriorEsFantasma
+                        ? <div style={{...INP,background:'#f9fafb',color:'#b45309',display:'flex',alignItems:'center',fontSize:12,fontStyle:'italic'}}>Pendiente de revisión</div>
+                        : <input type="number" style={{...INP,background:'#f9fafb',cursor:'not-allowed'}} value={form.sueldo_anterior} readOnly/>}
+                    </FL>
+                    <FL label="Sueldo nuevo ($)">
+                      <input type="number" style={INP} value={nuevoEsFantasma?'':form.sueldo_nuevo} placeholder={nuevoEsFantasma?'Pendiente de revisión':undefined} onChange={e=>setForm({...form,sueldo_nuevo:e.target.value===''?0:Number(e.target.value)})}/>
+                    </FL>
+                  </div>
+                  {esDesdeAsignacion&&!form.sueldo_nuevo&&(
+                    <p style={{fontSize:11,color:'#b45309',marginTop:4}}>⚠ Pendiente de revisión — complete el sueldo nuevo si corresponde.</p>
+                  )}
+                  {!nuevoEsFantasma&&!anteriorEsFantasma&&form.sueldo_nuevo!==form.sueldo_anterior&&(
+                    <p style={{fontSize:11,color:form.sueldo_nuevo<form.sueldo_anterior?'#dc2626':C.green,marginTop:4}}>
+                      {form.sueldo_nuevo<form.sueldo_anterior?'↓':'↑'} Diferencia: {clp(Math.abs(form.sueldo_nuevo-form.sueldo_anterior))}
+                    </p>
+                  )}
+                </>);
+              })()}
             </div>
           )}
 
@@ -1789,9 +1817,9 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
               <p style={{fontSize:11,fontWeight:600,color:C.textMuted,marginBottom:8}}>🕐 Cambio jornada / horario</p>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
                 <FL label="Jornada anterior"><input style={{...INP,background:'#f9fafb'}} value={form.jornada_anterior||''} readOnly/></FL>
-                <FL label="Jornada nueva"><input style={INP} value={form.jornada_nueva||''} onChange={e=>setForm({...form,jornada_nueva:e.target.value})} placeholder="Ej: Lun-Vie 08:00-13:00"/></FL>
+                <FL label="Jornada nueva"><input disabled={esDesdeAsignacion} style={{...INP,...(esDesdeAsignacion?{background:'#f9fafb',cursor:'not-allowed',color:C.textMuted}:{})}} value={form.jornada_nueva||''} onChange={e=>setForm({...form,jornada_nueva:e.target.value})} placeholder="Ej: Lun-Vie 08:00-13:00"/></FL>
                 <FL label="Horario anterior"><input style={{...INP,background:'#f9fafb'}} value={form.horario_anterior||''} readOnly/></FL>
-                <FL label="Horario nuevo"><input style={INP} value={form.horario_nuevo||''} onChange={e=>setForm({...form,horario_nuevo:e.target.value})}/></FL>
+                <FL label="Horario nuevo"><input disabled={esDesdeAsignacion} style={{...INP,...(esDesdeAsignacion?{background:'#f9fafb',cursor:'not-allowed',color:C.textMuted}:{})}} value={form.horario_nuevo||''} onChange={e=>setForm({...form,horario_nuevo:e.target.value})}/></FL>
               </div>
             </div>
           )}
@@ -1807,7 +1835,7 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
                   </select>
                 </FL>
                 <FL label="Centro nuevo">
-                  <select style={INP} value={form.centro_nuevo||''} onChange={e=>setForm({...form,centro_nuevo:e.target.value})}>
+                  <select disabled={esDesdeAsignacion} style={{...INP,...(esDesdeAsignacion?{background:'#f9fafb',cursor:'not-allowed',color:C.textMuted}:{})}} value={form.centro_nuevo||''} onChange={e=>setForm({...form,centro_nuevo:e.target.value})}>
                     <option value="">— Seleccionar —</option>
                     {(data.contratos||[]).map(c=><option key={c.id} value={c.id}>{c.id} — {c.cliente}</option>)}
                   </select>
@@ -1844,6 +1872,9 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
             <div>
               <p style={{fontWeight:600,fontSize:12,color:C.text}}>{tipoLabel(a.tipo_anexo)}</p>
+              {a.asignacion_origen_id
+                ? <span title="Generado desde un movimiento operativo." style={{display:'inline-block',fontSize:10,fontWeight:600,color:'#1e40af',background:'#dbeafe',border:'1px solid #bfdbfe',borderRadius:4,padding:'1px 6px',marginTop:3}}>Desde asignación</span>
+                : <span title="Creado directamente por RRHH." style={{display:'inline-block',fontSize:10,fontWeight:600,color:C.textMuted,background:'#f3f4f6',border:`1px solid ${C.border}`,borderRadius:4,padding:'1px 6px',marginTop:3}}>Manual / administrativo</span>}
               <p style={{fontSize:11,color:C.textMuted,marginTop:2}}>{a.motivo||'Sin descripción'}</p>
               <p style={{fontSize:10,color:C.textMuted,marginTop:2}}>
                 Vigencia: {a.fecha_vigencia?new Date(a.fecha_vigencia.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL'):'—'}
@@ -1852,6 +1883,11 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
               {a.sueldo_nuevo&&a.sueldo_nuevo!==a.sueldo_anterior&&(
                 <p style={{fontSize:10,color:C.textMuted,marginTop:2}}>
                   💰 {clp(a.sueldo_anterior)} → {clp(a.sueldo_nuevo)}
+                </p>
+              )}
+              {a.asignacion_origen_id&&!a.sueldo_nuevo&&(
+                <p style={{fontSize:10,color:C.textMuted,marginTop:2}}>
+                  {['centro','jornada'].includes(a.impacto_laboral)?'Sin cambio remuneracional':'Sueldo: pendiente de revisión'}
                 </p>
               )}
             </div>
