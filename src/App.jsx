@@ -440,6 +440,19 @@ const resolverColacionAlAbrir = (existente, jv) => {
   }
   return {colacion_minutos:existente.colacion_minutos??null, colacion_imputable:existente.colacion_imputable??null, editableRegularizacion:true, sinDerivar:true};
 };
+// ASIG.JORNADA.BASE.1-D: la asignación base inicial no debe permitir reconstruir manualmente
+// horario/días que ya vienen de la jornada estructurada del contrato. Misma filosofía que
+// resolverColacionAlAbrir — se resuelve UNA VEZ al abrir, nunca en cada render.
+const resolverJornadaAlAbrir = (existente, jv) => {
+  const derivable = jv && jv.estructurada && jv.jornada.hora_inicio && jv.jornada.hora_termino;
+  if(derivable){
+    const horario = `${jv.jornada.hora_inicio}-${jv.jornada.hora_termino}`;
+    const dias = Array.isArray(jv.jornada.dias) ? diasATextoOperativo(jv.jornada.dias) : (existente.dias_semana||"Lun-Vie");
+    return {horario, dias_semana:dias, editableRegularizacion:false};
+  }
+  // No derivable desde el contrato: se conserva lo que ya existía, editable para regularización manual.
+  return {horario:existente.horario||"", dias_semana:existente.dias_semana||"Lun-Vie", editableRegularizacion:true};
+};
 // ASIG.JORNADA.BASE.1-B microfix: ninguna marca interna de sesión/UI (prefijo "_") debe llegar a
 // Supabase. Regla genérica, no una lista de campos — evita que vuelva a pasar con marcas futuras.
 const limpiarAsignacionParaGuardar = (obj) => {
@@ -819,7 +832,7 @@ function FechaInput({value,onChange,style,max}){
 
 // HORA.1-lite: campo de hora con escritura fluida. Reusa fmtHoraOperativa (normaliza) + horaOperativaValida (valida).
 // Acepta "9"->09:00, "900"->09:00, "0930"->09:30, "1830"->18:30, "18:30". Rechaza 25:00, 18:75. Picker nativo secundario.
-function HoraInput({value,onChange,style}){
+function HoraInput({value,onChange,style,disabled}){
   const [txt,setTxt]=useState(value||'');
   const [msg,setMsg]=useState('');
   useEffect(()=>{ setTxt(value||''); },[value]);
@@ -834,7 +847,7 @@ function HoraInput({value,onChange,style}){
   const onBlurText=()=>{ if(txt&&String(txt).trim()) commit(txt); };
   return (
     <div>
-      <input style={{...(style||INP)}} value={txt} onChange={onText} onBlur={onBlurText} placeholder="HH:mm (ej: 0930)" inputMode="numeric" maxLength={5}/>
+      <input disabled={disabled} style={{...(style||INP),...(disabled?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={txt} onChange={onText} onBlur={onBlurText} placeholder="HH:mm (ej: 0930)" inputMode="numeric" maxLength={5}/>
       {msg&&<div style={{fontSize:11,color:'#9a3412',marginTop:4}}>{msg}</div>}
     </div>
   );
@@ -3795,8 +3808,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
     if(esBaseInicial){
       // ASIG.JORNADA.BASE.1: jornada precargada desde jornadaVigente, igual patrón que la remuneración.
       const jv=jornadaVigente(form,new Date().toISOString().slice(0,10),data);
-      const diasTexto=jv.estructurada&&Array.isArray(jv.jornada.dias)?diasATextoOperativo(jv.jornada.dias):"Lun-Vie";
-      const horarioTexto=jv.estructurada&&jv.jornada.hora_inicio&&jv.jornada.hora_termino?`${jv.jornada.hora_inicio}-${jv.jornada.hora_termino}`:"";
+      // ASIG.JORNADA.BASE.1-D: horario/días se resuelven UNA VEZ al abrir, con su propia marca de sesión.
+      const rj=resolverJornadaAlAbrir({horario:"",dias_semana:"Lun-Vie"}, jv);
       // ASIG.JORNADA.BASE.1-B: se resuelve UNA VEZ al abrir — no se recalcula después con cada tecla.
       const rc=resolverColacionAlAbrir({colacion_minutos:null,colacion_imputable:null}, jv);
       // Asignación inicial operativa: remuneración/jornada precargadas y bloqueadas desde la ficha del trabajador.
@@ -3806,7 +3819,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
         bono_asistencia:form.bono_asistencia||0,bono_movilizacion:form.bono_movilizacion||0,bono_colacion:form.bono_colacion||0,
         gratificacion_monto:form.gratificacion_monto||0,porcentaje_costo:100,
         fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,
-        horas_semanales:"",dias_semana:diasTexto,horario:horarioTexto,colacion_minutos:rc.colacion_minutos,colacion_imputable:rc.colacion_imputable,
+        horas_semanales:"",dias_semana:rj.dias_semana,horario:rj.horario,colacion_minutos:rc.colacion_minutos,colacion_imputable:rc.colacion_imputable,
+        _jornadaEditablePorRegularizacion:rj.editableRegularizacion,
         _colacionEditablePorRegularizacion:rc.editableRegularizacion,_colacionSinDerivar:rc.sinDerivar,
         jornada:"",descripcion:"",
         rol_asignacion:"base_inicial"});
@@ -4628,13 +4642,30 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                       // (openNuevaAsignacion / botón Editar) — nunca se recalcula en vivo mientras se escribe,
                       // así el campo no se bloquea a mitad de que el usuario complete un dato.
                       const colacionBloqueada = asigForm.rol_asignacion==="base_inicial" && colacionCompletaAsignacion && !asigForm._colacionEditablePorRegularizacion;
+                      // ASIG.JORNADA.BASE.1-D: si la jornada ya viene derivada del contrato estructurado,
+                      // horario/días quedan de solo lectura — la marca se fijó UNA VEZ al abrir (openNuevaAsignacion
+                      // / botón Editar), nunca se recalcula en vivo. Si no fue derivable (legacy sin contrato
+                      // estructurado), se mantiene la vía de regularización manual.
+                      const jornadaBloqueada = asigForm.rol_asignacion==="base_inicial" && !asigForm._jornadaEditablePorRegularizacion;
+                      const desgloseJornada = horarioActualValido ? horasEfectivasAsignacion(true, horarioActualTxt, asigForm.colacion_minutos, asigForm.colacion_imputable) : null;
                       return (<>
-                        <FL label="Hora inicio (operativa)"><HoraInput value={hIni} onChange={v=>onInicioBlur(v)}/></FL>
-                        <FL label="Hora término (operativa)"><HoraInput value={hFin} onChange={v=>onTerminoBlur(v)}/></FL>
-                        <FL label="Duración de asignación para costeo operativo">
-                          <input style={INP} value={durDisplay} placeholder="Ej: 01:15 ó 1,25" onChange={e=>setAsigForm({...asigForm,_durRaw:e.target.value})} onBlur={e=>onDuracionBlur(e.target.value)} title="Duración operativa para costeo. Se guarda como decimal. NO es la jornada legal (esa se toma del contrato estructurado)."/>
-                          <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>Ej: 00:30 = media hora, 01:15 = una hora y quince minutos.{durDec>0?` Se guarda como ${durDec} h.`:""}</div>
-                        </FL>
+                        <FL label="Hora inicio (operativa)"><HoraInput value={hIni} onChange={v=>onInicioBlur(v)} disabled={jornadaBloqueada}/></FL>
+                        <FL label="Hora término (operativa)"><HoraInput value={hFin} onChange={v=>onTerminoBlur(v)} disabled={jornadaBloqueada}/></FL>
+                        {jornadaBloqueada ? (
+                          <FL label="Duración" span>
+                            <div style={{fontSize:12,color:C.text,background:'#f9fafb',border:`1px solid ${C.border}`,borderRadius:6,padding:'8px 10px',lineHeight:1.6}}>
+                              <div>Horario de presencia: <b>{asigForm.horario||"—"}</b></div>
+                              <div>Duración bruta: <b>{desgloseJornada?duracionATexto(desgloseJornada.bruta):"—"}</b></div>
+                              <div>Colación: <b>{asigForm.colacion_minutos!=null?`${asigForm.colacion_minutos} min`:"—"}</b> ({asigForm.colacion_imputable===true?"imputable, no se descuenta":asigForm.colacion_imputable===false?"no imputable, se descuenta":"no definida"})</div>
+                              <div>Duración efectiva (para capacidad/costeo): <b>{desgloseJornada?duracionATexto(desgloseJornada.horas):"—"}</b></div>
+                            </div>
+                          </FL>
+                        ) : (
+                          <FL label="Duración de asignación para costeo operativo">
+                            <input style={INP} value={durDisplay} placeholder="Ej: 01:15 ó 1,25" onChange={e=>setAsigForm({...asigForm,_durRaw:e.target.value})} onBlur={e=>onDuracionBlur(e.target.value)} title="Duración operativa para costeo. Se guarda como decimal. NO es la jornada legal (esa se toma del contrato estructurado)."/>
+                            <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>Ej: 00:30 = media hora, 01:15 = una hora y quince minutos.{durDec>0?` Se guarda como ${durDec} h.`:""}</div>
+                          </FL>
+                        )}
                         <FL label="Colación (minutos)">
                           <input type="number" min={0} disabled={colacionBloqueada} style={{...INP,...(colacionBloqueada?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={(asigForm.colacion_minutos===null||asigForm.colacion_minutos===undefined)?"":asigForm.colacion_minutos} placeholder="Ej: 60" onChange={e=>{const v=e.target.value; setAsigForm({...asigForm,colacion_minutos:v===""?null:Number(v)});}}/>
                         </FL>
@@ -4648,7 +4679,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                         </FL>
                         <FL label="Días de asignación (operativo)" span>
                           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                            {J2_DIAS.map(([k,lbl])=>(<button key={k} type="button" onClick={()=>toggleDia(k)} style={{padding:"5px 11px",borderRadius:6,fontSize:12,cursor:"pointer",border:`1px solid ${C.border}`,background:diasSel.includes(k)?C.accent:C.surface,color:diasSel.includes(k)?C.accentText:C.text}}>{lbl}</button>))}
+                            {J2_DIAS.map(([k,lbl])=>(<button key={k} type="button" disabled={jornadaBloqueada} onClick={()=>toggleDia(k)} style={{padding:"5px 11px",borderRadius:6,fontSize:12,cursor:jornadaBloqueada?"not-allowed":"pointer",border:`1px solid ${C.border}`,background:jornadaBloqueada?'#f3f4f6':(diasSel.includes(k)?C.accent:C.surface),color:jornadaBloqueada?C.textMuted:(diasSel.includes(k)?C.accentText:C.text),opacity:jornadaBloqueada?0.7:1}}>{lbl}</button>))}
                           </div>
                         </FL>
                         <FL label="Jornada (visual · generada)" span>
@@ -4709,8 +4740,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {key:"jornada",label:"Jornada",render:r=><span style={{fontSize:12,color:C.textMuted}}>{r.jornada||r.horario||"—"}</span>},
                     {key:"acciones",label:"",render:r=><div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
                       <button onClick={()=>{
-                        // ASIG.JORNADA.BASE.1-B: la marca editableRegularizacion se fija UNA VEZ al abrir
-                        // (nunca se recalcula en vivo mientras el usuario escribe).
+                        // ASIG.JORNADA.BASE.1-B/D: las marcas editableRegularizacion se fijan UNA VEZ al abrir
+                        // (nunca se recalculan en vivo mientras el usuario escribe).
                         let extra={};
                         if(r.rol_asignacion==="base_inicial"){
                           const jv=jornadaVigente(form,new Date().toISOString().slice(0,10),data);
@@ -4719,8 +4750,10 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                           extra.colacion_imputable=rc.colacion_imputable;
                           extra._colacionEditablePorRegularizacion=rc.editableRegularizacion;
                           extra._colacionSinDerivar=rc.sinDerivar;
-                          if(!r.horario && jv.estructurada && jv.jornada.hora_inicio && jv.jornada.hora_termino) extra.horario=`${jv.jornada.hora_inicio}-${jv.jornada.hora_termino}`;
-                          if(!r.dias_semana && jv.estructurada && Array.isArray(jv.jornada.dias)) extra.dias_semana=diasATextoOperativo(jv.jornada.dias);
+                          const rj=resolverJornadaAlAbrir({horario:r.horario||"",dias_semana:r.dias_semana||"Lun-Vie"}, jv);
+                          extra.horario=rj.horario;
+                          extra.dias_semana=rj.dias_semana;
+                          extra._jornadaEditablePorRegularizacion=rj.editableRegularizacion;
                         }
                         setAsigForm({...r,_edit:true,_original_contrato_id:r.contrato_id,...extra});
                       }} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>
