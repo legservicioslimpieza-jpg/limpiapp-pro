@@ -420,6 +420,26 @@ const horasEfectivasAsignacion = (horarioValido, horario, colacionMinutos, colac
   }
   return {horas:bruta, advertencia:"Colación no definida para esta asignación. Revise si la duración corresponde a horas efectivas o brutas.", bruta};
 };
+// ASIG.JORNADA.BASE.1-B: ¿la combinación (imputable, minutos) es completa? Misma regla usada
+// tanto para decidir bloqueo como para decidir si hace falta regularizar.
+const colacionEstaCompleta = (colacionImputable, colacionMinutos) => colacionImputable===true || (
+  colacionImputable===false && colacionMinutos!==null && colacionMinutos!==undefined && String(colacionMinutos).trim()!==""
+);
+// ASIG.JORNADA.BASE.1-B microfix: se evalúa UNA SOLA VEZ al abrir el formulario (nunca en cada
+// render mientras se escribe), para no bloquear el campo a mitad de que el usuario complete un dato.
+// existente: {colacion_minutos, colacion_imputable} tal cual venían ANTES de cualquier auto-precarga.
+const resolverColacionAlAbrir = (existente, jv) => {
+  const yaCompleta = colacionEstaCompleta(existente.colacion_imputable, existente.colacion_minutos);
+  if(yaCompleta) return {colacion_minutos:existente.colacion_minutos, colacion_imputable:existente.colacion_imputable, editableRegularizacion:false, sinDerivar:false};
+  const colDerivable = jv && jv.estructurada && (jv.jornada.colacion_min!=null || jv.jornada.colacion_minutos!=null || jv.jornada.colacion_imputable!=null);
+  if(colDerivable){
+    const cm = jv.jornada.colacion_min ?? jv.jornada.colacion_minutos ?? null;
+    const ci = jv.jornada.colacion_imputable ?? null;
+    const derivadaCompleta = colacionEstaCompleta(ci, cm);
+    return {colacion_minutos:cm, colacion_imputable:ci, editableRegularizacion:!derivadaCompleta, sinDerivar:false};
+  }
+  return {colacion_minutos:existente.colacion_minutos??null, colacion_imputable:existente.colacion_imputable??null, editableRegularizacion:true, sinDerivar:true};
+};
 const dateOnly = v => v ? String(v).split("T")[0] : "";
 // J1.2: horas efectivas semanales de un bloque = (horas brutas entre inicio y término − colación no imputable) × nº días.
 const calcHorasEfectivasBloque = (b) => {
@@ -3767,8 +3787,8 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
       const jv=jornadaVigente(form,new Date().toISOString().slice(0,10),data);
       const diasTexto=jv.estructurada&&Array.isArray(jv.jornada.dias)?diasATextoOperativo(jv.jornada.dias):"Lun-Vie";
       const horarioTexto=jv.estructurada&&jv.jornada.hora_inicio&&jv.jornada.hora_termino?`${jv.jornada.hora_inicio}-${jv.jornada.hora_termino}`:"";
-      const colMin=jv.estructurada?(jv.jornada.colacion_min??jv.jornada.colacion_minutos??null):null;
-      const colImp=jv.estructurada?(jv.jornada.colacion_imputable??null):null;
+      // ASIG.JORNADA.BASE.1-B: se resuelve UNA VEZ al abrir — no se recalcula después con cada tecla.
+      const rc=resolverColacionAlAbrir({colacion_minutos:null,colacion_imputable:null}, jv);
       // Asignación inicial operativa: remuneración/jornada precargadas y bloqueadas desde la ficha del trabajador.
       setAsigForm({trabajador_id:form.id,contrato_id:contratoId||"",activo:true,estado_asig:"activa",afecta_remuneracion:true,
         sueldo_asignado:form.sueldo_base||0,modalidad_cobertura:null,origen_trabajador:null,
@@ -3776,7 +3796,9 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
         bono_asistencia:form.bono_asistencia||0,bono_movilizacion:form.bono_movilizacion||0,bono_colacion:form.bono_colacion||0,
         gratificacion_monto:form.gratificacion_monto||0,porcentaje_costo:100,
         fecha_inicio_asig:new Date().toISOString().slice(0,10),fecha_termino_asig:null,
-        horas_semanales:"",dias_semana:diasTexto,horario:horarioTexto,colacion_minutos:colMin,colacion_imputable:colImp,jornada:"",descripcion:"",
+        horas_semanales:"",dias_semana:diasTexto,horario:horarioTexto,colacion_minutos:rc.colacion_minutos,colacion_imputable:rc.colacion_imputable,
+        _colacionEditablePorRegularizacion:rc.editableRegularizacion,_colacionSinDerivar:rc.sinDerivar,
+        jornada:"",descripcion:"",
         rol_asignacion:"base_inicial"});
     }else{
       // A.1/A.2: todos los campos numéricos arrancan vacíos (placeholder), no en 0 ni heredados.
@@ -4582,6 +4604,12 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                       const diasSel=textoADiasOperativo(asigForm.dias_semana);
                       const toggleDia=(k)=>{const s=diasSel.includes(k)?diasSel.filter(x=>x!==k):[...diasSel,k];const txt=diasATextoOperativo(s);setAsigForm({...asigForm,dias_semana:txt,jornada:[txt,asigForm.horario||""].filter(Boolean).join(" ")});};
                       const jornadaGen=[asigForm.dias_semana||"",asigForm.horario||""].filter(Boolean).join(" ");
+                      // ASIG.JORNADA.BASE.1-B microfix: reutiliza colacionEstaCompleta (no duplica la regla).
+                      const colacionCompletaAsignacion = colacionEstaCompleta(asigForm.colacion_imputable, asigForm.colacion_minutos);
+                      // La marca _colacionEditablePorRegularizacion se fijó UNA VEZ al abrir el formulario
+                      // (openNuevaAsignacion / botón Editar) — nunca se recalcula en vivo mientras se escribe,
+                      // así el campo no se bloquea a mitad de que el usuario complete un dato.
+                      const colacionBloqueada = asigForm.rol_asignacion==="base_inicial" && colacionCompletaAsignacion && !asigForm._colacionEditablePorRegularizacion;
                       return (<>
                         <FL label="Hora inicio (operativa)"><HoraInput value={hIni} onChange={v=>onInicioBlur(v)}/></FL>
                         <FL label="Hora término (operativa)"><HoraInput value={hFin} onChange={v=>onTerminoBlur(v)}/></FL>
@@ -4590,14 +4618,15 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                           <div style={{fontSize:11,color:C.textMuted,marginTop:4}}>Ej: 00:30 = media hora, 01:15 = una hora y quince minutos.{durDec>0?` Se guarda como ${durDec} h.`:""}</div>
                         </FL>
                         <FL label="Colación (minutos)">
-                          <input type="number" min={0} disabled={asigForm.rol_asignacion==="base_inicial"} style={{...INP,...(asigForm.rol_asignacion==="base_inicial"?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={(asigForm.colacion_minutos===null||asigForm.colacion_minutos===undefined)?"":asigForm.colacion_minutos} placeholder="Ej: 60" onChange={e=>{const v=e.target.value; setAsigForm({...asigForm,colacion_minutos:v===""?null:Number(v)});}}/>
+                          <input type="number" min={0} disabled={colacionBloqueada} style={{...INP,...(colacionBloqueada?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={(asigForm.colacion_minutos===null||asigForm.colacion_minutos===undefined)?"":asigForm.colacion_minutos} placeholder="Ej: 60" onChange={e=>{const v=e.target.value; setAsigForm({...asigForm,colacion_minutos:v===""?null:Number(v)});}}/>
                         </FL>
                         <FL label="Colación imputable">
-                          <select disabled={asigForm.rol_asignacion==="base_inicial"} style={{...INP,...(asigForm.rol_asignacion==="base_inicial"?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={asigForm.colacion_imputable===true?"si":(asigForm.colacion_imputable===false?"no":"")} onChange={e=>{const v=e.target.value; setAsigForm({...asigForm,colacion_imputable:v===""?null:(v==="si")});}}>
+                          <select disabled={colacionBloqueada} style={{...INP,...(colacionBloqueada?{background:'#f3f4f6',cursor:'not-allowed',color:C.textMuted}:{})}} value={asigForm.colacion_imputable===true?"si":(asigForm.colacion_imputable===false?"no":"")} onChange={e=>{const v=e.target.value; setAsigForm({...asigForm,colacion_imputable:v===""?null:(v==="si")});}}>
                             <option value="">— No definida —</option>
                             <option value="no">No, se descuenta del horario</option>
                             <option value="si">Sí, no se descuenta (ya está pagada)</option>
                           </select>
+                          {asigForm._colacionSinDerivar&&<div style={{fontSize:11,color:'#b45309',marginTop:4,background:'#fffbeb',border:'1px solid #fde68a',borderRadius:6,padding:'6px 8px'}}>⚠ Asignación base antigua sin colación registrada. Complete la colación para corregir la capacidad laboral.</div>}
                         </FL>
                         <FL label="Días de asignación (operativo)" span>
                           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -4661,7 +4690,22 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {key:"fechas",label:"Vigencia",render:r=><span style={{fontSize:12,color:C.textMuted}}>{dateOnly(r.fecha_inicio_asig)||"—"}<br/>{r.fecha_termino_asig?`hasta ${dateOnly(r.fecha_termino_asig)}`:"vigente"}</span>},
                     {key:"jornada",label:"Jornada",render:r=><span style={{fontSize:12,color:C.textMuted}}>{r.jornada||r.horario||"—"}</span>},
                     {key:"acciones",label:"",render:r=><div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
-                      <button onClick={()=>setAsigForm({...r,_edit:true,_original_contrato_id:r.contrato_id})} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>
+                      <button onClick={()=>{
+                        // ASIG.JORNADA.BASE.1-B: la marca editableRegularizacion se fija UNA VEZ al abrir
+                        // (nunca se recalcula en vivo mientras el usuario escribe).
+                        let extra={};
+                        if(r.rol_asignacion==="base_inicial"){
+                          const jv=jornadaVigente(form,new Date().toISOString().slice(0,10),data);
+                          const rc=resolverColacionAlAbrir({colacion_minutos:r.colacion_minutos??null,colacion_imputable:r.colacion_imputable??null}, jv);
+                          extra.colacion_minutos=rc.colacion_minutos;
+                          extra.colacion_imputable=rc.colacion_imputable;
+                          extra._colacionEditablePorRegularizacion=rc.editableRegularizacion;
+                          extra._colacionSinDerivar=rc.sinDerivar;
+                          if(!r.horario && jv.estructurada && jv.jornada.hora_inicio && jv.jornada.hora_termino) extra.horario=`${jv.jornada.hora_inicio}-${jv.jornada.hora_termino}`;
+                          if(!r.dias_semana && jv.estructurada && Array.isArray(jv.jornada.dias)) extra.dias_semana=diasATextoOperativo(jv.jornada.dias);
+                        }
+                        setAsigForm({...r,_edit:true,_original_contrato_id:r.contrato_id,...extra});
+                      }} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Editar</button>
                       {r.estado_asig!=="terminada"&&r.activo!==false&&<button onClick={()=>abrirMovilidad(r)} style={{color:"#0e7490",background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Mover</button>}
                       {r.estado_asig!=="terminada"&&r.activo!==false&&<button onClick={()=>terminarAsig(r)} style={{color:C.red,background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:500}}>Terminar</button>}
                     </div>},
