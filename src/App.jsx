@@ -4603,7 +4603,14 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {(()=>{
                       const hParts=String(asigForm.horario||"").split("-");
                       const hIni=hParts[0]||""; const hFin=hParts[1]||"";
-                      const durDec=horasANumero(asigForm.horas_semanales);
+                      // ASIG.JORNADA.BASE.1-C: durDec (usada para RECOMPONER hora_termino al mover
+                      // hora_inicio/duración) debe salir SIEMPRE de la BRUTA del horario actual, nunca
+                      // de horas_semanales persistido — que desde ASIG.JORNADA.BASE.1-B puede ser NETO
+                      // (bruta − colación). Si se leyera el neto acá, la colación terminaría modificando
+                      // hora_termino de forma indirecta, que es justo lo que no debe pasar.
+                      const horarioActualTxt=String(asigForm.horario||"").trim();
+                      const horarioActualValido=horarioActualTxt.length>0 && horarioRangoValido(horarioActualTxt);
+                      const durDec=horarioActualValido?difHorasDec(hIni,hFin):horasANumero(asigForm.horas_semanales);
                       const durDisplay=asigForm._durRaw!==undefined?asigForm._durRaw:duracionATexto(durDec);
                       const jGen=(ini,fin)=>[asigForm.dias_semana||"",(ini||fin)?`${ini}-${fin}`:""].filter(Boolean).join(" ");
                       // inicio: recompone término desde la duración vigente (mantiene duración)
