@@ -3912,6 +3912,59 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
   const terminarAsig=(a)=>{
     setRetiroModal({asig:a, fecha:new Date().toISOString().slice(0,10), motivo:'', responsable:''});
   };
+  // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 3D: crea el borrador REAL de anexo vinculado a su
+  // asignación de origen. Nunca firma, nunca aplica, nunca genera PDF. Alcance cerrado: solo el
+  // INSERT en anexos_contrato + marcar la asignación como 'borrador_generado' tras éxito.
+  const mapImpactoATipoAnexo=(tipoImpacto)=>{
+    // Solo 'centro' tiene un tipo específico sin ambigüedad de signo. Para el resto (remuneración
+    // y jornada pueden ser aumento O reducción, y un flag booleano no lo distingue) se usa
+    // 'cambio_multiple' como tipo neutro — no se inventa un signo que el sistema no conoce.
+    if(tipoImpacto==='centro') return 'cambio_centro';
+    return 'cambio_multiple';
+  };
+  const generarBorradorAnexo=async(a)=>{
+    if(!a.fecha_inicio_asig){
+      alert("No se puede generar el borrador porque la asignación no tiene fecha de inicio.");
+      return;
+    }
+    // Anti-duplicado — verificar ANTES de insertar (camino principal).
+    const {data:existentes, error:errSel}=await supabase.from('anexos_contrato').select('id').eq('asignacion_origen_id',a.id).limit(1);
+    if(errSel){ alert("Error al verificar si ya existe un borrador: "+errSel.message); return; }
+    if(existentes && existentes.length>0){
+      alert(`Ya existe un borrador de anexo para esta asignación (${existentes[0].id}).`);
+      return;
+    }
+    const rec={
+      id: genAnexoId(a.trabajador_id),
+      trabajador_id: a.trabajador_id,
+      tipo_anexo: mapImpactoATipoAnexo(a.tipo_impacto_laboral),
+      fecha_firma: null,
+      fecha_vigencia: a.fecha_inicio_asig,
+      motivo: "Borrador generado desde asignación posterior con impacto laboral.",
+      estado: "borrador",
+      asignacion_origen_id: a.id,
+      contrato_origen_id: a.contrato_id,
+      tipo_origen_anexo: "asignacion_posterior",
+      impacto_laboral: a.tipo_impacto_laboral||null,
+      centro_nuevo: a.contrato_id,
+      horario_nuevo: a.horario||null,
+      jornada_nueva: a.jornada||a.horario||null,
+      clausulas: { origen:"asignacion_posterior", asignacion_id:a.id, contrato_id:a.contrato_id, tipo_impacto_laboral:a.tipo_impacto_laboral||null, generado_en:new Date().toISOString() },
+    };
+    // Defensa adicional (carrera entre dos clics/pestañas): llamada directa a Supabase para poder
+    // inspeccionar error.code === '23505' (índice único), no vía el insert genérico que solo alerta.
+    const {error:errIns}=await supabase.from('anexos_contrato').insert(rec);
+    if(errIns){
+      if(errIns.code==='23505'){
+        alert("Ya existe un borrador de anexo para esta asignación.");
+      }else{
+        alert("Error al generar el borrador de anexo: "+errIns.message);
+      }
+      return;
+    }
+    // Solo después del insert exitoso: marcar la asignación. update() ya recarga los datos.
+    await update('asignaciones', {id:a.id, estado_evaluacion_documental:'borrador_generado'});
+  };
   const abrirMovilidad=(o)=>{
     const hoy=new Date().toISOString().slice(0,10);
     setMovilidadModal({
@@ -4738,6 +4791,19 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {key:"bonos",label:"Bonos",render:r=><span style={{fontSize:12,color:C.textMuted}}>Mov {clp(r.bono_movilizacion)} · Col {clp(r.bono_colacion)}</span>},
                     {key:"fechas",label:"Vigencia",render:r=><span style={{fontSize:12,color:C.textMuted}}>{dateOnly(r.fecha_inicio_asig)||"—"}<br/>{r.fecha_termino_asig?`hasta ${dateOnly(r.fecha_termino_asig)}`:"vigente"}</span>},
                     {key:"jornada",label:"Jornada",render:r=><span style={{fontSize:12,color:C.textMuted}}>{r.jornada||r.horario||"—"}</span>},
+                    {key:"doc",label:"Revisión documental",render:r=>{
+                      if(r.rol_asignacion!=="movimiento_posterior") return <span style={{fontSize:11,color:C.textMuted}}>—</span>;
+                      if(r.estado_evaluacion_documental==="anexo_solicitado"){
+                        return (<div>
+                          <div style={{fontSize:11,color:'#b45309',marginBottom:4}}>Revisión documental: anexo solicitado</div>
+                          <button onClick={()=>generarBorradorAnexo(r)} style={{fontSize:11,fontWeight:600,color:'#fff',background:C.accent,border:'none',borderRadius:5,padding:'4px 9px',cursor:'pointer'}}>Generar borrador de anexo</button>
+                        </div>);
+                      }
+                      if(r.estado_evaluacion_documental==="borrador_generado") return <span style={{fontSize:11,color:C.green,fontWeight:600}}>✓ Borrador de anexo generado</span>;
+                      if(r.estado_evaluacion_documental==="pendiente_revision") return <span style={{fontSize:11,color:C.textMuted}}>Pendiente de revisión</span>;
+                      if(r.estado_evaluacion_documental==="no_aplica") return <span style={{fontSize:11,color:C.textMuted}}>No aplica</span>;
+                      return <span style={{fontSize:11,color:C.textMuted}}>—</span>;
+                    }},
                     {key:"acciones",label:"",render:r=><div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
                       <button onClick={()=>{
                         // ASIG.JORNADA.BASE.1-B/D: las marcas editableRegularizacion se fijan UNA VEZ al abrir
