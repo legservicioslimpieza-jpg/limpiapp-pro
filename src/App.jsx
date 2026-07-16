@@ -1950,6 +1950,9 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
               {a.asignacion_origen_id
                 ? <span title="Generado desde un movimiento operativo." style={{display:'inline-block',fontSize:10,fontWeight:600,color:'#1e40af',background:'#dbeafe',border:'1px solid #bfdbfe',borderRadius:4,padding:'1px 6px',marginTop:3}}>Desde asignación</span>
                 : <span title="Creado directamente por RRHH." style={{display:'inline-block',fontSize:10,fontWeight:600,color:C.textMuted,background:'#f3f4f6',border:`1px solid ${C.border}`,borderRadius:4,padding:'1px 6px',marginTop:3}}>Manual / administrativo</span>}
+              {!a.asignacion_origen_id&&!a.tipo_origen_anexo&&(
+                <span style={{display:'block',fontSize:10,color:C.textMuted,fontStyle:'italic',marginTop:2}}>Origen no clasificado en esta versión</span>
+              )}
               <p style={{fontSize:11,color:C.textMuted,marginTop:2}}>{a.motivo||'Sin descripción'}</p>
               <p style={{fontSize:10,color:C.textMuted,marginTop:2}}>
                 Vigencia: {a.fecha_vigencia?new Date(a.fecha_vigencia.split('T')[0]+'T12:00:00').toLocaleDateString('es-CL'):'—'}
