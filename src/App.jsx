@@ -1620,7 +1620,7 @@ function genAnexoId(trabajadorId){
   return `ANX-${(trabajadorId||'TR').slice(-4)}-${ts}`;
 }
 
-function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTrabajador, prefill, clearPrefill}){
+function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTrabajador, prefill, clearPrefill, setTab}){
   const blankAnexo=(pf={})=>({
     id:genAnexoId(trabajador.id), trabajador_id:trabajador.id, tipo_anexo:'',
     fecha_firma:'', fecha_vigencia:'', motivo:'',
@@ -1634,7 +1634,31 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
   const anexos=(data.anexos_contrato||[]).filter(a=>a.trabajador_id===trabajador.id)
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
 
-  const openNew=()=>setForm(blankAnexo());
+  // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 4B-A: clasificación previa, el anexo manual ya no
+  // parte de un formulario en blanco. Solo interviene en la creación de un anexo NUEVO — no toca
+  // la edición de anexos existentes ni el flujo de prefill (desvinculación).
+  const [clasifModal,setClasifModal]=useState(null); // null | {paso:'clasificar'} | {paso:'advertencia'}
+  const CLASIFICACIONES_ANEXO=[
+    {v:'ajuste_administrativo', l:'Ajuste remuneracional administrativo'},
+    {v:'regularizacion_historica', l:'Regularización histórica'},
+    {v:'correccion_documental', l:'Corrección documental'},
+    {v:'cambio_operativo_manual', l:'Cambio operativo manual'},
+    {v:'otro_justificado', l:'Otro motivo justificado'},
+  ];
+  const openNew=()=>setClasifModal({paso:'clasificar'});
+  const elegirClasificacion=(valor)=>{
+    if(valor==='cambio_operativo_manual'){ setClasifModal({paso:'advertencia', valor}); return; }
+    setClasifModal(null);
+    setForm(blankAnexo({tipo_origen_anexo:valor}));
+  };
+  const continuarManualmente=()=>{
+    setForm(blankAnexo({tipo_origen_anexo:'cambio_operativo_manual'}));
+    setClasifModal(null);
+  };
+  const irACrearAsignacion=()=>{
+    setClasifModal(null);
+    setTab&&setTab('asignaciones');
+  };
 
   // Pre-llenado desde el Retiro de asignación (por si la pestaña ya estaba montada). Abre el form y limpia el prefill.
   useEffect(()=>{
@@ -1861,6 +1885,39 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
         <button onClick={openNew} style={{marginBottom:12,padding:'7px 14px',borderRadius:6,border:`1px dashed ${C.accent}`,background:C.accentBg,color:C.accent,cursor:'pointer',fontSize:12,fontWeight:600}}>
           + Nuevo anexo
         </button>
+      )}
+
+      {/* INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 4B-A: paso de clasificación previo (no formulario en blanco) */}
+      {clasifModal&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}} onClick={()=>setClasifModal(null)}>
+          <div style={{background:'#fff',borderRadius:10,padding:22,maxWidth:480,width:'100%',maxHeight:'90vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+            {clasifModal.paso==='clasificar'&&(<>
+              <h3 style={{margin:'0 0 4px',fontSize:16,color:C.text}}>¿Por qué estás creando este anexo?</h3>
+              <p style={{fontSize:12,color:C.textMuted,marginBottom:14}}>Elige la clasificación que mejor describe este cambio.</p>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {CLASIFICACIONES_ANEXO.map(op=>(
+                  <button key={op.v} onClick={()=>elegirClasificacion(op.v)} style={{textAlign:'left',padding:'10px 12px',borderRadius:8,border:`1px solid ${C.border}`,background:'#fff',cursor:'pointer',fontSize:13,fontWeight:600,color:C.text}}>{op.l}</button>
+                ))}
+              </div>
+              <div style={{display:'flex',justifyContent:'flex-end',marginTop:16}}>
+                <button onClick={()=>setClasifModal(null)} style={{padding:'8px 14px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12,fontWeight:600,color:C.text}}>Cancelar</button>
+              </div>
+            </>)}
+            {clasifModal.paso==='advertencia'&&(<>
+              <h3 style={{margin:'0 0 10px',fontSize:16,color:C.text}}>Este cambio parece operativo</h3>
+              <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:7,padding:'10px 12px',fontSize:12,color:'#92400e',marginBottom:16}}>
+                Este cambio parece corresponder a una asignación operativa. Para mantener trazabilidad, lo recomendado es generarlo desde la pestaña Asignaciones.
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                <button onClick={irACrearAsignacion} style={{padding:'10px 12px',borderRadius:8,border:`1px solid ${C.accent}`,background:C.accent,color:'#fff',cursor:'pointer',fontSize:13,fontWeight:700}}>Ir a crear asignación</button>
+                <button onClick={continuarManualmente} style={{padding:'10px 12px',borderRadius:8,border:`1px solid ${C.border}`,background:'#fff',cursor:'pointer',fontSize:13,fontWeight:600,color:C.text}}>Continuar manualmente</button>
+              </div>
+              <div style={{display:'flex',justifyContent:'flex-end',marginTop:12}}>
+                <button onClick={()=>setClasifModal(null)} style={{padding:'8px 14px',borderRadius:6,border:'none',background:'transparent',cursor:'pointer',fontSize:12,color:C.textMuted}}>Cancelar</button>
+              </div>
+            </>)}
+          </div>
+        </div>
       )}
 
       {/* Lista de anexos */}
@@ -4888,6 +4945,7 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
               setFormTrabajador={setForm}
               prefill={anexoPrefill}
               clearPrefill={()=>setAnexoPrefill(null)}
+              setTab={setTab}
             />
           )}
           {tab==="anexos"&&isNew&&(
