@@ -1782,6 +1782,16 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
               Este anexo está vinculado a una asignación operativa. Los datos de centro, jornada y horario vienen del movimiento original y están protegidos para mantener trazabilidad.
             </div>
           )}
+          {form.tipo_origen_anexo==='cambio_operativo_manual'&&(
+            <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:7,padding:'10px 12px',marginBottom:12}}>
+              <label style={{display:'block',fontSize:12,fontWeight:700,color:'#92400e',marginBottom:4}}>Justificación de la excepción</label>
+              <p style={{fontSize:11,color:'#92400e',marginBottom:6}}>Explica por qué este cambio se registrará manualmente y no desde una asignación operativa.</p>
+              <textarea rows={2} style={{...INP,resize:'vertical',width:'100%'}} value={form.observaciones||''} onChange={e=>setForm({...form,observaciones:e.target.value})} placeholder="Ej: reemplazo temporal acordado verbalmente, se regulariza aquí porque..."/>
+              {!form.observaciones?.trim()&&(
+                <p style={{fontSize:11,color:'#b45309',marginTop:4}}>Para continuar manualmente, debes indicar una justificación.</p>
+              )}
+            </div>
+          )}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
             <FL label="Tipo de anexo">
               <select style={INP} value={form.tipo_anexo} onChange={e=>setForm({...form,tipo_anexo:e.target.value})}>
@@ -1872,10 +1882,18 @@ function TabAnexos({trabajador, data, insert, update, saveAsignacion, setFormTra
 
           <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
             <button onClick={()=>setForm(null)} style={{padding:'7px 14px',borderRadius:6,border:`1px solid ${C.border}`,background:'transparent',cursor:'pointer',fontSize:12}}>Cancelar</button>
-            <button onClick={save} disabled={!form.tipo_anexo||!form.fecha_vigencia}
-              style={{padding:'7px 16px',borderRadius:6,border:'none',background:form.tipo_anexo&&form.fecha_vigencia?C.accent:'#e5e7eb',color:form.tipo_anexo&&form.fecha_vigencia?'#fff':C.textMuted,cursor:form.tipo_anexo&&form.fecha_vigencia?'pointer':'not-allowed',fontSize:12,fontWeight:600}}>
-              Guardar anexo
-            </button>
+            {(()=>{
+              // INTEG.ASIG-ANEXO-COSTO.1-A · Incremento 4B-B: justificación obligatoria solo para
+              // cambio_operativo_manual. Reutiliza el campo 'observaciones' ya existente, sin columnas nuevas.
+              const faltaJustificacion = form.tipo_origen_anexo==='cambio_operativo_manual' && !(form.observaciones||'').trim();
+              const puedeGuardar = form.tipo_anexo && form.fecha_vigencia && !faltaJustificacion;
+              return (
+                <button onClick={()=>save()} disabled={!puedeGuardar}
+                  style={{padding:'7px 16px',borderRadius:6,border:'none',background:puedeGuardar?C.accent:'#e5e7eb',color:puedeGuardar?'#fff':C.textMuted,cursor:puedeGuardar?'pointer':'not-allowed',fontSize:12,fontWeight:600}}>
+                  Guardar borrador de anexo
+                </button>
+              );
+            })()}
           </div>
         </div>
       )}
