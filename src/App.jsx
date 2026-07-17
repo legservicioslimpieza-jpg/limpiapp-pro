@@ -623,6 +623,51 @@ const evaluarImpactoLaboral = (asignacionNueva, baseInicialDelTrabajador) => {
   return {remuneracional, jornada_operativa, centro_operativo, posible_centro_principal, tipo_resumen, alertas};
 };
 
+// ASIG.DOC.1-B1: helper único de presentación para estado_evaluacion_documental. Devuelve
+// SEMÁNTICA (etiqueta, variante, ayuda, acción), no colores rígidos — la traducción de variante
+// a estilo visual vive en el render, no acá. No es una segunda fuente de reglas de negocio: no
+// escribe nada, no decide nada más que cómo mostrar un estado que ya existe en el dato.
+// Contrato canónico (Gabriel): valores internos válidos hoy: anexo_solicitado, borrador_generado,
+// pendiente_revision, no_aplica. pendiente_evaluacion_documental solo se presenta SI llegara a
+// existir — nunca se escribe desde acá. revision_requerida/no_aplica_justificado NO son valores
+// internos — son textos de presentación derivados de pendiente_revision y de no_aplica+motivo.
+const presentarEstadoEvaluacionDocumental = (asignacion) => {
+  const estado = asignacion?.estado_evaluacion_documental;
+  // Microfix 2: normalizada — espacios en blanco no cuentan como justificación real.
+  const motivo = String(asignacion?.motivo_evaluacion_documental ?? "").trim();
+
+  if(estado === 'anexo_solicitado'){
+    return { etiqueta:'Anexo solicitado', variante:'info', ayudaSecundaria:null,
+      accion:{ tipo:'generar_borrador', etiqueta:'Generar borrador de anexo' } };
+  }
+  if(estado === 'borrador_generado'){
+    // No se describe como "resuelto": solo significa que el borrador fue creado.
+    return { etiqueta:'Borrador generado', variante:'info', ayudaSecundaria:null, accion:null };
+  }
+  if(estado === 'pendiente_revision'){
+    return { etiqueta:'Revisión requerida', variante:'attention', ayudaSecundaria:null, accion:null };
+  }
+  if(estado === 'no_aplica'){
+    if(motivo){
+      return { etiqueta:'No aplica justificado', variante:'success', ayudaSecundaria:motivo,
+        accion:{ tipo:'ver_justificacion', etiqueta:'Ver justificación' } };
+    }
+    return { etiqueta:'No aplica', variante:'success', ayudaSecundaria:null, accion:null };
+  }
+  if(estado === 'pendiente_evaluacion_documental'){
+    // Preparado por si el valor llegara a existir. No se escribe desde ningún lugar en B1.
+    return { etiqueta:'Pendiente de evaluación documental', variante:'neutral', ayudaSecundaria:null, accion:null };
+  }
+  // Microfix 1: null/undefined/vacío ≠ valor desconocido. No es un estado interno nuevo,
+  // es solo una defensa visual para no ocultar un dato incorrecto o importado como si nunca
+  // hubiese existido evaluación.
+  const estadoTxt = String(estado ?? "").trim();
+  if(estadoTxt === ""){
+    return { etiqueta:'Sin evaluación registrada', variante:'neutral', ayudaSecundaria:null, accion:null };
+  }
+  return { etiqueta:'Estado documental no reconocido', variante:'attention', ayudaSecundaria:null, accion:null };
+};
+
 // RRHH.1-A: base activa de un trabajador. Refleja el predicado del índice único
 // (es_asignacion_base=true AND estado_asig='activa' AND activo IS DISTINCT FROM false).
 const baseActivaDe = (asignaciones) => (asignaciones||[]).find(
@@ -4906,17 +4951,37 @@ function Trabajadores({data,insert,update,saveAsignacion,terminarAsignacion,cont
                     {key:"fechas",label:"Vigencia",render:r=><span style={{fontSize:12,color:C.textMuted}}>{dateOnly(r.fecha_inicio_asig)||"—"}<br/>{r.fecha_termino_asig?`hasta ${dateOnly(r.fecha_termino_asig)}`:"vigente"}</span>},
                     {key:"jornada",label:"Jornada",render:r=><span style={{fontSize:12,color:C.textMuted}}>{r.jornada||r.horario||"—"}</span>},
                     {key:"doc",label:"Revisión documental",render:r=>{
+                      // ASIG.DOC.1-B1: solo presentación, vía presentarEstadoEvaluacionDocumental.
+                      // La condición de guarda (movimiento_posterior) se mantiene SIN CAMBIOS —
+                      // decisión de diseño de ASIG.DOC.1-D, no de este incremento.
                       if(r.rol_asignacion!=="movimiento_posterior") return <span style={{fontSize:11,color:C.textMuted}}>—</span>;
-                      if(r.estado_evaluacion_documental==="anexo_solicitado"){
-                        return (<div>
-                          <div style={{fontSize:11,color:'#b45309',marginBottom:4}}>Revisión documental: anexo solicitado</div>
-                          <button onClick={()=>generarBorradorAnexo(r)} style={{fontSize:11,fontWeight:600,color:'#fff',background:C.accent,border:'none',borderRadius:5,padding:'4px 9px',cursor:'pointer'}}>Generar borrador de anexo</button>
-                        </div>);
-                      }
-                      if(r.estado_evaluacion_documental==="borrador_generado") return <span style={{fontSize:11,color:C.green,fontWeight:600}}>✓ Borrador de anexo generado</span>;
-                      if(r.estado_evaluacion_documental==="pendiente_revision") return <span style={{fontSize:11,color:C.textMuted}}>Pendiente de revisión</span>;
-                      if(r.estado_evaluacion_documental==="no_aplica") return <span style={{fontSize:11,color:C.textMuted}}>No aplica</span>;
-                      return <span style={{fontSize:11,color:C.textMuted}}>—</span>;
+                      const p=presentarEstadoEvaluacionDocumental(r);
+                      // Traducción de variante -> estilo visual. Vive acá, no en el helper (que es
+                      // solo semántica), usando los tonos ya definidos en el contrato canónico.
+                      const VARIANTE_ESTILO={
+                        neutral:  {color:C.textMuted, bg:'#f3f4f6'},
+                        info:     {color:'#075985', bg:'#e0f2fe'},
+                        attention:{color:'#92400e', bg:'#fef3c7'},
+                        success:  {color:'#166534', bg:'#dcfce7'},
+                      };
+                      const st=VARIANTE_ESTILO[p.variante]||VARIANTE_ESTILO.neutral;
+                      const badge=<span style={{display:'inline-block',fontSize:11,fontWeight:600,color:st.color,background:st.bg,borderRadius:5,padding:'2px 8px'}}>{p.etiqueta}</span>;
+                      return (
+                        <div>
+                          <div style={{marginBottom:p.accion?4:0}}>{badge}</div>
+                          {p.accion?.tipo==='generar_borrador'&&(
+                            <button onClick={()=>generarBorradorAnexo(r)} style={{fontSize:11,fontWeight:600,color:'#fff',background:C.accent,border:'none',borderRadius:5,padding:'4px 9px',cursor:'pointer'}}>{p.accion.etiqueta}</button>
+                          )}
+                          {p.accion?.tipo==='ver_justificacion'&&(
+                            // <details>/<summary> nativo: abre por clic, teclado (Enter/Espacio) y
+                            // táctil, sin depender de hover/tooltip ni de un sistema modal nuevo.
+                            <details style={{marginTop:2}}>
+                              <summary style={{fontSize:11,fontWeight:600,color:C.accent,cursor:'pointer',listStyle:'none'}}>{p.accion.etiqueta}</summary>
+                              <p style={{fontSize:11,color:C.textMuted,marginTop:4,maxWidth:220}}>{p.ayudaSecundaria}</p>
+                            </details>
+                          )}
+                        </div>
+                      );
                     }},
                     {key:"acciones",label:"",render:r=><div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
                       <button onClick={()=>{
