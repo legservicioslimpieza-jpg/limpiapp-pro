@@ -1,0 +1,24 @@
+              set_config              
+--------------------------------------
+ 0ca11f5e-ead2-4520-a556-386bb02b2012
+(1 row)
+
+              set_config              
+--------------------------------------
+ fe43e108-0a77-40e7-b72b-db3f50d1f9fa
+(1 row)
+
+BEGIN
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_v1/ASIG_EVENTOS1_A_staging_fixtures_setup_v1_2.sql:57: NOTICE:  GUARDA anti-producción OK: staging vacío, propietarios correctos, UUID válidos y sintéticos.
+DO
+INSERT 0 2
+INSERT 0 2
+INSERT 0 2
+INSERT 0 1
+INSERT 0 1
+COMMIT
+              admin_uid               |             noadmin_uid              | asig_i6 | asig_c1 |  trabajador_i6  |  trabajador_c1  |   contrato_i6   |   contrato_c1   
+--------------------------------------+--------------------------------------+---------+---------+-----------------+-----------------+-----------------+-----------------
+ 0ca11f5e-ead2-4520-a556-386bb02b2012 | fe43e108-0a77-40e7-b72b-db3f50d1f9fa |       1 |       2 | ZZ-FIXT-TRAB-I6 | ZZ-FIXT-TRAB-C1 | ZZ-FIXT-CONT-I6 | ZZ-FIXT-CONT-C1
+(1 row)
+

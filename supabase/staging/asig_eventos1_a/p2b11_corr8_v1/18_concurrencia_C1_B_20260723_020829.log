@@ -1,0 +1,32 @@
+BEGIN
+SET
+DO
+SELECT 1
+GRANT
+                    set_config                    
+--------------------------------------------------
+ {"sub" : "0ca11f5e-ead2-4520-a556-386bb02b2012"}
+(1 row)
+
+UPDATE 1
+SET
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_v1/ASIG_EVENTOS1_A_P2A_concurrencia_C1_B_v2_5_4.sql:71: NOTICE:  C1_B FASE1 lista (token del estado previo).
+DO
+RESET
+>>> BARRERA C1_B: espere el COMMIT de C1_A, luego presione ENTER para ejecutar la FASE 2 SET
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_v1/ASIG_EVENTOS1_A_P2A_concurrencia_C1_B_v2_5_4.sql:87: NOTICE:  C1_B OK: ESTADO_OBSOLETO
+DO
+RESET
+COMMIT
+              set_config              
+--------------------------------------
+ 0ca11f5e-ead2-4520-a556-386bb02b2012
+(1 row)
+
+ set_config 
+------------
+ 2
+(1 row)
+
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_v1/ASIG_EVENTOS1_A_P2A_concurrencia_C1_B_v2_5_4.sql:115: NOTICE:  >>> C1 VERIFICACIÓN OK: exactamente 1 evento (solo A creó: created; B recibió ESTADO_OBSOLETO sin crear evento).
+DO

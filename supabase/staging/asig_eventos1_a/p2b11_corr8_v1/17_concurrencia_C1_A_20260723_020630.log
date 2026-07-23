@@ -1,0 +1,20 @@
+BEGIN
+SET
+DO
+SELECT 1
+GRANT
+                    set_config                    
+--------------------------------------------------
+ {"sub" : "0ca11f5e-ead2-4520-a556-386bb02b2012"}
+(1 row)
+
+UPDATE 1
+SET
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_v1/ASIG_EVENTOS1_A_P2A_concurrencia_C1_A_v2_5_4.sql:64: NOTICE:  C1_A FASE1 lista.
+DO
+RESET
+>>> BARRERA C1_A: cuando C1_B TERMINÓ su FASE 1, presione ENTER para ejecutar la FASE 2 (A commitea primero) SET
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_v1/ASIG_EVENTOS1_A_P2A_concurrencia_C1_A_v2_5_4.sql:81: NOTICE:  C1_A OK: created
+DO
+RESET
+COMMIT

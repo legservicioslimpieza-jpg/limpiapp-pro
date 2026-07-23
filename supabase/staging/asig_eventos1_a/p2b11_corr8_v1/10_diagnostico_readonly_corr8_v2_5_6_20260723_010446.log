@@ -1,0 +1,204 @@
+
+=== CONTROL DE VERSIÓN POSTGRESQL ===
+server_version_num: 170006
+server_version:     17.6
+VERSIÓN APROBADA: PostgreSQL 16 o superior
+
+=== DIAGNÓSTICO READ-ONLY CORR.8 ===
+BEGIN
+ estado_valor | filas 
+--------------+-------
+ activa       |     2
+(1 row)
+
+          column_name           |        data_type         | is_nullable |              column_default              
+--------------------------------+--------------------------+-------------+------------------------------------------
+ id                             | integer                  | NO          | nextval('asignaciones_id_seq'::regclass)
+ trabajador_id                  | text                     | YES         | 
+ contrato_id                    | text                     | YES         | 
+ activo                         | boolean                  | YES         | true
+ created_at                     | timestamp with time zone | YES         | now()
+ sueldo_asignado                | numeric                  | YES         | 0
+ bono_asistencia                | numeric                  | YES         | 0
+ bono_movilizacion              | numeric                  | YES         | 0
+ bono_colacion                  | numeric                  | YES         | 0
+ gratificacion_monto            | numeric                  | YES         | 0
+ monto_asignado                 | numeric                  | YES         | 0
+ porcentaje_costo               | numeric                  | YES         | 100
+ afecta_remuneracion            | boolean                  | YES         | true
+ afecta_facturacion             | boolean                  | YES         | false
+ horas_semanales                | numeric                  | YES         | 
+ dias_semana                    | text                     | YES         | 
+ horario                        | text                     | YES         | 
+ jornada                        | text                     | YES         | 
+ fecha_inicio_asig              | date                     | YES         | 
+ fecha_termino_asig             | date                     | YES         | 
+ estado_asig                    | text                     | YES         | 'activa'::text
+ descripcion                    | text                     | YES         | 
+ modalidad_cobertura            | text                     | YES         | 
+ origen_trabajador              | text                     | YES         | 
+ gratificacion_metodo_asig      | text                     | YES         | 
+ gratificacion_porcentaje_asig  | numeric                  | YES         | 
+ gratificacion_observacion_asig | text                     | YES         | 
+ es_asignacion_base             | boolean                  | NO          | false
+ base_origen                    | text                     | YES         | 
+ base_inferencia_confianza      | text                     | YES         | 
+ base_inferencia_motivo         | text                     | YES         | 
+ base_inferencia_advertencias   | jsonb                    | NO          | '[]'::jsonb
+ base_inferencia_fecha          | date                     | YES         | 
+ rol_asignacion                 | text                     | YES         | 
+ estado_evaluacion_documental   | text                     | YES         | 
+ tipo_impacto_laboral           | text                     | YES         | 
+ motivo_evaluacion_documental   | text                     | YES         | 
+ colacion_minutos               | numeric                  | YES         | 
+ colacion_imputable             | boolean                  | YES         | 
+(39 rows)
+
+       column_name        |        data_type         | is_nullable | column_default 
+--------------------------+--------------------------+-------------+----------------
+ id                       | uuid                     | NO          | 
+ email                    | text                     | NO          | 
+ nombre                   | text                     | NO          | 
+ rol                      | text                     | NO          | 
+ trabajador_id            | text                     | YES         | 
+ contrato_id              | text                     | YES         | 
+ activo                   | boolean                  | NO          | true
+ created_at               | timestamp with time zone | NO          | now()
+ updated_at               | timestamp with time zone | NO          | now()
+ cambio_clave_obligatorio | boolean                  | YES         | true
+ fecha_primer_login       | timestamp with time zone | YES         | 
+ fecha_cambio_clave       | timestamp with time zone | YES         | 
+ ultimo_cambio_clave_por  | uuid                     | YES         | 
+(13 rows)
+
+   rol_valor   | filas 
+---------------+-------
+ supervisor    |     1
+ administrador |     1
+(2 rows)
+
+ esquema |    tabla     | rls_habilitado | rls_forzado 
+---------+--------------+----------------+-------------
+ public  | asignaciones | t              | f
+ public  | usuarios     | t              | f
+(2 rows)
+
+ schemaname |  tablename   |       policyname       | permissive |      roles      |  cmd   |                                          qual                                          | with_check 
+------------+--------------+------------------------+------------+-----------------+--------+----------------------------------------------------------------------------------------+------------
+ public     | asignaciones | asig_admin_sup         | PERMISSIVE | {public}        | ALL    | (get_user_rol() = ANY (ARRAY['administrador'::text, 'supervisor'::text]))              | 
+ public     | asignaciones | asig_trabajador_select | PERMISSIVE | {public}        | SELECT | ((get_user_rol() = 'trabajador'::text) AND (trabajador_id = get_user_trabajador_id())) | 
+ public     | usuarios     | usuarios_admin_all     | PERMISSIVE | {public}        | ALL    | (get_user_rol() = 'administrador'::text)                                               | 
+ public     | usuarios     | usuarios_self_select   | PERMISSIVE | {authenticated} | SELECT | (id = auth.uid())                                                                      | 
+(4 rows)
+
+ policyname 
+------------
+(0 rows)
+
+ esquema | funcion | argumentos | retorno |     propietario     | security_definer 
+---------+---------+------------+---------+---------------------+------------------
+ auth    | uid     |            | uuid    | supabase_auth_admin | f
+(1 row)
+
+ auth_uid_regproc | runner_usa_auth | runner_ejecuta_auth_uid | runner_concede_auth | runner_concede_auth_uid 
+------------------+-----------------+-------------------------+---------------------+-------------------------
+ auth.uid()       | t               | t                       | f                   | f
+(1 row)
+
+  esquema   | funcion | argumentos  | retorno | propietario 
+------------+---------+-------------+---------+-------------
+ extensions | digest  | bytea, text | bytea   | postgres
+ extensions | digest  | text, text  | bytea   | postgres
+(2 rows)
+
+ digest_tt_regproc | digest_bt_regproc  | authenticated_usa_extensions 
+-------------------+--------------------+------------------------------
+ digest(text,text) | digest(bytea,text) | t
+(1 row)
+
+ extname  | esquema_extension 
+----------+-------------------
+ pgcrypto | extensions
+(1 row)
+
+ usuario_actual | usuario_sesion 
+----------------+----------------
+ postgres       | postgres
+(1 row)
+
+ server_version_num | server_version | createrole_self_grant_actual 
+--------------------+----------------+------------------------------
+             170006 | 17.6           | 
+(1 row)
+
+ rol_concedido | miembro  | admin_option | inherit_option | set_option |   otorgante    
+---------------+----------+--------------+----------------+------------+----------------
+ anon          | postgres | t            | t              | t          | supabase_admin
+ authenticated | postgres | t            | t              | t          | supabase_admin
+ service_role  | postgres | t            | t              | t          | supabase_admin
+(3 rows)
+
+ runner_puede_set_authenticated 
+--------------------------------
+ t
+(1 row)
+
+ rolname  | es_superusuario | puede_crear_roles | puede_crear_db | bypassa_rls | create_en_public | concede_create_en_public 
+----------+-----------------+-------------------+----------------+-------------+------------------+--------------------------
+ postgres | f               | t                 | t              | t           | t                | t
+(1 row)
+
+ tipo | nombre 
+------+--------
+(0 rows)
+
+ f_preparar | f_retirar | f_listar | f_bridge_auth | f_appender 
+------------+-----------+----------+---------------+------------
+            |           |          |               | 
+(1 row)
+
+  runner  | runner_es_postgres | es_superusuario | puede_usar_auth | puede_ejecutar_authuid | puede_conceder_usage_auth_informativo | puede_conceder_exec_authuid_informativo | puede_conceder_usage_extensions | puede_conceder_exec_digest | authenticated_usa_public | runner_concede_create_public 
+----------+--------------------+-----------------+-----------------+------------------------+---------------------------------------+-----------------------------------------+---------------------------------+----------------------------+--------------------------+------------------------------
+ postgres | t                  | f               | t               | t                      | f                                     | f                                       | t                               | t                          | t                        | t
+(1 row)
+
+ candidata_sintetica | estado_asig | activo | fecha_inicio_asig 
+---------------------+-------------+--------+-------------------
+                   2 | activa      | t      | 2026-07-21
+                   1 | activa      | t      | 2026-07-21
+(2 rows)
+
+ check_asserts_actual 
+----------------------
+ on
+(1 row)
+
+ usuarios_id_tipo | fecha_inicio_tipo | fecha_termino_tipo | asignaciones_id_tipo 
+------------------+-------------------+--------------------+----------------------
+ uuid             | date              | date               | integer
+(1 row)
+
+ rol_definidor  | tipo_objeto |                                                acl_por_defecto                                                 
+----------------+-------------+----------------------------------------------------------------------------------------------------------------
+ postgres       | f           | {postgres=X/postgres}
+ supabase_admin | f           | {postgres=X/supabase_admin,anon=X/supabase_admin,authenticated=X/supabase_admin,service_role=X/supabase_admin}
+(2 rows)
+
+    rol_definidor    |    alcance     | tipo_objeto |                                                acl_por_defecto                                                 
+---------------------+----------------+-------------+----------------------------------------------------------------------------------------------------------------
+ postgres            | public         | f           | {postgres=X/postgres}
+ postgres            | storage        | f           | {postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+ supabase_admin      | extensions     | f           | {postgres=X*/supabase_admin}
+ supabase_admin      | graphql        | f           | {postgres=X/supabase_admin,anon=X/supabase_admin,authenticated=X/supabase_admin,service_role=X/supabase_admin}
+ supabase_admin      | graphql_public | f           | {postgres=X/supabase_admin,anon=X/supabase_admin,authenticated=X/supabase_admin,service_role=X/supabase_admin}
+ supabase_admin      | public         | f           | {postgres=X/supabase_admin,anon=X/supabase_admin,authenticated=X/supabase_admin,service_role=X/supabase_admin}
+ supabase_admin      | realtime       | f           | {postgres=X/supabase_admin,dashboard_user=X/supabase_admin}
+ supabase_auth_admin | auth           | f           | {postgres=X/supabase_auth_admin,dashboard_user=X/supabase_auth_admin}
+(8 rows)
+
+ ejecutor |   public_owner    |   auth_owner   | extensions_owner 
+----------+-------------------+----------------+------------------
+ postgres | pg_database_owner | supabase_admin | postgres
+(1 row)
+
+ROLLBACK

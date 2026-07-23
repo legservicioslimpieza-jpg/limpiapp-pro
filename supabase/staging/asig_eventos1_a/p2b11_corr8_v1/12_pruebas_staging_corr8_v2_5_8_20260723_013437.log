@@ -1,0 +1,35 @@
+BEGIN
+DO
+SET
+DO
+DO
+SELECT 1
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:98: NOTICE:  FIXTURE SINTÉTICA ZZ-FIXT: asig_ok=1 (se revierte al final; no toca producción)
+DO
+ set_config 
+------------
+ {}
+(1 row)
+
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:108: NOTICE:  GRUPO A0 OK (auth.uid() IS NULL con claims vacíos)
+DO
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:133: NOTICE:  GRUPO AUTH-ROLE OK
+DO
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:169: NOTICE:  GRUPO P OK
+DO
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:194: NOTICE:  GRUPO D OK
+DO
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:254: NOTICE:  GRUPOS E/I OK
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:254: NOTICE:  GRUPOS E/I revertidos (savepoint)
+DO
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:282: NOTICE:  GRUPO S OK
+DO
+ROLLBACK
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:312: NOTICE:  OK BLOQUEO1 public.preparar_retiro_asignacion_individual(integer): anon=false authenticated=true PUBLIC=false service_role=false
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:312: NOTICE:  OK BLOQUEO1 public.retirar_asignacion_individual(uuid,integer,text,text,text): anon=false authenticated=true PUBLIC=false service_role=false
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:312: NOTICE:  OK BLOQUEO1 public.listar_eventos_asignacion_admin(integer): anon=false authenticated=true PUBLIC=false service_role=false
+DO
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:356: NOTICE:  CORR.5 PUENTE AUTH OK: owner=postgres; SECURITY DEFINER; STABLE; API denegada; owners técnicos habilitados.
+DO
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_pruebas_staging_v2_5_8.sql:439: NOTICE:  CORR.8 OWNERS/ACL TEMPORAL DIRECTA OK
+DO
