@@ -1,0 +1,23 @@
+BEGIN
+              set_config              
+--------------------------------------
+ 0ca11f5e-ead2-4520-a556-386bb02b2012
+(1 row)
+
+ set_config 
+------------
+ 2
+(1 row)
+
+NOTICE:  C1 PREFLIGHT FIXTURE OK: asig=2 trabajador=ZZ-FIXT-TRAB-C1 contrato=ZZ-FIXT-CONT-C1 estado=activa
+DO
+                    set_config                    
+--------------------------------------------------
+ {"sub" : "0ca11f5e-ead2-4520-a556-386bb02b2012"}
+(1 row)
+
+SET
+NOTICE:  C1 PREFLIGHT EVENTOS OK: asignación 2 tiene 0 eventos
+DO
+RESET
+ROLLBACK

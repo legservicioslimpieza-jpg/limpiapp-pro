@@ -1,0 +1,59 @@
+BEGIN
+ ejecutor |   public_owner    |   auth_owner   | extensions_owner 
+----------+-------------------+----------------+------------------
+ postgres | pg_database_owner | supabase_admin | postgres
+(1 row)
+
+   tipo   |            objeto            | propietario 
+----------+------------------------------+-------------
+ FUNCTION | get_user_contrato_id         | postgres
+ FUNCTION | get_user_rol                 | postgres
+ FUNCTION | get_user_trabajador_id       | postgres
+ FUNCTION | marcar_clave_cambiada        | postgres
+ FUNCTION | qr_actividad_pendiente       | postgres
+ FUNCTION | qr_cerrar_evidencia          | postgres
+ FUNCTION | qr_cumplimiento_dia          | postgres
+ FUNCTION | qr_dependencia               | postgres
+ FUNCTION | qr_iniciar_evidencia         | postgres
+ FUNCTION | qr_validar_trabajador        | postgres
+ FUNCTION | registrar_primer_login       | postgres
+ FUNCTION | set_updated_at               | postgres
+ SEQUENCE | asignaciones_id_seq          | postgres
+ SEQUENCE | horarios_id_seq              | postgres
+ SEQUENCE | liquidaciones_id_seq         | postgres
+ SEQUENCE | parametros_legales_id_seq    | postgres
+ SEQUENCE | qr_actividades_folio_seq     | postgres
+ SEQUENCE | tabla_iusc_id_seq            | postgres
+ SEQUENCE | tasas_afp_id_seq             | postgres
+ TABLE    | anexos_contrato              | postgres
+ TABLE    | asignaciones                 | postgres
+ TABLE    | asistencia                   | postgres
+ TABLE    | checklist                    | postgres
+ TABLE    | contratos                    | postgres
+ TABLE    | cumplimiento_egreso          | postgres
+ TABLE    | dependencias                 | postgres
+ TABLE    | desvinculaciones_programadas | postgres
+ TABLE    | documentos_trabajador        | postgres
+ TABLE    | empresa_config               | postgres
+ TABLE    | entregas_epp                 | postgres
+ TABLE    | evaluaciones_vencimiento     | postgres
+ TABLE    | evidencias                   | postgres
+ TABLE    | feriados_chile               | postgres
+ TABLE    | horarios                     | postgres
+ TABLE    | incidencias                  | postgres
+ TABLE    | liquidaciones                | postgres
+ TABLE    | obligaciones_mensuales       | postgres
+ TABLE    | ordenes_servicio             | postgres
+ TABLE    | parametros_legales           | postgres
+ TABLE    | qr_actividad_fotos           | postgres
+ TABLE    | qr_actividades               | postgres
+ TABLE    | supervisiones                | postgres
+ TABLE    | tabla_iusc                   | postgres
+ TABLE    | tasas_afp                    | postgres
+ TABLE    | trabajadores                 | postgres
+ TABLE    | usuarios                     | postgres
+(46 rows)
+
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_v1/ASIG_EVENTOS1_A_bootstrap_staging_owner_verification_v2_2.sql:52: NOTICE:  VERIFICACIÓN DE PROPIETARIOS OK: ejecutor=postgres; 27 tablas / 7 secuencias / 12 funciones a nombre de postgres.
+DO
+ROLLBACK

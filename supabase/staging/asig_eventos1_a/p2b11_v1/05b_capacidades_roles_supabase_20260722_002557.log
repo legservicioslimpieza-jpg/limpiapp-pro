@@ -1,0 +1,39 @@
+
+=== PRIVILEGIOS DE ROLES RELEVANTES ===
+BEGIN
+       rolname       | current_user_es_miembro | current_user_tiene_usage | concede_usage_auth | concede_execute_auth_uid | concede_usage_extensions | concede_execute_digest 
+---------------------+-------------------------+--------------------------+--------------------+--------------------------+--------------------------+------------------------
+ postgres            | t                       | t                        | f                  | f                        | t                        | t
+ supabase_admin      | f                       | f                        | t                  | t                        | t                        | t
+ supabase_auth_admin | f                       | f                        | f                  | t                        | f                        | f
+(3 rows)
+
+      rol_concedido       | miembro  | admin_option | inherit_option | set_option 
+--------------------------+----------+--------------+----------------+------------
+ anon                     | postgres | t            | t              | t
+ authenticated            | postgres | t            | t              | t
+ authenticator            | postgres | t            | t              | t
+ pg_create_subscription   | postgres | t            | t              | t
+ pg_monitor               | postgres | t            | t              | t
+ pg_read_all_data         | postgres | t            | t              | t
+ pg_signal_backend        | postgres | t            | t              | t
+ service_role             | postgres | t            | t              | t
+ supabase_privileged_role | postgres | f            | t              | t
+(9 rows)
+
+ createrole_self_grant 
+-----------------------
+ 
+(1 row)
+
+ROLLBACK
+
+=== PRUEBA READ-ONLY: SET ROLE supabase_admin ===
+BEGIN
+ERROR:  permission denied to set role "supabase_admin"
+Código SET ROLE supabase_admin: 1
+
+=== PRUEBA READ-ONLY: SET ROLE supabase_auth_admin ===
+BEGIN
+ERROR:  permission denied to set role "supabase_auth_admin"
+Código SET ROLE supabase_auth_admin: 1

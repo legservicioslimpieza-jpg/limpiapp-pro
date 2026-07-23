@@ -1,0 +1,13 @@
+BEGIN
+         rolname          | rolsuper | rolcreaterole | rolcreatedb | rolbypassrls | rolinherit 
+--------------------------+----------+---------------+-------------+--------------+------------
+ supabase_privileged_role | f        | f             | f           | f            | t
+(1 row)
+
+ es_miembro | tiene_usage | puede_set_role 
+------------+-------------+----------------
+ t          | t           | t
+(1 row)
+
+SET
+ERROR:  permission denied for schema auth

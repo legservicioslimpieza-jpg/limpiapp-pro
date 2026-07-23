@@ -1,0 +1,23 @@
+BEGIN
+              set_config              
+--------------------------------------
+ 0ca11f5e-ead2-4520-a556-386bb02b2012
+(1 row)
+
+ set_config 
+------------
+ 1
+(1 row)
+
+NOTICE:  I6 PREFLIGHT FIXTURE OK: asig=1 trabajador=ZZ-FIXT-TRAB-I6 contrato=ZZ-FIXT-CONT-I6 estado=activa
+DO
+                    set_config                    
+--------------------------------------------------
+ {"sub" : "0ca11f5e-ead2-4520-a556-386bb02b2012"}
+(1 row)
+
+SET
+NOTICE:  I6 PREFLIGHT EVENTOS OK: asignación 1 tiene 0 eventos
+DO
+RESET
+ROLLBACK

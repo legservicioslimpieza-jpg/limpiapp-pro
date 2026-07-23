@@ -1,0 +1,12 @@
+BEGIN
+ ejecutor | puede_usar_schema_auth | puede_ejecutar_auth_uid | uid_sin_jwt 
+----------+------------------------+-------------------------+-------------
+ postgres | t                      | t                       | 
+(1 row)
+
+ propietario_auth_uid | security_definer 
+----------------------+------------------
+ supabase_auth_admin  | f
+(1 row)
+
+ROLLBACK

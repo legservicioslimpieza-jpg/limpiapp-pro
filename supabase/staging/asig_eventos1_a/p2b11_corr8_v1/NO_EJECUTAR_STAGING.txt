@@ -1,0 +1,8 @@
+ASIG.EVENTOS.1-A · CORR.8
+NO EJECUTAR EN STAGING.
+NO COPIAR AL REPOSITORIO.
+NO COMMIT / NO PUSH / NO DEPLOY.
+
+Este paquete es exclusivamente para reauditoría independiente offline.
+Solo un veredicto APTO y una aprobación posterior explícita de Gabriel habilitan un nuevo diagnóstico read-only.
+Producción está fuera de alcance.

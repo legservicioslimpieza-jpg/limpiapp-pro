@@ -1,0 +1,110 @@
+BEGIN
+DO
+SET
+DO
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_migracion_construida_v2_5_7_CANDIDATA.sql:150: NOTICE:  pg_default_acl (public, FUNCTIONS) definidor=postgres acl=postgres=X/postgres
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_migracion_construida_v2_5_7_CANDIDATA.sql:150: NOTICE:  pg_default_acl (public, FUNCTIONS) definidor=supabase_admin acl=postgres=X/supabase_admin, anon=X/supabase_admin, authenticated=X/supabase_admin, service_role=X/supabase_admin
+psql:/Users/ernestog/Documents/LimpiApp_Master/00_Trabajo_Reciente_Julio/limpiapp-erp 3/supabase/staging/asig_eventos1_a/p2b11_corr8_v1/ASIG_EVENTOS1_A_P2A_migracion_construida_v2_5_7_CANDIDATA.sql:150: NOTICE:  AVISO BLOQUEO1: supabase_admin otorga EXECUTE por defecto a anon/service_role; se revoca explícitamente en §7.
+DO
+CREATE ROLE
+CREATE ROLE
+CREATE ROLE
+CREATE ROLE
+DO
+COMMENT
+COMMENT
+COMMENT
+COMMENT
+CREATE SCHEMA
+CREATE SCHEMA
+SET
+REVOKE
+GRANT
+REVOKE
+REVOKE
+GRANT
+REVOKE
+GRANT
+GRANT
+GRANT
+COMMENT
+COMMENT
+RESET
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMENT
+GRANT
+GRANT
+GRANT
+SET
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+RESET
+SET
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+RESET
+SET
+ALTER DEFAULT PRIVILEGES
+RESET
+SET
+ALTER DEFAULT PRIVILEGES
+RESET
+CREATE TABLE
+ALTER TABLE
+SET
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+ALTER TABLE
+ALTER TABLE
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+REVOKE
+GRANT
+GRANT
+COMMENT
+RESET
+GRANT
+GRANT
+GRANT
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+SET
+REVOKE
+REVOKE
+RESET
+SET
+CREATE FUNCTION
+REVOKE
+COMMENT
+RESET
+SET
+REVOKE
+RESET
+SET
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMENT
+RESET
+SET
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMENT
+RESET
+SET
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMENT
+RESET
+REVOKE
+DO
+COMMIT
